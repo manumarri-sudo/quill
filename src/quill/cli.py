@@ -374,22 +374,62 @@ def tail(
             bits.append(f"[dim italic]— {reason}[/dim italic]")
         return "  ".join(bits)
 
+    # session_id → short label so sub-agents are visually identifiable
+    sub_labels: dict[str, str] = {}
+    sub_counter = [0]
+
+    def _label(evt: dict[str, object]) -> str:
+        if str(evt.get("type")) == "agent.spawned":
+            sid = str(evt.get("session_id", ""))
+            if sid not in sub_labels:
+                sub_counter[0] += 1
+                sub_labels[sid] = f"sub·{sub_counter[0]}"
+        return ""
+
     def _print(line: str) -> None:
         try:
             evt = json.loads(line)
         except json.JSONDecodeError:
             return
+        _label(evt)
         ts = str(evt.get("ts", ""))[11:19]
         risk = str(evt.get("risk", "low"))
         rcolor = risk_color.get(risk, "white")
         tcolor, tlabel = type_glyph.get(str(evt.get("type", "")), ("dim", str(evt.get("type", ""))))
         line_summary = _summarise(evt)
+
+        # if this event came from a sub-agent, indent + tag with ↳ sub·N
+        payload = evt.get("payload") or {}
+        parent = ""
+        if isinstance(payload, dict):
+            parent = str(payload.get("parent_session_id") or "")
+        sid = str(evt.get("session_id", ""))
+        sub_tag = ""
+        indent = ""
+        if parent:
+            tag = sub_labels.get(sid, "sub")
+            sub_tag = f" [magenta]↳ {tag}[/magenta]"
+            indent = "  "
+
         console.print(
-            f"  [dim]{ts}[/dim]  "
+            f"{indent}  [dim]{ts}[/dim]  "
             f"[{rcolor}]{risk:<8}[/{rcolor}]  "
-            f"[{tcolor}]{tlabel:<22}[/{tcolor}]  "
+            f"[{tcolor}]{tlabel:<22}[/{tcolor}]"
+            f"{sub_tag}  "
             f"{line_summary}",
         )
+
+    # legend printed once before the stream starts
+    legend = (
+        "[dim]legend:[/dim]  "
+        "[green]✓ allowed[/green]   "
+        "[yellow]? ask[/yellow]   "
+        "[bold red]✗ BLOCKED[/bold red]   "
+        "[magenta]✗ scope[/magenta]   "
+        "[magenta]↳ sub-agent[/magenta]"
+    )
+    console.print(legend)
+    console.print()
 
     # Initial drain
     with p.open() as f:
@@ -571,9 +611,19 @@ def audit_show(
     table.add_column("time", style="dim", no_wrap=True, width=8)
     table.add_column("verdict", no_wrap=True, width=8)
     table.add_column("risk", no_wrap=True, width=8)
-    table.add_column("tool", no_wrap=True, max_width=14)
+    table.add_column("tool", no_wrap=True, max_width=18)
     table.add_column("what was tried", no_wrap=False, ratio=2)
     table.add_column("why", style="dim italic", no_wrap=False, ratio=2)
+
+    # Build a session_id → short label map so sub-agents have a readable
+    # identity in the rendered table. ses-foo-1234 → "sub·1234".
+    session_labels: dict[str, str] = {}
+    spawn_count = 0
+    for evt in events:
+        if evt.get("type") == "agent.spawned":
+            sid = str(evt.get("session_id", ""))
+            spawn_count += 1
+            session_labels[sid] = f"sub·{spawn_count}"
 
     pairs: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
@@ -587,6 +637,8 @@ def audit_show(
                 "ts": evt.get("ts", ""),
                 "verdict": etype,
                 "risk": evt.get("risk", "low"),
+                "session_id": evt.get("session_id", ""),
+                "agent_id": evt.get("agent_id", ""),
                 "payload_attempt": (pending or {}).get("payload") or {},
                 "payload_verdict": evt.get("payload") or {},
             }
@@ -600,6 +652,12 @@ def audit_show(
     if not rows:
         out.print(f"[dim]no tool calls match.[/dim] log: {p}")
         return
+
+    has_subs = any(
+        (r["payload_verdict"].get("parent_session_id")
+         or r["payload_attempt"].get("parent_session_id"))
+        for r in rows
+    )
 
     for r in rows:
         risk = str(r["risk"])
@@ -618,14 +676,38 @@ def audit_show(
                   or attempt.get("risk_reason") or "")
         if isinstance(reason, str):
             reason = reason[:140]
+
+        # sub-agent decoration — visible by default
+        parent = (verdict.get("parent_session_id")
+                  or attempt.get("parent_session_id") or "")
+        sub_label = session_labels.get(str(r["session_id"]), "")
+        if parent and sub_label:
+            tool_cell = f"  [magenta]↳ {sub_label}[/magenta]  [dim]{tool}[/dim]"
+        elif parent:
+            tool_cell = f"  [magenta]↳ sub[/magenta]  [dim]{tool}[/dim]"
+        else:
+            tool_cell = tool
+
         table.add_row(
             str(r["ts"])[11:19],
             f"[{vcolor}]{vlabel}[/{vcolor}]",
             f"[{rcolor}]{risk}[/{rcolor}]",
-            tool, what, str(reason),
+            tool_cell, what, str(reason),
         )
 
+    # legend printed ABOVE the table so the symbols are obvious
+    legend_bits = [
+        "[green]✓ allow[/green]",
+        "[yellow]? ask[/yellow]",
+        "[bold red]✗ block[/bold red]",
+        "[magenta]✗ scope[/magenta]",
+    ]
+    if has_subs:
+        legend_bits.append("[magenta]↳[/magenta] sub-agent (Task)")
+    out.print("[dim]legend:[/dim]  " + "   ".join(legend_bits))
+    out.print()
     out.print(table)
+
     counts = {"allow": 0, "block": 0, "ask  ": 0, "scope": 0}
     for r in rows:
         v = str(r["verdict"])
@@ -633,7 +715,15 @@ def audit_show(
         elif v == "verdict.blocked": counts["block"] += 1
         elif v == "verdict.ask": counts["ask  "] += 1
         elif v == "verdict.scope_violation": counts["scope"] += 1
-    summary = "  ".join(f"{k.strip()}={v}" for k, v in counts.items() if v)
+    sub_n = sum(
+        1 for r in rows
+        if (r["payload_verdict"].get("parent_session_id")
+            or r["payload_attempt"].get("parent_session_id"))
+    )
+    parts = [f"{k.strip()}={v}" for k, v in counts.items() if v]
+    if sub_n:
+        parts.append(f"sub-agent={sub_n}")
+    summary = "  ".join(parts)
     out.print(f"[dim]{len(rows)} tool call(s) · {summary} · log: {p}[/dim]")
 
 
