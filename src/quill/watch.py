@@ -37,6 +37,8 @@ _DASHBOARD_HTML = r"""<!doctype html>
   --bg: #0c0e12; --panel: #14171c; --line: #1f242c;
   --fg: #e8eaed; --dim: #8a92a0;
   --low: #2ec27e; --med: #6a9bf4; --high: #f5c451; --crit: #e0626a;
+  --sub: #c98ad6;     /* magenta-pink for sub-agent decoration */
+  --spawn: #c98ad6;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -54,6 +56,27 @@ header h1 { font: 600 14px -apple-system, system-ui; margin: 0; }
 header .meta { color: var(--dim); font-size: 12px; }
 header .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--low); display: inline-block; margin-right: 6px; box-shadow: 0 0 6px var(--low); }
 .live { display: inline-flex; align-items: center; }
+
+/* legend bar — explains the symbols, sticks under header */
+.legend {
+  position: sticky;
+  top: 38px;
+  z-index: 4;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding: 8px 16px;
+  display: flex; flex-wrap: wrap; gap: 18px;
+  font-size: 11px; color: var(--dim);
+  letter-spacing: 0.04em;
+}
+.legend .item { display: inline-flex; align-items: center; gap: 6px; }
+.legend .glyph { font-weight: 700; font-size: 12px; }
+.legend .item.allow .glyph { color: var(--low); }
+.legend .item.ask   .glyph { color: var(--high); }
+.legend .item.block .glyph { color: var(--crit); }
+.legend .item.scope .glyph { color: var(--sub); }
+.legend .item.sub   .glyph { color: var(--sub); }
+
 main { padding: 8px 16px 64px 16px; }
 .row {
   display: grid;
@@ -72,6 +95,7 @@ main { padding: 8px 16px 64px 16px; }
 .type.allowed { color: var(--low); }
 .type.blocked, .type.scope { color: var(--crit); }
 .type.attempt { color: var(--med); }
+.type.spawned { color: var(--spawn); }
 .tool { font-weight: 500; }
 .reason { color: var(--dim); font-style: italic; }
 .empty { padding: 32px; color: var(--dim); text-align: center; }
@@ -80,6 +104,28 @@ main { padding: 8px 16px 64px 16px; }
 .dot.medium { background: var(--med); }
 .dot.high { background: var(--high); }
 .dot.critical { background: var(--crit); }
+
+/* sub-agent decoration: indented, prefixed with ↳, with a small label */
+.row.sub { padding-left: 22px; border-left: 1px solid rgba(201,138,214,0.18); margin-left: 6px; }
+.row.sub .ts { color: var(--sub); opacity: .75; }
+.sub-tag {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sub);
+  border: 1px solid rgba(201,138,214,0.4);
+  border-radius: 3px;
+  vertical-align: 1px;
+}
+.row.spawn-row {
+  background: rgba(201,138,214,0.05);
+  border-bottom: 1px solid rgba(201,138,214,0.18);
+}
+.row.spawn-row .type { color: var(--spawn); font-weight: 600; }
+
 footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel); border-top: 1px solid var(--line); color: var(--dim); padding: 6px 16px; font-size: 12px; }
 </style>
 </head>
@@ -89,47 +135,88 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel)
   <span class=meta>streaming <code id=logpath></code></span>
   <span class=meta live><span class=pulse></span> live</span>
 </header>
+<div class=legend>
+  <span class="item allow"><span class=glyph>✓</span> allowed</span>
+  <span class="item ask"><span class=glyph>?</span> ask human</span>
+  <span class="item block"><span class=glyph>✗</span> BLOCKED</span>
+  <span class="item scope"><span class=glyph>✗</span> scope violation</span>
+  <span class="item sub"><span class=glyph>↳</span> sub-agent (Task)</span>
+  <span class=meta style="margin-left:auto;">click any row for details</span>
+</div>
 <main id=feed>
   <div class=empty id=empty>waiting for events...</div>
 </main>
 <footer>
   <span id=counts>0 events</span> ·
+  <span id=subcount>0 sub-agents</span> ·
   <span id=lastevent></span>
 </footer>
 <script>
 const feed = document.getElementById("feed");
 const empty = document.getElementById("empty");
 const countsEl = document.getElementById("counts");
+const subEl = document.getElementById("subcount");
 const lastEl = document.getElementById("lastevent");
 const logpath = document.getElementById("logpath");
 let n = 0;
+const subLabels = new Map();   // session_id -> "sub·N"
+let subCounter = 0;
 
 function shortType(t) {
   if (t === "verdict.allowed") return ["allowed", "allowed"];
-  if (t === "verdict.blocked") return ["blocked", "blocked"];
-  if (t === "verdict.scope_violation") return ["scope", "scope"];
+  if (t === "verdict.blocked") return ["blocked", "BLOCKED"];
+  if (t === "verdict.scope_violation") return ["scope", "scope violation"];
+  if (t === "verdict.ask") return ["ask", "ask human"];
   if (t === "tool.attempted") return ["attempt", "attempted"];
   if (t === "tool.completed") return ["", "completed"];
   if (t === "session.start") return ["", "session start"];
   if (t === "session.end") return ["", "session end"];
+  if (t === "agent.spawned") return ["spawned", "agent spawned"];
+  if (t === "agent.closed") return ["", "agent closed"];
   return ["", t];
 }
 
 function render(evt) {
   if (empty) { empty.remove(); }
+
+  // assign a stable label to each sub-agent the first time we see it
+  if (evt.type === "agent.spawned") {
+    const sid = evt.session_id || "";
+    if (!subLabels.has(sid)) {
+      subCounter++;
+      subLabels.set(sid, `sub·${subCounter}`);
+      subEl.textContent = `${subCounter} sub-agent${subCounter === 1 ? "" : "s"}`;
+    }
+  }
+
+  const p = evt.payload || {};
+  const parent = p.parent_session_id || "";
+  const isSub = !!parent;
+  const subTag = isSub ? (subLabels.get(evt.session_id) || "sub") : "";
+  const isSpawn = evt.type === "agent.spawned";
+
   const div = document.createElement("div");
-  div.className = "row";
+  div.className = "row" + (isSub ? " sub" : "") + (isSpawn ? " spawn-row" : "");
   const ts = (evt.ts || "").slice(11, 19);
   const risk = (evt.risk || "low").toLowerCase();
   const [klass, label] = shortType(evt.type || "");
-  const p = evt.payload || {};
   const tool = p.tool_name || "";
   const reason = p.reason || p.risk_reason || "";
+
+  let toolHtml = "";
+  if (isSpawn) {
+    const cwd = p.cwd ? `<span class=reason>in ${escapeHtml(String(p.cwd).slice(-50))}</span>` : "";
+    toolHtml = `<span class="sub-tag">${escapeHtml(subLabels.get(evt.session_id) || "sub")}</span><span class=reason>spawned by ${escapeHtml(parent.slice(0, 16))}…</span>  ${cwd}`;
+  } else {
+    const subPrefix = isSub ? `<span class="sub-tag">${escapeHtml(subTag)}</span>` : "";
+    toolHtml = `${subPrefix}${escapeHtml(tool)} ${reason ? `<span class=reason>— ${escapeHtml(reason)}</span>` : ""}`;
+  }
+
   div.innerHTML = `
     <div class=ts>${ts}</div>
     <div class="risk ${risk}">${risk}</div>
     <div class="type ${klass}"><span class="dot ${risk}"></span>${label}</div>
-    <div class=tool>${escapeHtml(tool)} ${reason ? `<span class=reason>— ${escapeHtml(reason)}</span>` : ""}</div>
+    <div class=tool>${toolHtml}</div>
   `;
   feed.prepend(div);
   n++;
