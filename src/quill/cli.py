@@ -460,12 +460,28 @@ def audit_show(
                  "tool.attempted with its verdict",
         ),
     ] = False,
+    project: Annotated[
+        Path | None,
+        typer.Option(
+            "--project", "-P",
+            help="filter to events whose cwd is inside this directory "
+                 "(uses the cwd recorded by the Claude Code hook adapter)",
+        ),
+    ] = None,
+    sub_only: Annotated[
+        bool,
+        typer.Option(
+            "--sub", help="show only events from spawned sub-agents",
+        ),
+    ] = False,
 ) -> None:
     """Pretty-print recent gate decisions.
 
     By default each tool call is rendered as ONE row: the command/path
     that was attempted, the risk, the verdict, the plain-English reason.
     Use --raw to see every audit event separately (for debugging).
+    Use --project <dir> to scope to a single repo. Use --sub to show
+    only sub-agent (Task-spawned) events.
     """
     p = log_path or default_audit_path()
     if not p.exists():
@@ -473,6 +489,21 @@ def audit_show(
         raise typer.Exit(code=1)
     with p.open() as f:
         events = [json.loads(line) for line in f if line.strip()]
+
+    # filters at the event level (applied before pairing)
+    if project is not None:
+        proj = str(project.expanduser().resolve())
+        def _in_project(e: dict[str, Any]) -> bool:
+            cwd = (e.get("payload") or {}).get("cwd") or ""
+            return isinstance(cwd, str) and (
+                cwd == proj or cwd.startswith(proj + "/") or cwd.startswith(proj + "\\")
+            )
+        events = [e for e in events if _in_project(e)]
+    if sub_only:
+        def _is_sub(e: dict[str, Any]) -> bool:
+            p_ = (e.get("payload") or {}).get("parent_session_id")
+            return bool(p_)
+        events = [e for e in events if _is_sub(e)]
 
     risk_style = {
         "low": "green",
