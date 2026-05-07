@@ -335,6 +335,56 @@ button {
 .install.large .cmd { padding: 26px 16px 26px 8px; font-size: 18px; }
 .install.large .copy { padding: 0 28px; font-size: 12px; }
 
+/* tabs above the install bar */
+.install-tabs {
+  display: flex;
+  gap: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: -1px;
+  position: relative;
+  z-index: 1;
+}
+.install-tab {
+  padding: 9px 16px 11px;
+  background: transparent;
+  color: var(--ink-3);
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  cursor: pointer;
+  transition: color var(--t-fast), background var(--t-fast);
+  font-feature-settings: "tnum";
+  font-weight: 500;
+}
+.install-tab:hover { color: var(--ink); }
+.install-tab[aria-selected="true"] {
+  color: var(--code-fg);
+  background: var(--code-bg);
+  border-color: var(--code-bg);
+}
+.install-tab .badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+  border-radius: 2px;
+  background: var(--block);
+  color: var(--bg);
+  letter-spacing: 0.08em;
+  vertical-align: 1px;
+}
+.install-tab[aria-selected="true"] .badge { background: var(--ask); color: var(--code-bg); }
+
+.install.tabbed {
+  border-top-left-radius: 0;  /* sit flush against the active tab */
+}
+
 .install-meta {
   margin-top: 18px;
   font-family: var(--mono);
@@ -1012,9 +1062,15 @@ footer {
       Last summer <a class="underline-grow" href="https://www.tomshardware.com/tech-industry/artificial-intelligence/ai-coding-platform-goes-rogue-during-code-freeze-and-deletes-entire-company-database-replit-ceo-apologizes-after-ai-engine-says-it-made-a-catastrophic-error-in-judgment-and-destroyed-all-production-data" target="_blank" rel="noopener">Replit's agent deleted Jason Lemkin's production database</a> mid&#8209;vibe&#8209;code. In April, a Cursor agent <a class="underline-grow" href="https://www.theregister.com/2026/04/27/cursoropus_agent_snuffs_out_pocketos/" target="_blank" rel="noopener">wiped PocketOS — including all backups — in nine seconds</a>. A Claude Code session <a class="underline-grow" href="https://github.com/anthropics/claude-code/issues/10077" target="_blank" rel="noopener">ran <code>rm&nbsp;-rf&nbsp;~/</code> on someone's Mac</a>. Quill is the pause button before the next one is yours.
     </p>
 
-    <div class="install reveal" id="install-1" style="transition-delay: 220ms" data-cmd="pip install quill && quill start">
+    <div class="install-tabs reveal" role="tablist" aria-label="install commands by package manager" style="transition-delay: 200ms">
+      <button class="install-tab" role="tab" aria-selected="true"  data-target="install-1" data-cmd="uvx quill">uv <span class="badge">fast</span></button>
+      <button class="install-tab" role="tab" aria-selected="false" data-target="install-1" data-cmd="pipx install quill && quill">pipx</button>
+      <button class="install-tab" role="tab" aria-selected="false" data-target="install-1" data-cmd="pip install quill && quill">pip</button>
+      <button class="install-tab" role="tab" aria-selected="false" data-target="install-1" data-cmd="brew install quill && quill">brew</button>
+    </div>
+    <div class="install tabbed reveal" id="install-1" style="transition-delay: 220ms" data-cmd="uvx quill">
       <span class="prompt">$</span>
-      <span class="cmd">pip install quill <span class="pipe">&amp;&amp;</span> quill start</span>
+      <span class="cmd">uvx quill</span>
       <button class="copy" type="button" aria-label="copy install command">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
           <rect x="4" y="4" width="9" height="9" rx="1.2"/>
@@ -1367,9 +1423,9 @@ footer {
 <section class="second-install">
   <div class="shell">
     <h2 class="ask reveal">Sixty seconds. <em>One paste.</em><br>Stop babysitting&nbsp;the&nbsp;agent.</h2>
-    <div class="install large reveal" id="install-2" data-cmd="pip install quill && quill start" style="transition-delay: 80ms">
+    <div class="install large reveal" id="install-2" data-cmd="uvx quill" style="transition-delay: 80ms">
       <span class="prompt">$</span>
-      <span class="cmd">pip install quill <span class="pipe">&amp;&amp;</span> quill start</span>
+      <span class="cmd">uvx quill</span>
       <button class="copy" type="button" aria-label="copy install command">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
           <rect x="4" y="4" width="9" height="9" rx="1.2"/>
@@ -1427,6 +1483,32 @@ footer {
 </footer>
 
 <script>
+/* ============================================================
+   0. tabs — swap the install command between uv/pipx/pip/brew
+   ============================================================ */
+const tabs = document.querySelectorAll('.install-tab');
+tabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    const targetId = tab.dataset.target;
+    const cmd = tab.dataset.cmd;
+    const bar = document.getElementById(targetId);
+    if (!bar) return;
+    // de-select siblings
+    tab.parentElement.querySelectorAll('.install-tab').forEach(t => {
+      t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
+    });
+    // update the bar's data-cmd and the visible cmd text
+    bar.dataset.cmd = cmd;
+    const cmdEl = bar.querySelector('.cmd');
+    if (cmdEl) {
+      // pretty-print: keep && in dim
+      const html = escapeHtml(cmd).replace(/&amp;&amp;/g,
+        '<span class="pipe">&amp;&amp;</span>');
+      cmdEl.innerHTML = html;
+    }
+  });
+});
+
 /* ============================================================
    1. copy-to-clipboard for the install bars
    ============================================================ */
