@@ -1,0 +1,304 @@
+"""`quill doctor` — first-run-friction killer.
+
+Runs deterministic checks against the user's installation and reports a
+green/yellow/red status for each. Designed to answer the question every
+new user asks: "did I install this right?"
+
+Each check is independent, fast, and produces a one-line summary. No
+external network calls; the doctor never decides for the user, only
+shows the state and points at the fix.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Final
+
+from quill._version import __version__
+from quill.config import (
+    QuillConfig,
+    default_audit_path,
+    default_config_path,
+    load_config,
+)
+from quill.errors import ConfigError
+
+
+# Symbols & colours expected to be wrapped by the caller (rich tags).
+PASS: Final[str] = "[green]PASS[/green]"
+WARN: Final[str] = "[yellow]WARN[/yellow]"
+FAIL: Final[str] = "[red]FAIL[/red]"
+
+
+@dataclass(slots=True)
+class CheckResult:
+    """One row of doctor output."""
+
+    name: str
+    status: str         # PASS | WARN | FAIL (rich tags above)
+    detail: str
+    fix: str = ""       # one-line remediation hint shown on WARN/FAIL
+
+
+@dataclass(slots=True)
+class DoctorReport:
+    results: list[CheckResult] = field(default_factory=list)
+
+    def add(self, result: CheckResult) -> None:
+        self.results.append(result)
+
+    @property
+    def has_failures(self) -> bool:
+        return any(r.status == FAIL for r in self.results)
+
+    @property
+    def has_warnings(self) -> bool:
+        return any(r.status == WARN for r in self.results)
+
+
+# ---------------------------------------------------------------------------
+# individual checks
+# ---------------------------------------------------------------------------
+
+
+def check_python_version() -> CheckResult:
+    v = sys.version_info
+    if (v.major, v.minor) < (3, 11):
+        return CheckResult(
+            "python", FAIL,
+            f"Python {v.major}.{v.minor}.{v.micro} (need >= 3.11)",
+            fix="Upgrade Python to 3.11+ (recommended: 3.12 or 3.13).",
+        )
+    return CheckResult(
+        "python", PASS,
+        f"Python {v.major}.{v.minor}.{v.micro}",
+    )
+
+
+def check_quill_version() -> CheckResult:
+    return CheckResult(
+        "quill", PASS,
+        f"quill {__version__} (installed at {Path(__file__).resolve().parent})",
+    )
+
+
+def check_config(config_path: Path | None = None) -> tuple[CheckResult, QuillConfig | None]:
+    p = config_path or default_config_path()
+    if not p.exists():
+        return (
+            CheckResult(
+                "config", WARN,
+                f"no config at {p}",
+                fix="Run `quill init` to write a starter config.",
+            ),
+            None,
+        )
+    try:
+        cfg = load_config(p)
+    except ConfigError as e:
+        return (
+            CheckResult(
+                "config", FAIL,
+                f"{p}: {e}",
+                fix="Fix the TOML errors above. Run `quill init --force` to reset.",
+            ),
+            None,
+        )
+    n_upstreams = len(cfg.upstream)
+    n_scopes = len(cfg.session.scope)
+    detail = (
+        f"{p} ({n_upstreams} upstream{'' if n_upstreams == 1 else 's'}, "
+        f"{n_scopes} scope{'' if n_scopes == 1 else 's'})"
+    )
+    return CheckResult("config", PASS, detail), cfg
+
+
+def check_audit_log(audit_path: Path | None = None) -> CheckResult:
+    p = audit_path or default_audit_path()
+    parent = p.parent
+    if not parent.exists():
+        return CheckResult(
+            "audit log", WARN,
+            f"directory does not exist yet: {parent}",
+            fix=f"Will be created on first emit. To pre-create: mkdir -p {parent}",
+        )
+    if not os.access(parent, os.W_OK):
+        return CheckResult(
+            "audit log", FAIL,
+            f"directory not writable: {parent}",
+            fix=f"chmod the directory or use QUILL_LOG=path/to/your/audit.log.jsonl",
+        )
+    if p.exists():
+        mode = stat.S_IMODE(p.stat().st_mode)
+        if mode & 0o077:
+            return CheckResult(
+                "audit log", FAIL,
+                f"{p} is world/group readable (mode {oct(mode)})",
+                fix=f"chmod 600 {p}",
+            )
+        size_kb = p.stat().st_size / 1024
+        return CheckResult("audit log", PASS, f"{p} ({size_kb:.1f} KB, mode 0o600)")
+    return CheckResult("audit log", PASS, f"writable: {p} (no log yet)")
+
+
+def check_hmac_key() -> CheckResult:
+    p = Path(os.environ.get("QUILL_KEY", "~/.quill/key")).expanduser()
+    if not p.exists():
+        return CheckResult(
+            "hmac key", WARN,
+            f"no key yet at {p}",
+            fix="Will be auto-generated on first quill serve / claude-hook invocation.",
+        )
+    mode = stat.S_IMODE(p.stat().st_mode)
+    if mode & 0o077:
+        return CheckResult(
+            "hmac key", FAIL,
+            f"{p} is too permissive (mode {oct(mode)})",
+            fix=f"chmod 600 {p}  -- the signing key must not be world-readable.",
+        )
+    if p.stat().st_size != 32:
+        return CheckResult(
+            "hmac key", WARN,
+            f"{p} is {p.stat().st_size} bytes (expected 32)",
+            fix="Rotate the key: rm the file and let quill regenerate it.",
+        )
+    return CheckResult("hmac key", PASS, f"{p} (32 bytes, mode 0o600)")
+
+
+def check_claude_hook_installed(
+    settings_path: Path | None = None,
+) -> CheckResult:
+    p = settings_path or Path("~/.claude/settings.json").expanduser()
+    if not p.exists():
+        return CheckResult(
+            "claude code hook", WARN,
+            f"no Claude Code settings at {p}",
+            fix="Run `quill claude-hook-install` once Claude Code is installed.",
+        )
+    try:
+        data = json.loads(p.read_text() or "{}")
+    except json.JSONDecodeError as e:
+        return CheckResult(
+            "claude code hook", FAIL,
+            f"{p} is not valid JSON: {e}",
+            fix="Fix the JSON, then re-run quill claude-hook-install.",
+        )
+    pre_list = (data.get("hooks") or {}).get("PreToolUse") or []
+    has_quill = any(
+        any(h.get("command") == "quill claude-hook" for h in (block.get("hooks") or []))
+        for block in pre_list
+    )
+    if not has_quill:
+        return CheckResult(
+            "claude code hook", WARN,
+            f"hook not installed in {p}",
+            fix="Run `quill claude-hook-install` to enable gating Claude Code's "
+                "built-in tools.",
+        )
+    return CheckResult("claude code hook", PASS, f"installed in {p}")
+
+
+def check_quill_on_path() -> CheckResult:
+    found = shutil.which("quill")
+    if not found:
+        return CheckResult(
+            "quill on PATH", FAIL,
+            "the `quill` command is not on PATH",
+            fix="Install with `pip install quill`, or activate the venv where it lives.",
+        )
+    return CheckResult("quill on PATH", PASS, found)
+
+
+def check_upstream_executables(cfg: QuillConfig | None) -> list[CheckResult]:
+    """Check each [[upstream]] block's first command-token resolves on PATH."""
+    if cfg is None or not cfg.upstream:
+        return []
+    out: list[CheckResult] = []
+    for up in cfg.upstream:
+        token = up.command[0]
+        if Path(token).is_absolute():
+            ok = Path(token).exists()
+            out.append(
+                CheckResult(
+                    f"upstream/{up.name}", PASS if ok else FAIL,
+                    f"command[0]: {token}" if ok else f"command[0] does not exist: {token}",
+                    fix="" if ok else "Fix the path or install the executable.",
+                ),
+            )
+        else:
+            found = shutil.which(token)
+            out.append(
+                CheckResult(
+                    f"upstream/{up.name}", PASS if found else WARN,
+                    f"command[0]: {token} -> {found}" if found
+                    else f"command[0] not on PATH: {token}",
+                    fix="" if found else f"Install {token} or use an absolute path.",
+                ),
+            )
+    return out
+
+
+def check_audit_chain_intact(audit_path: Path | None = None) -> CheckResult:
+    """Verify the existing audit log's HMAC chain.
+
+    Conservative on missing files: a missing log is fine (no entries yet).
+    """
+    p = audit_path or default_audit_path()
+    if not p.exists() or p.stat().st_size == 0:
+        return CheckResult("audit chain", PASS, f"{p} is empty")
+
+    key_path = Path(os.environ.get("QUILL_KEY", "~/.quill/key")).expanduser()
+    if not key_path.exists():
+        return CheckResult(
+            "audit chain", WARN,
+            "log exists but no HMAC key at default path; can't verify",
+            fix="Set QUILL_KEY to the key that wrote this log, or check ~/.quill/key.",
+        )
+    try:
+        key = key_path.read_bytes()
+        from quill.audit import verify_chain  # local import
+        total, failures = verify_chain(p, key)
+    except (OSError, ValueError) as e:
+        return CheckResult(
+            "audit chain", FAIL, f"{p}: {e}",
+            fix="The log may be corrupted. Stop quill and investigate.",
+        )
+    if failures:
+        return CheckResult(
+            "audit chain", FAIL,
+            f"chain BROKEN: {len(failures)} of {total} entries fail",
+            fix=f"Inspect: quill audit verify --log {p}. Possible tampering.",
+        )
+    return CheckResult("audit chain", PASS, f"{total} entries verified")
+
+
+# ---------------------------------------------------------------------------
+# orchestrator
+# ---------------------------------------------------------------------------
+
+
+def run_doctor(
+    config_path: Path | None = None,
+) -> DoctorReport:
+    """Run every check and collect the results."""
+    report = DoctorReport()
+    report.add(check_python_version())
+    report.add(check_quill_version())
+    report.add(check_quill_on_path())
+    cfg_result, cfg = check_config(config_path=config_path)
+    report.add(cfg_result)
+    audit_path = cfg.audit.resolved_path() if cfg else None
+    report.add(check_audit_log(audit_path=audit_path))
+    report.add(check_hmac_key())
+    report.add(check_audit_chain_intact(audit_path=audit_path))
+    report.add(check_claude_hook_installed())
+    for r in check_upstream_executables(cfg):
+        report.add(r)
+    return report

@@ -25,20 +25,21 @@ Performance budget:
 """
 from __future__ import annotations
 
-import secrets
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Any
 
-import anyio
 import structlog
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.server.fastmcp import FastMCP
+from mcp.server.lowlevel import NotificationOptions, Server
+from mcp.server.models import InitializationOptions
+from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from quill._version import __version__
 from quill.audit import AuditLog
-from quill.config import QuillConfig, UpstreamConfig
+from quill.config import QuillConfig
 from quill.errors import (
     ConfirmationMismatch,
     HumanDeclined,
@@ -59,6 +60,10 @@ class _UpstreamConn:
     name: str
     session: ClientSession
     tool_names: set[str] = field(default_factory=set)
+    # Full Tool objects from the upstream — preserved so we can re-emit each
+    # tool's JSON schema upward. The MCP client (Claude Code etc.) gets full
+    # autocomplete and validation, not a single generic "call" tool.
+    tools: list[Tool] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -121,7 +126,13 @@ class QuillProxy:
             await log.ainfo("upstream.connected", name=up_cfg.name)
 
     async def _discover_tools(self) -> None:
-        """Ask each upstream for its tool list and build the routing table."""
+        """Ask each upstream for its tool list and build the routing table.
+
+        Stores the full upstream Tool objects so we can re-emit them upward
+        with their original JSON schemas intact. Tool names are namespaced
+        with the upstream name to make collisions impossible:
+            upstream "filesystem" tool "read_file" -> "filesystem.read_file"
+        """
         for up in self._upstreams.values():
             try:
                 result = await up.session.list_tools()
@@ -129,20 +140,30 @@ class QuillProxy:
                 msg = f"could not list tools from upstream {up.name!r}: {e}"
                 raise TransportError(msg) from e
             for tool in result.tools:
-                # Namespace each tool with its upstream so collisions are impossible.
                 qualified = f"{up.name}.{tool.name}"
                 up.tool_names.add(qualified)
+                up.tools.append(tool)
                 self._tool_routing[qualified] = up.name
-                self._tool_routing[tool.name] = up.name  # also accept short form
+                # We do NOT route the unqualified short form: ambiguous if
+                # two upstreams expose the same tool name. Always require
+                # the upstream prefix so the routing decision is deterministic.
 
     def all_tools(self) -> list[Tool]:
-        """Tools we re-advertise upward to the MCP client (Claude Code etc.)."""
+        """Re-advertise every upstream tool upward, namespaced + schema-intact.
+
+        The MCP client (Claude Code, Cursor, ...) sees one tool per upstream
+        tool, with the original JSON-Schema input contract preserved. The
+        gate is invisible to the client until a call is rejected.
+        """
         out: list[Tool] = []
         for up in self._upstreams.values():
-            # We refetch each call so any upstream tool-list mutations propagate;
-            # cheap because it's an in-memory cache on the SDK side.
-            pass
-        # For v1, we expose the cached list built at startup; live refresh in v0.2.
+            for tool in up.tools:
+                out.append(Tool(
+                    name=f"{up.name}.{tool.name}",
+                    description=tool.description,
+                    inputSchema=tool.inputSchema,
+                    annotations=tool.annotations,
+                ))
         return out
 
     async def call_tool(
@@ -290,29 +311,52 @@ class QuillProxy:
         return text_blobs
 
 
-def build_proxy_server(proxy: QuillProxy) -> FastMCP:
-    """Wrap a QuillProxy as a FastMCP server that re-advertises all upstream
-    tools. The MCP client (Claude Code) sees a single quill server that
-    exposes every protected tool, with the gate transparently in front.
+def build_proxy_server(proxy: QuillProxy) -> Server:
+    """Wrap a QuillProxy as a low-level MCP Server.
 
-    For v1 the tool surface is built at startup; live refresh comes in v0.2.
+    Every upstream tool is re-emitted with its original JSON schema so the
+    MCP client (Claude Code, Cursor, ...) gets full autocomplete and
+    validation. Tool names are namespaced with the upstream name; any
+    collisions are impossible.
+
+    The gate is transparent on the happy path: the client sees a normal
+    tool result. On block, the client sees an error tool-result with the
+    plain-English reason from Quill.
     """
-    mcp = FastMCP(name="quill")
+    server: Server[None] = Server("quill", version=__version__)
 
-    # Attach a generic tool-call handler. We register one passthrough tool per
-    # discovered upstream tool by namespacing under the upstream name.
-    # Implementation note: in v1 we don't dynamically declare every upstream
-    # tool's schema. v0.2 will re-emit each upstream's JSON-Schema upward so
-    # the MCP client gets full type info. v1 ships with a single generic
-    # "quill.call" tool that takes (tool_name, arguments) — sufficient for
-    # the audit story but less ergonomic for autocomplete.
-    @mcp.tool()
-    async def call(tool_name: str, arguments: dict[str, Any]) -> str:
-        """Invoke an upstream MCP tool through Quill's gate."""
+    @server.list_tools()
+    async def _handle_list_tools() -> list[Tool]:
+        return proxy.all_tools()
+
+    @server.call_tool()
+    async def _handle_call_tool(
+        name: str, arguments: dict[str, Any] | None,
+    ) -> list[TextContent]:
+        args = dict(arguments or {})
         try:
-            results = await proxy.call_tool(tool_name, arguments)
+            return await proxy.call_tool(name, args)
         except PolicyDenied as e:
-            return f"BLOCKED by quill: {e}"
-        return "\n".join(r.text for r in results)
+            # Surface the plain-English reason as a tool error so the agent
+            # can read it and potentially course-correct (or surface it to
+            # the human).
+            return [TextContent(type="text", text=f"BLOCKED by quill: {e}")]
 
-    return mcp
+    return server
+
+
+async def run_stdio(server: Server[Any]) -> None:
+    """Run an MCP Server over stdio. Used by `quill serve`."""
+    async with stdio_server() as (read, write):
+        await server.run(
+            read,
+            write,
+            InitializationOptions(
+                server_name="quill",
+                server_version=__version__,
+                capabilities=server.get_capabilities(
+                    notification_options=NotificationOptions(),
+                    experimental_capabilities={},
+                ),
+            ),
+        )

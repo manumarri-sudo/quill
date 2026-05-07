@@ -67,17 +67,20 @@ class UpstreamConfig(BaseModel):
 
     model_config = ConfigDict(strict=True, extra="forbid")
     name: str = Field(min_length=1, max_length=64)
-    command: tuple[str, ...] = Field(min_length=1)
+    # TOML arrays become Python lists; strict mode would reject tuple, so we
+    # accept list at the schema boundary and only convert to tuple at the
+    # internal usage site.
+    command: list[str] = Field(min_length=1)
     env: dict[str, str] = Field(default_factory=dict)
-    env_pass: tuple[str, ...] = Field(
-        default_factory=tuple,
+    env_pass: list[str] = Field(
+        default_factory=list,
         description="Names of env vars to forward from Quill's environ "
         "(e.g. GITHUB_TOKEN). NEVER includes Quill's own secrets.",
     )
 
     @field_validator("env_pass")
     @classmethod
-    def _check_env_pass(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+    def _check_env_pass(cls, v: list[str]) -> list[str]:
         # Refuse to forward anything that smells like Quill's signing key.
         forbidden = {"QUILL_HMAC_KEY", "QUILL_SIGNING_KEY"}
         bad = [e for e in v if e in forbidden]
@@ -90,7 +93,7 @@ class UpstreamConfig(BaseModel):
 class SessionConfig(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
     intent: str = Field(min_length=1, max_length=2000)
-    scope: tuple[str, ...] = Field(default_factory=tuple)
+    scope: list[str] = Field(default_factory=list)
     budget_usd: float | None = Field(default=None, ge=0)
 
     def parsed_scope(self) -> tuple[Scope, ...]:
@@ -119,7 +122,7 @@ class QuillConfig(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
     session: SessionConfig
     audit: AuditConfig = Field(default_factory=AuditConfig)
-    upstream: tuple[UpstreamConfig, ...] = Field(default_factory=tuple)
+    upstream: list[UpstreamConfig] = Field(default_factory=list)
     policy: dict[str, Risk] = Field(default_factory=dict)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
 

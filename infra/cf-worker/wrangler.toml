@@ -1,0 +1,12 @@
+# Cloudflare Worker config for the quill telemetry receiver.
+# After `wrangler d1 create quill-telemetry`, paste the printed
+# database_id below.
+
+name = "quill-telemetry"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "quill-telemetry"
+database_id = "REPLACE_AFTER_wrangler_d1_create"
