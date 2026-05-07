@@ -45,21 +45,31 @@ from quill.tree import render_tree_live, render_tree_static
 
 app = typer.Typer(
     add_completion=False,
-    no_args_is_help=True,
-    help="quill: the pause button between AI agents and the things you can't undo.",
+    no_args_is_help=False,  # `quill` with no args runs `start`
+    help="quill: the pause button between AI agents and the things you can't undo.\n\n"
+         "  quill start    set up + watch live (this is the only command most users need)\n"
+         "  quill audit    see what got blocked/allowed\n"
+         "  quill doctor   diagnose the install\n",
 )
-audit_app = typer.Typer(no_args_is_help=True, help="audit-log subcommands.")
+
+
+@app.callback(invoke_without_command=True)
+def _root(ctx: typer.Context) -> None:
+    """When called with no subcommand, run `start`."""
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(start)
+audit_app = typer.Typer(
+    no_args_is_help=True,
+    help="see what got blocked / allowed / asked.",
+)
 app.add_typer(audit_app, name="audit")
-journal_app = typer.Typer(
-    no_args_is_help=True,
-    help="session-journal subcommands (writes to your AgentOS vault).",
-)
-app.add_typer(journal_app, name="journal")
+journal_app = typer.Typer(no_args_is_help=True, help="session-journal subcommands.")
+app.add_typer(journal_app, name="journal", hidden=True)
 telemetry_app = typer.Typer(
     no_args_is_help=True,
-    help="opt-in anonymous usage telemetry (off by default).",
+    help="opt-in anonymous usage telemetry.",
 )
-app.add_typer(telemetry_app, name="telemetry")
+app.add_typer(telemetry_app, name="telemetry", hidden=True)
 
 console = Console(stderr=True)
 
@@ -105,10 +115,116 @@ def _hmac_key() -> bytes:
 
 
 # --------------------------------------------------------------------------
-# init
+# start — the front door. one command, sets up + opens dashboard.
 # --------------------------------------------------------------------------
 
 @app.command()
+def start(
+    no_browser: Annotated[
+        bool,
+        typer.Option("--no-browser", help="don't auto-open the dashboard"),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes", "-y",
+            help="don't prompt for the telemetry decision (leaves it as-is)",
+        ),
+    ] = False,
+) -> None:
+    """Install the hook, optionally enable telemetry, open the dashboard.
+
+    This is the only command most users will ever run. Idempotent — safe
+    to re-run; nothing gets duplicated. After this finishes, every Bash /
+    Edit / Write / NotebookEdit call in your Claude Code session is gated
+    by quill, signed into ~/.quill/audit.log.jsonl, and visible live in
+    the dashboard.
+    """
+    out = Console()
+
+    out.print()
+    out.print("[bold]quill[/bold] [dim]· the pause button between AI agents "
+              "and the things you can't undo[/dim]")
+    out.print()
+
+    # 1. Install the Claude Code PreToolUse hook (idempotent)
+    settings_path, was_installed = cc_adapter.install_into_settings()
+    if was_installed:
+        out.print(f"  [green]✓[/green] hook already installed in [dim]{settings_path}[/dim]")
+    else:
+        out.print(f"  [green]✓[/green] hook installed in [dim]{settings_path}[/dim]")
+        out.print(f"        [yellow]→ restart Claude Code to pick up the new hook[/yellow]")
+
+    # 2. Telemetry one-time prompt
+    state = tel.TelemetryState.load()
+    if not state.asked and not yes:
+        out.print()
+        out.print("  [bold]help shape quill v0.2?[/bold]  share anonymous "
+                  "aggregate stats — counts, risk distribution, namespaces.")
+        out.print("  [dim]nothing personally identifiable. inspect what would "
+                  "ship: [bold]quill telemetry show[/bold][/dim]")
+        try:
+            ans = typer.prompt(
+                "  share? (y/N)", default="N", show_default=False,
+            ).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            ans = "n"
+        if ans == "y":
+            tel.opt_in()
+            out.print(f"  [green]✓[/green] telemetry on   [dim]install_id "
+                      f"{tel.TelemetryState.load().install_id}[/dim]")
+        else:
+            tel.opt_out()
+            out.print("  [dim]✓ telemetry off (default). turn on later: "
+                      "quill telemetry on[/dim]")
+    else:
+        on = state.opted_in
+        out.print(f"  [green]✓[/green] telemetry: "
+                  f"[{'green' if on else 'dim'}]{'on' if on else 'off'}[/]")
+
+    # 3. Doctor sanity-check (silent unless something's wrong)
+    report = run_doctor()
+    if report.has_failures:
+        out.print()
+        out.print("  [red]✗ install has failures. run [bold]quill doctor[/bold] "
+                  "to see them.[/red]")
+        return
+    if report.has_warnings:
+        warns = [r for r in report.results if r.status == "[yellow]WARN[/yellow]"]
+        out.print(f"  [yellow]⚠[/yellow] {len(warns)} warning(s)  "
+                  f"[dim](quill doctor for details)[/dim]")
+    else:
+        out.print("  [green]✓[/green] install looks clean")
+
+    # 4. Open the live dashboard
+    out.print()
+    log = default_audit_path()
+    n_events = 0
+    if log.exists():
+        with log.open() as f:
+            n_events = sum(1 for _ in f)
+    out.print(f"  [bold cyan]quill is live.[/bold cyan]  audit log: "
+              f"[dim]{log}[/dim] ([dim]{n_events} entries[/dim])")
+    out.print()
+    out.print("  starting the live dashboard at "
+              "[bold]http://127.0.0.1:9099[/bold]")
+    out.print("  [dim]Ctrl-C to stop the dashboard. quill keeps running "
+              "in Claude Code regardless.[/dim]")
+    out.print()
+
+    try:
+        watch_mod.serve(log, port=watch_mod.DEFAULT_PORT,
+                        open_browser=not no_browser)
+    except KeyboardInterrupt:
+        out.print()
+        out.print("  [dim]dashboard stopped. quill is still gating Claude Code.[/dim]")
+
+
+# --------------------------------------------------------------------------
+# init
+# --------------------------------------------------------------------------
+
+@app.command(hidden=True)
 def init(
     config_path: Annotated[
         Path | None,
@@ -136,7 +252,7 @@ def init(
 # serve
 # --------------------------------------------------------------------------
 
-@app.command()
+@app.command(hidden=True)
 def serve(
     config_path: Annotated[
         Path | None,
@@ -199,7 +315,7 @@ def serve(
 # tail
 # --------------------------------------------------------------------------
 
-@app.command()
+@app.command(hidden=True)
 def tail(
     log_path: Annotated[
         Path | None,
@@ -494,7 +610,7 @@ def audit_show(
 # tree
 # --------------------------------------------------------------------------
 
-@app.command()
+@app.command(hidden=True)
 def tree(
     log_path: Annotated[
         Path | None,
@@ -565,7 +681,7 @@ def doctor(
 # claude-hook  (Claude Code PreToolUse adapter)
 # --------------------------------------------------------------------------
 
-@app.command("claude-hook")
+@app.command("claude-hook", hidden=True)
 def claude_hook() -> None:
     """Run as Claude Code's PreToolUse hook.
 
@@ -578,7 +694,7 @@ def claude_hook() -> None:
     raise typer.Exit(code=cc_adapter.main())
 
 
-@app.command("claude-hook-install")
+@app.command("claude-hook-install", hidden=True)
 def claude_hook_install(
     settings_path: Annotated[
         Path | None,

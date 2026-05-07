@@ -83,60 +83,117 @@ DEFAULT_HIGH_PATTERNS: Final[tuple[str, ...]] = (
 # operator can downgrade in their per-tool policy override.
 # ---------------------------------------------------------------------------
 
-CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str], ...]] = (
+# (regex_pattern, reason, suggested_fix)
+# The suggested_fix is shown to the user when this pattern blocks a command,
+# so the gate is constructive rather than just punitive. Keep suggestions
+# concrete — a paste-able command, not advice.
+CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     # Filesystem destruction
-    (r"\brm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*\s+)+(?!\s*$)", "rm -rf"),
-    (r"\bfind\b.*-delete\b", "find -delete"),
-    (r"\bdd\s+if=", "dd low-level disk write"),
-    (r"\bmkfs\.", "filesystem format"),
-    (r":\(\)\s*\{.*:\|:&.*\}\s*;\s*:", "fork bomb"),
+    (r"\brm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*\s+)+(?!\s*$)", "rm -rf",
+     "Move to a quarantine dir instead so you can recover: "
+     "`mv <target> /tmp/quarantine_$(date +%s)`"),
+    (r"\bfind\b.*-delete\b", "find -delete",
+     "Run without -delete first to preview matches: replace `-delete` with `-print`"),
+    (r"\bdd\s+if=", "dd low-level disk write",
+     "Verify the of= target with `lsblk` first; one wrong character corrupts the wrong disk"),
+    (r"\bmkfs\.", "filesystem format",
+     "Confirm the device path with `lsblk -f` first — formatting the wrong drive is unrecoverable"),
+    (r":\(\)\s*\{.*:\|:&.*\}\s*;\s*:", "fork bomb",
+     "This is a fork bomb pattern. Refuse."),
     # Version control destructive
-    (r"\bgit\s+push\s+(?:--force|--force-with-lease|-f)\b", "git push --force"),
-    (r"\bgit\s+reset\s+--hard\b", "git reset --hard"),
-    (r"\bgit\s+clean\s+-[a-zA-Z]*[fdx]+", "git clean -fdx"),
-    (r"\bgit\s+update-ref\s+-d\b", "git update-ref -d"),
+    (r"\bgit\s+push\s+(?:--force|--force-with-lease|-f)\b", "git push --force",
+     "Use `git push --force-with-lease` to avoid clobbering a teammate's commits — "
+     "or rebase first: `git fetch && git rebase origin/<branch>`"),
+    (r"\bgit\s+reset\s+--hard\b", "git reset --hard",
+     "Stash uncommitted work first: `git stash push -u -m 'pre-reset'`, then reset"),
+    (r"\bgit\s+clean\s+-[a-zA-Z]*[fdx]+", "git clean -fdx",
+     "Preview first with `git clean -ndx` (dry run); commit anything you want to keep"),
+    (r"\bgit\s+update-ref\s+-d\b", "git update-ref -d",
+     "Tag the commit before deleting the ref: `git tag backup-$(date +%s) <ref>`"),
     # Database destructive
-    (r"\bdrop\s+(?:table|database|schema|index)\b", "DROP TABLE/DATABASE/SCHEMA"),
-    (r"\btruncate\s+(?:table\s+)?\w+", "TRUNCATE TABLE"),
-    (r"\bdelete\s+from\s+\w+(?!.*\bwhere\b)", "DELETE FROM without WHERE"),
+    (r"\bdrop\s+(?:table|database|schema|index)\b", "DROP TABLE/DATABASE/SCHEMA",
+     "Back up first: `pg_dump -t <table> > /tmp/backup_$(date +%s).sql`. "
+     "Then run the DROP in a transaction so you can `ROLLBACK` if needed."),
+    (r"\btruncate\s+(?:table\s+)?\w+", "TRUNCATE TABLE",
+     "TRUNCATE is unrecoverable. `DELETE FROM <table>` (in a transaction) "
+     "lets you ROLLBACK; or back up with `pg_dump -t <table>` first"),
+    (r"\bdelete\s+from\s+\w+(?!.*\bwhere\b)", "DELETE FROM without WHERE",
+     "Add a WHERE clause. To delete all rows intentionally, use TRUNCATE explicitly "
+     "(in a transaction) so the intent is documented"),
     # Remote code execution
-    (r"\bcurl\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b", "curl | sh"),
-    (r"\bwget\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b", "wget | sh"),
-    (r"\beval\b\s+[\"']?\$\(", "eval $(...)"),
+    (r"\bcurl\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b", "curl | sh",
+     "Download first, read the script, *then* run: "
+     "`curl -fsSL <url> -o /tmp/install.sh && cat /tmp/install.sh && bash /tmp/install.sh`"),
+    (r"\bwget\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b", "wget | sh",
+     "Download first, read it, then run: `wget <url> -O /tmp/install.sh && cat /tmp/install.sh`"),
+    (r"\beval\b\s+[\"']?\$\(", "eval $(...)",
+     "Capture the command first and inspect it: `cmd=$(...)` then `echo \"$cmd\"`"),
     # Privilege & deploys
-    # `\bsudo\b` over-matched URL slugs like "manumarri-sudo/quill" because
-    # `-` and `/` are regex word boundaries. Anchor sudo at command-start
-    # (line-start, ; && || | ` (` or whitespace before).
-    (r"(?:^|[;&|`(\s])sudo(?=\s)", "sudo invocation"),
-    (r"\bchmod\s+(?:[0-7]*7[0-7]?7|\+s)", "chmod 777 / setuid"),
-    (r"\bnpm\s+publish\b", "npm publish"),
-    (r"\byarn\s+publish\b", "yarn publish"),
-    (r"\bvercel\s+(?:--prod\b|deploy\s+(?:\S+\s+)*--prod\b)", "vercel --prod"),
-    (r"\bflyctl\s+deploy\b(?!.*--config\s+.*staging)", "flyctl deploy"),
-    (r"\brailway\s+up\b.*--service\s+prod", "railway up --service prod"),
-    (r"\bkubectl\s+(?:delete|apply\s+-f.*prod)", "kubectl delete / prod apply"),
-    (r"\bdocker\s+(?:rmi|system\s+prune)", "docker rmi / system prune"),
-    (r"\bterraform\s+(?:destroy|apply\s+-auto-approve)", "terraform destroy / auto-apply"),
+    (r"(?:^|[;&|`(\s])sudo(?=\s)", "sudo invocation",
+     "Confirm you actually need root for this. Many tools (npm, pip, brew) "
+     "should never be run with sudo"),
+    (r"\bchmod\s+(?:[0-7]*7[0-7]?7|\+s)", "chmod 777 / setuid",
+     "World-writable or setuid is almost never what you want. Try `chmod 644` "
+     "for files / `chmod 755` for executables"),
+    (r"\bnpm\s+publish\b", "npm publish",
+     "Dry-run first to see exactly what gets uploaded: `npm publish --dry-run`. "
+     "Verify version, files, and that no secrets are in the tarball"),
+    (r"\byarn\s+publish\b", "yarn publish",
+     "Dry-run first: `yarn pack` produces the tarball without publishing. Inspect it"),
+    (r"\bvercel\s+(?:--prod\b|deploy\s+(?:\S+\s+)*--prod\b)", "vercel --prod",
+     "Preview-deploy first: `vercel deploy` (without --prod) — verify the preview "
+     "URL, then promote: `vercel promote <preview-url>`"),
+    (r"\bflyctl\s+deploy\b(?!.*--config\s+.*staging)", "flyctl deploy",
+     "Deploy to staging first: `flyctl deploy --config fly.staging.toml` — verify, "
+     "then deploy prod"),
+    (r"\brailway\s+up\b.*--service\s+prod", "railway up --service prod",
+     "Use a staging service first; railway has no built-in rollback once a "
+     "prod deploy goes out"),
+    (r"\bkubectl\s+(?:delete|apply\s+-f.*prod)", "kubectl delete / prod apply",
+     "Dry-run first: `kubectl ... --dry-run=server -o yaml` shows what would change"),
+    (r"\bdocker\s+(?:rmi|system\s+prune)", "docker rmi / system prune",
+     "List what would be removed first: `docker images` / `docker system df`"),
+    (r"\bterraform\s+(?:destroy|apply\s+-auto-approve)", "terraform destroy / auto-apply",
+     "Always plan first: `terraform plan -out=plan.tfplan`, review, then "
+     "`terraform apply plan.tfplan`. Never auto-approve in prod"),
     # Secret exfil shape
-    (r"\bcat\b.*~/\.(?:ssh|aws|kube)/", "read ~/.ssh ~/.aws ~/.kube"),
-    (r"\bcat\b\s+\.env\b", "read .env"),
+    (r"\bcat\b.*~/\.(?:ssh|aws|kube)/", "read ~/.ssh ~/.aws ~/.kube",
+     "If you need a credential value, read the specific file you mean and "
+     "redact for display: `head -c 20 <file>; echo '...'`"),
+    (r"\bcat\b\s+\.env\b", "read .env",
+     "Show only keys, not values: `grep -oE '^[A-Z_]+=' .env`"),
 )
 
-HIGH_COMMAND_PATTERNS: Final[tuple[tuple[str, str], ...]] = (
-    (r"\bgit\s+push\b", "git push"),
-    (r"\bgit\s+commit\b", "git commit"),
-    (r"\brm\s+(?!-[a-zA-Z]*[rRf])", "rm (single file)"),
-    (r"\bsed\s+-i\b", "sed -i (in-place)"),
-    (r"\bgh\s+pr\s+merge\b", "gh pr merge"),
-    (r"\bgh\s+repo\s+(?:delete|edit)\b", "gh repo delete/edit"),
-    (r"\bnpm\s+install\s+(?:-g|--global)\b", "npm install -g"),
-    (r"\bnpm\s+install\b", "npm install (mutates lockfile)"),
-    (r"\bvercel\s+deploy\b", "vercel deploy (preview)"),
-    (r"\bdocker\s+(?:push|run\b.*--privileged)", "docker push / privileged run"),
-    (r"\bcurl\s+-X\s+(?:POST|PUT|DELETE|PATCH)\b", "curl write request"),
-    (r"\bopen\s+\S+://", "open URL/app"),
-    (r"\bpip\s+install\s+(?:[^-]|-(?!h))", "pip install"),
-    (r"\bbrew\s+install\b", "brew install"),
+HIGH_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
+    (r"\bgit\s+push\b", "git push",
+     "Verify branch + diff first: `git status && git log @{u}..HEAD --oneline`"),
+    (r"\bgit\s+commit\b", "git commit",
+     "Show staged hunks first: `git diff --staged`"),
+    (r"\brm\s+(?!-[a-zA-Z]*[rRf])", "rm (single file)",
+     "Move to /tmp first: `mv <file> /tmp/` lets you recover for the session"),
+    (r"\bsed\s+-i\b", "sed -i (in-place)",
+     "Drop `-i` and pipe through `diff` first to preview the change"),
+    (r"\bgh\s+pr\s+merge\b", "gh pr merge",
+     "Verify checks: `gh pr checks` before merging"),
+    (r"\bgh\s+repo\s+(?:delete|edit)\b", "gh repo delete/edit",
+     "Repo-level changes are visible to collaborators — confirm with the team first"),
+    (r"\bnpm\s+install\s+(?:-g|--global)\b", "npm install -g",
+     "Prefer `npx <pkg>` for one-off use, or project-local install. "
+     "Globals can run install scripts at root"),
+    (r"\bnpm\s+install\b", "npm install (mutates lockfile)",
+     "If your lockfile should be authoritative, prefer `npm ci`"),
+    (r"\bvercel\s+deploy\b", "vercel deploy (preview)",
+     "Preview is cheap; promote with `vercel promote <url>` after verifying"),
+    (r"\bdocker\s+(?:push|run\b.*--privileged)", "docker push / privileged run",
+     "Drop privileges if possible, use `--cap-add` selectively"),
+    (r"\bcurl\s+-X\s+(?:POST|PUT|DELETE|PATCH)\b", "curl write request",
+     "Confirm URL + body. Use the API's `--dry-run` if available"),
+    (r"\bopen\s+\S+://", "open URL/app",
+     "Verify the URL first if it came from an untrusted source"),
+    (r"\bpip\s+install\s+(?:[^-]|-(?!h))", "pip install",
+     "Use a venv: `python -m venv .venv && .venv/bin/pip install ...`"),
+    (r"\bbrew\s+install\b", "brew install",
+     "Confirm the formula source: `brew info <pkg>` shows the homepage"),
 )
 
 LOW_COMMAND_PATTERNS: Final[tuple[str, ...]] = (
@@ -155,17 +212,22 @@ LOW_COMMAND_PATTERNS: Final[tuple[str, ...]] = (
 
 @dataclass(frozen=True, slots=True)
 class CommandClassification:
-    """Result of classifying a shell command."""
+    """Result of classifying a shell command.
+
+    `suggestion` is a paste-able safer alternative shown to the user when
+    the gate blocks. Empty string when no suggestion applies (LOW/MEDIUM).
+    """
 
     risk: Risk
     reason: str
+    suggestion: str = ""
 
 
-_CRITICAL_CMD_RE: Final[tuple[tuple[re.Pattern[str], str], ...]] = tuple(
-    (re.compile(p, re.IGNORECASE), r) for p, r in CRITICAL_COMMAND_PATTERNS
+_CRITICAL_CMD_RE: Final[tuple[tuple[re.Pattern[str], str, str], ...]] = tuple(
+    (re.compile(p, re.IGNORECASE), r, s) for p, r, s in CRITICAL_COMMAND_PATTERNS
 )
-_HIGH_CMD_RE: Final[tuple[tuple[re.Pattern[str], str], ...]] = tuple(
-    (re.compile(p, re.IGNORECASE), r) for p, r in HIGH_COMMAND_PATTERNS
+_HIGH_CMD_RE: Final[tuple[tuple[re.Pattern[str], str, str], ...]] = tuple(
+    (re.compile(p, re.IGNORECASE), r, s) for p, r, s in HIGH_COMMAND_PATTERNS
 )
 _LOW_CMD_RE: Final[tuple[re.Pattern[str], ...]] = tuple(
     re.compile(p, re.IGNORECASE) for p in LOW_COMMAND_PATTERNS
@@ -177,17 +239,18 @@ def classify_command(command: str) -> CommandClassification:
 
     For tools whose risk depends on the command string (Claude Code's `Bash`,
     a generic `shell.exec`, etc.). Conservative by design: when uncertain,
-    return MEDIUM and let the caller decide.
+    return MEDIUM and let the caller decide. CRITICAL/HIGH classifications
+    carry a paste-able safer-alternative `suggestion`.
     """
     cmd = (command or "").strip()
     if not cmd:
         return CommandClassification(Risk.LOW, "empty command")
-    for rex, reason in _CRITICAL_CMD_RE:
+    for rex, reason, suggestion in _CRITICAL_CMD_RE:
         if rex.search(cmd):
-            return CommandClassification(Risk.CRITICAL, reason)
-    for rex, reason in _HIGH_CMD_RE:
+            return CommandClassification(Risk.CRITICAL, reason, suggestion)
+    for rex, reason, suggestion in _HIGH_CMD_RE:
         if rex.search(cmd):
-            return CommandClassification(Risk.HIGH, reason)
+            return CommandClassification(Risk.HIGH, reason, suggestion)
     for rex in _LOW_CMD_RE:
         if rex.search(cmd):
             return CommandClassification(Risk.LOW, "read-only command")
