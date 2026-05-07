@@ -26,6 +26,8 @@ from rich.table import Table
 from quill._version import __version__
 from quill.adapters import claude_code as cc_adapter
 from quill.audit import AuditLog, verify_chain
+from quill.doctor import run_doctor
+from quill import telemetry as tel
 from quill.config import (
     QuillConfig,
     default_audit_path,
@@ -36,7 +38,7 @@ from quill.config import (
 from quill.errors import ConfigError, QuillError
 from quill.policy import SessionIntent
 from quill.prompt import Prompter
-from quill.proxy import QuillProxy, build_proxy_server
+from quill.proxy import QuillProxy, build_proxy_server, run_stdio
 from quill.tree import render_tree_live, render_tree_static
 
 app = typer.Typer(
@@ -46,8 +48,38 @@ app = typer.Typer(
 )
 audit_app = typer.Typer(no_args_is_help=True, help="audit-log subcommands.")
 app.add_typer(audit_app, name="audit")
+telemetry_app = typer.Typer(
+    no_args_is_help=True,
+    help="opt-in anonymous usage telemetry (off by default).",
+)
+app.add_typer(telemetry_app, name="telemetry")
 
 console = Console(stderr=True)
+
+
+def _maybe_emit_telemetry(audit_path: Path) -> None:
+    """Best-effort send of a session.summary if the user has opted in.
+
+    Reads the audit log we just wrote, derives the aggregate, fires off the
+    POST. Never raises — telemetry must not affect proxy correctness.
+    """
+    state = tel.TelemetryState.load()
+    if not state.opted_in:
+        return
+    if not audit_path.exists():
+        return
+    try:
+        events = []
+        with audit_path.open() as f:
+            for line in f:
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        aggregate = tel.aggregate_events(events)
+        tel.emit_session_summary(aggregate, state=state)
+    except Exception:  # noqa: BLE001 — never block on telemetry
+        pass
 
 
 def _hmac_key() -> bytes:
@@ -142,9 +174,12 @@ def serve(
                     f"upstreams={[u.name for u in cfg.upstream]}",
                 )
                 console.print(f"[dim]audit log: {cfg.audit.resolved_path()}[/dim]")
-                # Run the FastMCP server over stdio so Claude Code can connect.
+                # Run the MCP server over stdio so Claude Code can connect.
                 server = build_proxy_server(proxy)
-                await server.run_stdio_async()
+                try:
+                    await run_stdio(server)
+                finally:
+                    _maybe_emit_telemetry(cfg.audit.resolved_path())
 
     try:
         anyio.run(_run)
@@ -312,6 +347,43 @@ def tree(
 
 
 # --------------------------------------------------------------------------
+# doctor — install diagnostic
+# --------------------------------------------------------------------------
+
+@app.command()
+def doctor(
+    config_path: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="path to quill config"),
+    ] = None,
+) -> None:
+    """Verify the install: config, audit log, key, hook, upstreams.
+
+    Prints one line per check (PASS / WARN / FAIL) with a remediation
+    hint for anything that needs attention. Exits 1 if any FAIL was hit
+    so this can be used in scripts.
+    """
+    out = Console()  # use stdout, not stderr — script-friendly
+    report = run_doctor(config_path=config_path)
+    out.print()
+    out.print("[bold]quill doctor[/bold]")
+    out.print()
+    name_width = max(len(r.name) for r in report.results) + 2
+    for r in report.results:
+        out.print(f"  {r.status}  [bold]{r.name:<{name_width}}[/bold] {r.detail}")
+        if r.fix and r.status != "[green]PASS[/green]":
+            out.print(f"        [dim]→ {r.fix}[/dim]")
+    out.print()
+    if report.has_failures:
+        out.print("[red]some checks failed.[/red]  fix the FAILs above and re-run.")
+        raise typer.Exit(code=1)
+    if report.has_warnings:
+        out.print("[yellow]all checks passed (with warnings).[/yellow]  see hints above.")
+    else:
+        out.print("[green]all checks passed.[/green]")
+
+
+# --------------------------------------------------------------------------
 # claude-hook  (Claude Code PreToolUse adapter)
 # --------------------------------------------------------------------------
 
@@ -364,6 +436,69 @@ def claude_hook_install(
         console.print("  Restart Claude Code to pick up the new hook.")
     console.print(f"  matcher: [bold]{matcher}[/bold]")
     console.print(f"  audit log: {default_audit_path()}")
+
+
+# --------------------------------------------------------------------------
+# telemetry — opt-in anonymous aggregate usage
+# --------------------------------------------------------------------------
+
+@telemetry_app.command("status")
+def telemetry_status() -> None:
+    """Show whether telemetry is opted-in, and where state lives."""
+    s = tel.TelemetryState.load()
+    out = Console()
+    out.print(f"  install_id : [dim]{s.install_id}[/dim]")
+    out.print(f"  opted_in   : [{'green' if s.opted_in else 'yellow'}]"
+              f"{s.opted_in}[/]")
+    out.print(f"  asked      : {s.asked} {('@ ' + s.asked_at) if s.asked_at else ''}")
+    out.print(f"  endpoint   : {s.endpoint}")
+    out.print(f"  state file : {tel._state_path()}")
+
+
+@telemetry_app.command("on")
+def telemetry_on() -> None:
+    """Opt in to anonymous aggregate telemetry."""
+    s = tel.opt_in()
+    Console().print(
+        f"[green]telemetry on[/green]. install_id: [dim]{s.install_id}[/dim]\n"
+        "  Inspect what gets sent at any time:  quill telemetry show\n"
+        "  Turn off:                            quill telemetry off",
+    )
+
+
+@telemetry_app.command("off")
+def telemetry_off() -> None:
+    """Opt out of telemetry (or stay opted-out)."""
+    tel.opt_out()
+    Console().print("[yellow]telemetry off.[/yellow]  no events will be sent.")
+
+
+@telemetry_app.command("show")
+def telemetry_show(
+    log_path: Annotated[
+        Path | None,
+        typer.Option("--log", "-l", help="audit log to summarise"),
+    ] = None,
+) -> None:
+    """Print the JSON Quill *would* send.
+
+    This is the only thing that ever leaves your machine. Inspect it
+    before opting in if you want to verify the privacy contract holds.
+    """
+    s = tel.TelemetryState.load()
+    p = log_path or default_audit_path()
+    aggregate: dict[str, object] = {}
+    if p.exists():
+        events = []
+        with p.open() as f:
+            for line in f:
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        aggregate = tel.aggregate_events(events)
+    out = Console()
+    out.print(tel.preview_event_for_user(s, aggregate))
 
 
 # --------------------------------------------------------------------------
