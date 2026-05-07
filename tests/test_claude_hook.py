@@ -154,9 +154,24 @@ def test_run_hook_fails_open_on_malformed_input() -> None:
 
 
 def test_classify_event_for_unknown_tool_falls_back_to_namespace_classifier() -> None:
-    risk, reason = classify_event("postgres.drop_table", {"table": "users"})
+    risk, reason, suggestion = classify_event("postgres.drop_table", {"table": "users"})
     assert risk is Risk.CRITICAL
     assert "postgres.drop_table" in reason or "namespace" in reason
+    # Namespace-classifier path doesn't carry a suggestion (only classify_command
+    # does, since it knows the command-specific safer alternative).
+    assert isinstance(suggestion, str)
+
+
+def test_classify_event_returns_suggestion_for_dangerous_bash() -> None:
+    """The whole point of suggestions: a paste-able safer alternative goes
+    out with every CRITICAL/HIGH bash decision."""
+    risk, reason, suggestion = classify_event(
+        "Bash", {"command": "git push --force origin main"},
+    )
+    assert risk is Risk.CRITICAL
+    assert suggestion, "git push --force should carry a suggestion"
+    # Specifically, the canonical fix is --force-with-lease.
+    assert "force-with-lease" in suggestion or "rebase" in suggestion
 
 
 # ---- install helper ------------------------------------------------------

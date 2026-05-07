@@ -111,12 +111,12 @@ def _default_load_hmac_key() -> bytes:
     return key
 
 
-def classify_event(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[Risk, str]:
-    """Decide the risk + plain-English reason for a Claude Code tool call."""
+def classify_event(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[Risk, str, str]:
+    """Decide the risk + plain-English reason + safer-alternative suggestion."""
     if tool_name == "Bash":
         cmd = str(tool_input.get("command", ""))
         c = classify_command(cmd)
-        return c.risk, c.reason
+        return c.risk, c.reason, c.suggestion
 
     # User config can override per-tool risk via the [policy] table:
     # ["Bash"] = "high", ["Edit"] = "low", etc. Loaded best-effort: the hook
@@ -127,32 +127,43 @@ def classify_event(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[Risk,
         user_override = cfg.policy.get(tool_name)
 
     if user_override is not None:
-        return user_override, "user policy override"
+        return user_override, "user policy override", ""
 
     if tool_name in DEFAULT_BUILTIN_RISK:
-        return DEFAULT_BUILTIN_RISK[tool_name], f"default risk for {tool_name}"
+        return DEFAULT_BUILTIN_RISK[tool_name], f"default risk for {tool_name}", ""
 
     # Unknown tool name (custom MCP tool surfaced through Claude Code) — use
     # the namespace-based classifier as a last resort.
-    return classify(tool_name), f"namespace classifier for {tool_name}"
+    return classify(tool_name), f"namespace classifier for {tool_name}", ""
 
 
 def decide(tool_name: str, tool_input: Mapping[str, Any]) -> HookDecision:
-    """Risk + decision for a single Claude Code PreToolUse event."""
-    risk, reason = classify_event(tool_name, tool_input)
+    """Risk + decision for a single Claude Code PreToolUse event.
+
+    For CRITICAL/HIGH classifications carrying a `suggestion`, we surface
+    that suggestion inline in the reason so the user (and the agent
+    reading the tool result) sees a paste-able safer alternative right
+    next to the block. Constructive gate, not just punitive.
+    """
+    risk, reason, suggestion = classify_event(tool_name, tool_input)
+    suffix = f"  ↪ try: {suggestion}" if suggestion else ""
     if risk is Risk.CRITICAL:
         return HookDecision(
             permission="deny",
-            reason=f"Quill blocked: {reason}. To allow, lower the risk in "
-                   "your quill config or run the command outside Claude Code.",
+            reason=(
+                f"Quill blocked: {reason}.{suffix}  "
+                "(To allow anyway, lower the risk in ~/.quill/config.toml.)"
+            ),
             risk=risk,
             audit_event_type="verdict.blocked",
         )
     if risk is Risk.HIGH:
         return HookDecision(
             permission="ask",
-            reason=f"Quill flagged this as high risk ({reason}). Claude "
-                   "Code is asking you to confirm.",
+            reason=(
+                f"Quill flagged this as high risk: {reason}.{suffix}  "
+                "Claude Code is asking you to confirm."
+            ),
             risk=risk,
             audit_event_type="verdict.ask",
         )
