@@ -1,0 +1,68 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+build/
+dist/
+wheels/
+.eggs/
+MANIFEST
+
+# --- Virtualenvs ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Tooling caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.tox/
+.cache/
+pytest-cache-files-*/
+
+# --- Coverage ---
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# --- Quill runtime artifacts (NEVER commit) ---
+# The signing key is per-installation and must never be checked in.
+.quill/
+~/.quill/
+
+# Audit logs are user data with timestamps; keep out of source control.
+*.audit.log.jsonl
+audit.log.jsonl
+
+# --- Local secrets ---
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets.json
+
+# --- Generated experiment artifacts ---
+# The harness scripts are committed; the generated runs are not.
+experiments/results/
+experiments/results.zip
+
+# --- OS ---
+Thumbs.db
+.DS_Store
