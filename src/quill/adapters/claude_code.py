@@ -190,6 +190,89 @@ def _redacted_input(tool_input: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+# ---- multi-project session tracking ---------------------------------------
+# Claude Code's hook payload gives us session_id, transcript_path, and cwd.
+# We persist a tiny on-disk index keyed by transcript_path so we can:
+#   - notice when a NEW session_id appears under the same transcript
+#     (the parent agent spawned a Task sub-agent)
+#   - tag every audit event with parent_session_id when applicable
+#   - record cwd so audit_show can filter by project
+# State file lives at ~/.quill/sessions.json (mode 0o600), schema:
+#   { "<transcript_path>": { "root": "<sid>", "seen": ["<sid>", "<sid>", ...],
+#                             "cwd": "<path>" } }
+
+
+def _session_index_path() -> Path:
+    return Path(
+        os.environ.get("QUILL_SESSIONS", "~/.quill/sessions.json"),
+    ).expanduser()
+
+
+def _track_session(
+    *, transcript_path: str, session_id: str, cwd: str,
+) -> tuple[str, bool]:
+    """Update the session index, return (parent_session_id, is_new_subagent).
+
+    parent_session_id is "" if this IS the root session, otherwise the
+    root's session_id. is_new_subagent is True the FIRST time we see a
+    given non-root session_id under a transcript.
+    """
+    p = _session_index_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        index = json.loads(p.read_text()) if p.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        index = {}
+    if not isinstance(index, dict):
+        index = {}
+
+    rec = index.get(transcript_path) or {}
+    seen = rec.get("seen") or []
+    if not isinstance(seen, list):
+        seen = []
+    root = rec.get("root")
+    is_new_sub = False
+    if not root:
+        # First event we've ever seen for this transcript — root session.
+        root = session_id
+        seen = [session_id]
+    elif session_id not in seen:
+        # New session_id under an existing transcript = sub-agent spawn.
+        seen.append(session_id)
+        is_new_sub = (session_id != root)
+
+    index[transcript_path] = {"root": root, "seen": seen, "cwd": cwd}
+    with contextlib.suppress(OSError):
+        p.write_text(json.dumps(index))
+        p.chmod(0o600)
+
+    parent = "" if session_id == root else root
+    return parent, is_new_sub
+
+
+def _resolve_project_paths(cwd: str) -> tuple[Path, Path | None]:
+    """Given the cwd Claude Code passed us, return:
+       (audit_log_path, per_project_config_path or None).
+
+    Per-project audit logs live at <cwd>/.quill/audit.log.jsonl; per-project
+    config at <cwd>/.quill/config.toml. Both are opt-in: the user creates
+    the .quill/ directory in their project to activate per-project mode.
+    Otherwise we fall back to the global ~/.quill/ paths.
+    """
+    raw = os.environ.get("QUILL_LOG", "").strip()
+    if raw:
+        return Path(raw).expanduser(), None
+
+    cwd_p = Path(cwd).expanduser() if cwd else None
+    if cwd_p and (cwd_p / ".quill").is_dir():
+        return (
+            cwd_p / ".quill" / "audit.log.jsonl",
+            (cwd_p / ".quill" / "config.toml")
+            if (cwd_p / ".quill" / "config.toml").exists() else None,
+        )
+    return default_audit_path(), None
+
+
 def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     """Pure-function entry point for tests.
 
@@ -213,17 +296,47 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     if not isinstance(tool_input, Mapping):
         tool_input = {}
     session_id = str(event.get("session_id", "claude-code"))
+    transcript_path = str(event.get("transcript_path", "") or "")
+    cwd = str(event.get("cwd", "") or "")
+
+    # Track session lineage so we can tag sub-agent calls.
+    parent_session_id = ""
+    is_new_sub = False
+    if transcript_path and session_id:
+        with contextlib.suppress(Exception):
+            parent_session_id, is_new_sub = _track_session(
+                transcript_path=transcript_path,
+                session_id=session_id,
+                cwd=cwd,
+            )
 
     decision = decide(tool_name, tool_input)
+    agent_id = "claude-code-sub" if parent_session_id else "claude-code"
 
     if audit is not None:
-        # Always emit BOTH the attempt and the verdict so the chain is
-        # complete on a tool-by-tool basis even when the verdict is "allow".
         with contextlib.suppress(Exception):
+            # Emit a one-time agent.spawned event the first time we see a
+            # sub-agent's session_id, so the audit log captures the
+            # delegation graph.
+            if is_new_sub:
+                audit.emit(
+                    event_type="agent.spawned",
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    risk="low",
+                    payload={
+                        "name": "task-subagent",
+                        "parent_session_id": parent_session_id,
+                        "transcript_path": transcript_path,
+                        "cwd": cwd,
+                    },
+                    force_fsync=True,
+                )
+
             audit.emit(
                 event_type="tool.attempted",
                 session_id=session_id,
-                agent_id="claude-code",
+                agent_id=agent_id,
                 risk=decision.risk.value,
                 payload={
                     "tool_name": tool_name,
@@ -231,18 +344,22 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     "arg_count": len(tool_input),
                     "args_preview": _redacted_input(tool_input),
                     "via": "claude-code-hook",
+                    "parent_session_id": parent_session_id,
+                    "cwd": cwd,
                 },
             )
             audit.emit(
                 event_type=decision.audit_event_type,
                 session_id=session_id,
-                agent_id="claude-code",
+                agent_id=agent_id,
                 risk=decision.risk.value,
                 payload={
                     "tool_name": tool_name,
                     "by": "quill.adapters.claude_code",
                     "reason": decision.reason,
                     "permission": decision.permission,
+                    "parent_session_id": parent_session_id,
+                    "cwd": cwd,
                 },
                 force_fsync=decision.risk in (Risk.HIGH, Risk.CRITICAL),
             )
@@ -258,11 +375,21 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
 def main() -> int:
     """CLI entry: read stdin, write stdout, exit 0.
 
-    Wired to `quill claude-hook` via the CLI module.
+    Wired to `quill claude-hook` via the CLI module. Routes the audit
+    log to <cwd>/.quill/audit.log.jsonl when the user has opted in to
+    per-project mode by creating that directory.
     """
     stdin_text = sys.stdin.read()
-    raw = os.environ.get("QUILL_LOG", "").strip()
-    log_path = Path(raw).expanduser() if raw else default_audit_path()
+    # Peek at cwd from the payload so we can route the log per-project.
+    # Done via shallow parse so the rest of the hook logic is unchanged.
+    cwd_for_routing = ""
+    try:
+        peek = json.loads(stdin_text or "{}")
+        if isinstance(peek, dict):
+            cwd_for_routing = str(peek.get("cwd") or "")
+    except (json.JSONDecodeError, TypeError):
+        pass
+    log_path, _ = _resolve_project_paths(cwd_for_routing)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:

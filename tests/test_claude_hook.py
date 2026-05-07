@@ -227,3 +227,170 @@ def test_install_snippet_shape() -> None:
     assert pre["matcher"] == "Bash|Edit|Write|NotebookEdit"
     assert pre["hooks"][0]["command"] == "quill claude-hook"
     assert pre["hooks"][0]["timeout"] == 10
+
+
+# ---- multi-project + sub-agent tracking ---------------------------------
+
+
+def _payload(
+    *, tool_name: str, session_id: str, transcript: str, cwd: str,
+    **input_fields: object,
+) -> str:
+    return json.dumps({
+        "session_id": session_id,
+        "transcript_path": transcript,
+        "cwd": cwd,
+        "permission_mode": "default",
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool_name,
+        "tool_input": dict(input_fields),
+    })
+
+
+def test_root_session_writes_no_parent_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    log = tmp_path / "audit.jsonl"
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        run_hook(
+            _payload(
+                tool_name="Bash", session_id="ses-root",
+                transcript=str(tmp_path / "t.jsonl"),
+                cwd=str(tmp_path / "myproject"),
+                command="ls",
+            ),
+            audit=audit,
+        )
+    lines = [json.loads(l) for l in log.read_text().splitlines()]
+    attempt = next(e for e in lines if e["type"] == "tool.attempted")
+    assert attempt["payload"]["parent_session_id"] == ""
+    assert attempt["payload"]["cwd"] == str(tmp_path / "myproject")
+    assert attempt["agent_id"] == "claude-code"
+
+
+def test_subagent_spawn_emits_agent_spawned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a SECOND session_id appears under the same transcript, that's
+    a Task-spawned sub-agent. We must emit agent.spawned and tag every
+    subsequent event with parent_session_id."""
+    monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    log = tmp_path / "audit.jsonl"
+    transcript = str(tmp_path / "t.jsonl")
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        # root agent runs ls
+        run_hook(
+            _payload(
+                tool_name="Bash", session_id="ses-root",
+                transcript=transcript, cwd="/x",
+                command="ls",
+            ),
+            audit=audit,
+        )
+        # sub-agent appears with a different session_id under the same transcript
+        run_hook(
+            _payload(
+                tool_name="Bash", session_id="ses-sub",
+                transcript=transcript, cwd="/x",
+                command="git status",
+            ),
+            audit=audit,
+        )
+
+    lines = [json.loads(l) for l in log.read_text().splitlines()]
+    types = [e["type"] for e in lines]
+    assert "agent.spawned" in types
+
+    spawned = next(e for e in lines if e["type"] == "agent.spawned")
+    assert spawned["payload"]["parent_session_id"] == "ses-root"
+    assert spawned["session_id"] == "ses-sub"
+
+    # the sub-agent's tool.attempted carries parent_session_id
+    sub_attempts = [
+        e for e in lines
+        if e["type"] == "tool.attempted" and e["session_id"] == "ses-sub"
+    ]
+    assert sub_attempts
+    assert sub_attempts[0]["payload"]["parent_session_id"] == "ses-root"
+    assert sub_attempts[0]["agent_id"] == "claude-code-sub"
+
+
+def test_subagent_spawn_only_fires_once_per_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multiple calls from the same sub-agent should NOT emit repeated
+    agent.spawned events. Spawn fires once per session_id."""
+    monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    log = tmp_path / "audit.jsonl"
+    transcript = str(tmp_path / "t.jsonl")
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        run_hook(
+            _payload(tool_name="Bash", session_id="ses-root",
+                     transcript=transcript, cwd="/x", command="ls"),
+            audit=audit,
+        )
+        for _ in range(3):
+            run_hook(
+                _payload(tool_name="Bash", session_id="ses-sub",
+                         transcript=transcript, cwd="/x", command="ls"),
+                audit=audit,
+            )
+    lines = [json.loads(l) for l in log.read_text().splitlines()]
+    spawned = [e for e in lines if e["type"] == "agent.spawned"]
+    assert len(spawned) == 1
+
+
+def test_per_project_log_routing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If <cwd>/.quill/ exists, the hook routes the log there instead of
+    the global ~/.quill/audit.log.jsonl."""
+    from quill.adapters.claude_code import _resolve_project_paths
+
+    project = tmp_path / "my-saas"
+    (project / ".quill").mkdir(parents=True)
+    monkeypatch.delenv("QUILL_LOG", raising=False)
+
+    log_path, cfg = _resolve_project_paths(str(project))
+    assert log_path == project / ".quill" / "audit.log.jsonl"
+
+    # without per-project dir, falls back
+    no_project = tmp_path / "plain"
+    no_project.mkdir()
+    log_path2, _ = _resolve_project_paths(str(no_project))
+    assert log_path2 != project / ".quill" / "audit.log.jsonl"
+
+
+def test_per_project_config_optional(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from quill.adapters.claude_code import _resolve_project_paths
+
+    project = tmp_path / "my-saas"
+    (project / ".quill").mkdir(parents=True)
+    monkeypatch.delenv("QUILL_LOG", raising=False)
+
+    # no config file = no per-project config
+    _, cfg = _resolve_project_paths(str(project))
+    assert cfg is None
+
+    # config file present = path returned
+    cfg_path = project / ".quill" / "config.toml"
+    cfg_path.write_text('[session]\nintent = "test"\n')
+    _, cfg2 = _resolve_project_paths(str(project))
+    assert cfg2 == cfg_path
+
+
+def test_quill_log_env_overrides_per_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from quill.adapters.claude_code import _resolve_project_paths
+
+    project = tmp_path / "x"
+    (project / ".quill").mkdir(parents=True)
+    override = tmp_path / "override.jsonl"
+    monkeypatch.setenv("QUILL_LOG", str(override))
+
+    log_path, _ = _resolve_project_paths(str(project))
+    assert log_path == override
