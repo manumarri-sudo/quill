@@ -1,0 +1,1564 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>quill — the pause button between AI agents and the things you can't undo</title>
+<meta name="description" content="An MCP proxy that gates risky AI-agent tool calls. rm -rf, git push --force, DROP TABLE — all paused with a paste-able safer alternative. Every decision signed into a tamper-evident audit log.">
+<meta property="og:title" content="quill · stop your AI agent before it does the thing you can't undo">
+<meta property="og:description" content="An MCP proxy that gates risky AI-agent tool calls. Open source · MIT · sub-2ms gate latency.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%231e3a5f'/%3E%3Ctext x='50%25' y='62%25' text-anchor='middle' fill='%23faf8f3' font-family='Georgia,serif' font-style='italic' font-weight='600' font-size='22'%3Eq%3C/text%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,ital,wght@8..60,0,300..900;8..60,1,300..900&family=Inter:wght@300..700&family=JetBrains+Mono:wght@300..700&display=swap" rel="stylesheet">
+
+<style>
+/* ================================================================
+   QUILL · landing
+   editorial-technical aesthetic. type-led. asymmetric.
+   ================================================================ */
+
+:root {
+  /* tokens */
+  --bg:        #faf8f3;
+  --paper:     #f5efe1;
+  --rule:      #e8e0cd;
+  --rule-soft: #efe8d6;
+
+  --ink:       #1e3a5f;          /* deep navy — primary */
+  --ink-2:     #5a6878;           /* mid blue-gray — secondary */
+  --ink-3:     #9aa3b2;           /* faint */
+  --ink-4:     #c2c8d2;           /* very faint */
+
+  --code-bg:   #14253a;            /* darker navy than ink */
+  --code-bg-2: #1e3a5f;
+  --code-fg:   #f5efe1;
+  --code-dim:  #8a9bb0;
+
+  --allow:     #5a7a52;            /* muted moss */
+  --ask:       #b8843c;            /* warm amber */
+  --block:     #c1442f;            /* warm coral red */
+  --scope:     #7a4a7a;            /* muted plum */
+
+  --serif:     "Source Serif 4", Georgia, "Times New Roman", serif;
+  --sans:      "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --mono:      "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --max-content: 1240px;
+  --gutter: clamp(20px, 4vw, 64px);
+
+  --t-fast: 180ms cubic-bezier(.2,.7,.2,1);
+  --t-slow: 600ms cubic-bezier(.2,.7,.2,1);
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  font-feature-settings: "kern", "liga", "onum";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--ink); color: var(--bg); }
+
+/* ---------- editorial primitives ---------- */
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  font-weight: 500;
+  font-feature-settings: "tnum";
+}
+
+.smallcaps {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.06em;
+}
+
+.serif-display {
+  font-family: var(--serif);
+  font-optical-sizing: auto;
+  font-variation-settings: "opsz" 60;
+  letter-spacing: -0.025em;
+  line-height: 1.02;
+  font-weight: 400;
+}
+
+.serif-text {
+  font-family: var(--serif);
+  font-optical-sizing: auto;
+  font-variation-settings: "opsz" 14;
+  font-weight: 400;
+}
+
+.mono { font-family: var(--mono); font-feature-settings: "tnum", "liga"; }
+.italic { font-style: italic; }
+.dim { color: var(--ink-2); }
+.fainter { color: var(--ink-3); }
+
+.rule {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 0;
+}
+
+.section-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  font-weight: 500;
+  color: var(--ink-2);
+  font-feature-settings: "tnum";
+}
+
+.shell {
+  max-width: var(--max-content);
+  margin: 0 auto;
+  padding-left: var(--gutter);
+  padding-right: var(--gutter);
+}
+
+a {
+  color: var(--ink);
+  text-decoration: none;
+  position: relative;
+}
+a.underline-grow {
+  display: inline-block;
+}
+a.underline-grow::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  width: 100%;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(.4);
+  transform-origin: left;
+  transition: transform var(--t-fast);
+}
+a.underline-grow:hover::after { transform: scaleX(1); }
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  color: inherit;
+}
+
+/* ---------- top bar ---------- */
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.topbar .left { display: flex; gap: 28px; align-items: baseline; }
+.topbar .brand {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.topbar .meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  font-feature-settings: "tnum";
+}
+.topbar nav {
+  display: flex;
+  gap: 28px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+}
+
+/* ---------- hero ---------- */
+
+.hero {
+  padding: clamp(60px, 11vw, 140px) 0 clamp(80px, 12vw, 160px);
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: clamp(32px, 5vw, 72px);
+  position: relative;
+}
+.hero::before {
+  /* small printer's mark in the gutter, pure decoration */
+  content: "01";
+  position: absolute;
+  top: 8px;
+  right: var(--gutter);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--ink-3);
+}
+
+.hero .text { padding-top: 8px; }
+.hero .eyebrow { margin-bottom: 28px; display: block; }
+
+.hero h1 {
+  font-family: var(--serif);
+  font-optical-sizing: auto;
+  font-variation-settings: "opsz" 60;
+  font-weight: 400;
+  font-size: clamp(40px, 7.4vw, 96px);
+  line-height: 1.0;
+  letter-spacing: -0.028em;
+  margin: 0 0 32px;
+  color: var(--ink);
+  hanging-punctuation: first last;
+  /* hung quotes / ligatures */
+  font-feature-settings: "kern", "liga", "dlig";
+  max-width: 16ch;
+}
+.hero h1 em {
+  font-style: italic;
+  color: var(--ink);
+}
+.hero h1 .clipped {
+  position: relative;
+  white-space: nowrap;
+}
+.hero h1 .clipped::after {
+  /* a thin coral underline on "can't undo" — the only chromatic accent in the hero */
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  bottom: 0.05em;
+  height: 0.18em;
+  background: var(--block);
+  opacity: .14;
+  z-index: -1;
+}
+
+.hero .subhead {
+  font-family: var(--serif);
+  font-variation-settings: "opsz" 18;
+  font-size: clamp(17px, 1.4vw, 21px);
+  line-height: 1.55;
+  color: var(--ink-2);
+  max-width: 56ch;
+  margin: 0 0 44px;
+}
+.hero .subhead code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  color: var(--ink);
+  background: rgba(30, 58, 95, 0.06);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-style: normal;
+}
+
+.install {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  display: flex;
+  align-items: stretch;
+  border-radius: 4px;
+  font-family: var(--mono);
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 rgba(20, 37, 58, 0.04),
+    0 6px 22px -10px rgba(20, 37, 58, 0.32);
+  transition: box-shadow var(--t-fast), transform var(--t-fast);
+}
+.install:hover {
+  box-shadow:
+    0 1px 0 rgba(20, 37, 58, 0.04),
+    0 14px 32px -12px rgba(20, 37, 58, 0.42);
+  transform: translateY(-1px);
+}
+.install .prompt {
+  display: flex;
+  align-items: center;
+  padding: 18px 4px 18px 22px;
+  color: var(--code-dim);
+  user-select: none;
+  font-size: 14px;
+}
+.install .cmd {
+  flex: 1;
+  padding: 18px 16px 18px 6px;
+  font-size: clamp(14px, 1.2vw, 16px);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.install .cmd .pipe { color: var(--code-dim); }
+.install .copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 22px;
+  border-left: 1px solid rgba(245, 239, 225, 0.08);
+  color: var(--code-dim);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 500;
+  transition: color var(--t-fast), background var(--t-fast);
+  font-feature-settings: "tnum";
+  cursor: pointer;
+}
+.install .copy:hover { color: var(--code-fg); background: rgba(245, 239, 225, 0.05); }
+.install .copy.copied { color: #c8d6a8; }
+.install .copy svg { width: 13px; height: 13px; opacity: .7; }
+.install.large .prompt { padding: 26px 4px 26px 28px; font-size: 16px; }
+.install.large .cmd { padding: 26px 16px 26px 8px; font-size: 18px; }
+.install.large .copy { padding: 0 28px; font-size: 12px; }
+
+.install-meta {
+  margin-top: 18px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-feature-settings: "tnum";
+}
+.install-meta .dot {
+  display: inline-block;
+  width: 3px; height: 3px;
+  background: var(--ink-3);
+  border-radius: 50%;
+  vertical-align: middle;
+  margin: 0 4px;
+}
+
+/* ---------- live audit feed ---------- */
+
+.feed {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 18px 22px 22px;
+  margin-top: 28px;
+  /* asymmetric — let it breathe outside the column */
+  align-self: start;
+  box-shadow:
+    0 1px 0 rgba(20, 37, 58, 0.02),
+    0 24px 48px -32px rgba(20, 37, 58, 0.18);
+}
+.feed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--rule);
+}
+.feed-head .label {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.feed-head .live {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.feed-head .live::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--allow);
+  box-shadow: 0 0 0 0 rgba(90, 122, 82, 0.45);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(90, 122, 82, 0.45); }
+  50%      { box-shadow: 0 0 0 5px rgba(90, 122, 82, 0); }
+}
+
+.feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 380px;
+}
+.feed-row {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  opacity: 0;
+  transform: translateY(-6px);
+  animation: row-in 480ms cubic-bezier(.2,.8,.2,1) forwards;
+  font-feature-settings: "tnum", "liga";
+}
+.feed-row.fading {
+  animation: row-out 600ms cubic-bezier(.4,0,.6,1) forwards;
+}
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes row-out {
+  from { opacity: 1; }
+  to   { opacity: 0.18; }
+}
+.feed-row .meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+}
+.feed-row .ts { color: var(--ink-3); font-size: 11.5px; }
+.feed-row .glyph {
+  display: inline-block;
+  width: 9px; text-align: center;
+  font-weight: 600;
+}
+.feed-row .verdict {
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+.feed-row .risk {
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.feed-row .body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.feed-row .cmd {
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.feed-row .reason {
+  font-family: var(--serif);
+  font-style: italic;
+  font-variation-settings: "opsz" 12;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.feed-row[data-verdict="block"] .glyph,
+.feed-row[data-verdict="block"] .verdict { color: var(--block); }
+.feed-row[data-verdict="allow"] .glyph,
+.feed-row[data-verdict="allow"] .verdict { color: var(--allow); }
+.feed-row[data-verdict="ask"] .glyph,
+.feed-row[data-verdict="ask"] .verdict { color: var(--ask); }
+.feed-row[data-verdict="scope"] .glyph,
+.feed-row[data-verdict="scope"] .verdict { color: var(--scope); }
+
+.feed-foot {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--rule);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ---------- numbered section ---------- */
+
+section { padding: clamp(56px, 8vw, 110px) 0; border-top: 1px solid var(--rule); }
+section.no-rule { border-top: none; }
+
+.section-head {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(32px, 5vw, 72px);
+  margin-bottom: clamp(32px, 5vw, 56px);
+  align-items: baseline;
+}
+.section-head h2 {
+  font-family: var(--serif);
+  font-variation-settings: "opsz" 32;
+  font-size: clamp(28px, 3.6vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.018em;
+  font-weight: 400;
+  margin: 0;
+  color: var(--ink);
+  max-width: 22ch;
+}
+.section-head .lead {
+  font-family: var(--serif);
+  font-variation-settings: "opsz" 18;
+  font-size: clamp(15px, 1.2vw, 18px);
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 54ch;
+}
+
+/* three layers */
+
+.layers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(24px, 3vw, 56px);
+  margin-top: 16px;
+}
+.layer {
+  border-top: 1px solid var(--ink);
+  padding-top: 24px;
+  position: relative;
+}
+.layer .num {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  color: var(--ink-3);
+  margin-bottom: 14px;
+}
+.layer h3 {
+  font-family: var(--serif);
+  font-variation-settings: "opsz" 22;
+  font-size: clamp(20px, 1.7vw, 26px);
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  line-height: 1.18;
+  margin: 0 0 14px;
+}
+.layer h3 .verb { font-style: italic; color: var(--ink-2); font-weight: 400; }
+.layer p {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  max-width: 36ch;
+}
+.layer p code {
+  font-family: var(--mono);
+  font-size: 12.8px;
+  background: rgba(30, 58, 95, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--ink);
+}
+
+/* what it catches — index/table */
+
+.catches {
+  border-top: 1px solid var(--ink);
+}
+.catch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) auto minmax(0, 7fr);
+  gap: clamp(20px, 2.5vw, 40px);
+  align-items: baseline;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink);
+  font-feature-settings: "tnum", "liga";
+}
+.catch-row .arrow {
+  color: var(--block);
+  font-family: var(--serif);
+  font-style: italic;
+  opacity: .8;
+  font-size: 18px;
+  font-feature-settings: "liga";
+}
+.catch-row .what { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.catch-row .what .cmd { color: var(--ink); }
+.catch-row .fix { color: var(--ink-2); }
+.catch-row .fix code {
+  font-family: var(--mono);
+  color: var(--ink);
+  background: rgba(30, 58, 95, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12.8px;
+}
+.catch-row:hover { background: var(--rule-soft); }
+.catch-row:hover .arrow { opacity: 1; }
+
+/* WHY — anchor story */
+
+.why {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: start;
+}
+.why .pull {
+  font-family: var(--serif);
+  font-variation-settings: "opsz" 28;
+  font-style: italic;
+  font-size: clamp(20px, 2vw, 27px);
+  line-height: 1.32;
+  letter-spacing: -0.012em;
+  color: var(--ink);
+  margin: 0;
+  border-left: 2px solid var(--block);
+  padding-left: 22px;
+  max-width: 26ch;
+}
+.why p {
+  font-family: var(--serif);
+  font-variation-settings: "opsz" 18;
+  font-size: clamp(15px, 1.2vw, 18px);
+  line-height: 1.62;
+  color: var(--ink);
+  max-width: 56ch;
+  margin: 0 0 16px;
+}
+.why .cite {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+/* HOW diagram */
+
+.how {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(32px, 5vw, 72px);
+}
+.diagram {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: clamp(24px, 3vw, 38px);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.85;
+  color: var(--ink-2);
+  white-space: pre;
+  overflow-x: auto;
+  letter-spacing: -0.005em;
+}
+.diagram .hi { color: var(--ink); font-weight: 500; }
+.diagram .arrow { color: var(--block); }
+.diagram .branch { color: var(--ink-3); }
+
+.how-bullets {
+  list-style: none;
+  margin: 24px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+.how-bullets li {
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  padding-left: 22px;
+  position: relative;
+  max-width: 50ch;
+}
+.how-bullets li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.7em;
+  width: 12px;
+  height: 1px;
+  background: var(--ink);
+}
+
+/* OUTPUT — terminal facsimile */
+
+.output {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 rgba(20, 37, 58, 0.04),
+    0 24px 48px -28px rgba(20, 37, 58, 0.32);
+}
+.output-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 22px;
+  border-bottom: 1px solid rgba(245, 239, 225, 0.07);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--code-dim);
+}
+.output-bar .dots {
+  display: inline-flex;
+  gap: 6px;
+}
+.output-bar .dots span {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: rgba(245, 239, 225, 0.13);
+}
+.output-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-feature-settings: "tnum", "liga";
+}
+.output-table th, .output-table td {
+  text-align: left;
+  padding: 10px 14px;
+  white-space: nowrap;
+}
+.output-table th {
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--code-dim);
+  font-weight: 500;
+  border-bottom: 1px solid rgba(245, 239, 225, 0.06);
+}
+.output-table td.t-time { color: var(--code-dim); }
+.output-table td.t-tool { color: var(--code-fg); }
+.output-table td.t-cmd  { color: rgba(245, 239, 225, 0.8); }
+.output-table td.t-why  { color: rgba(245, 239, 225, 0.55); font-style: italic; }
+.output-table tr td.t-verdict { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+.output-table tr td.t-risk    { font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--code-dim); }
+.output-table tr[data-v="block"] td.t-verdict { color: #ed8a78; }
+.output-table tr[data-v="allow"] td.t-verdict { color: #a3c896; }
+.output-table tr[data-v="ask"]   td.t-verdict { color: #e0b572; }
+.output-table tr[data-v="block"] td.t-why { color: #ed8a78; opacity: .85; }
+.output-foot {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 22px;
+  border-top: 1px solid rgba(245, 239, 225, 0.07);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--code-dim);
+}
+
+/* PRIVACY */
+
+.privacy {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: clamp(32px, 5vw, 72px);
+}
+.privacy p {
+  font-family: var(--serif);
+  font-variation-settings: "opsz" 18;
+  font-size: clamp(15px, 1.2vw, 18px);
+  line-height: 1.62;
+  color: var(--ink);
+  max-width: 56ch;
+  margin: 0 0 18px;
+}
+.privacy ul {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+.privacy li {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  padding-left: 22px;
+  position: relative;
+  font-feature-settings: "tnum";
+}
+.privacy li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.65em;
+  width: 12px; height: 1px;
+  background: var(--ink);
+}
+
+/* SECOND install */
+
+.second-install {
+  padding: clamp(56px, 8vw, 100px) 0;
+  border-top: 1px solid var(--rule);
+  text-align: left;
+}
+.second-install .ask {
+  font-family: var(--serif);
+  font-variation-settings: "opsz" 36;
+  font-size: clamp(28px, 3.6vw, 44px);
+  line-height: 1.1;
+  letter-spacing: -0.018em;
+  font-weight: 400;
+  margin: 0 0 28px;
+  max-width: 22ch;
+  color: var(--ink);
+}
+.second-install .ask em { font-style: italic; color: var(--ink-2); }
+
+/* footer */
+
+footer {
+  border-top: 1px solid var(--ink);
+  padding: 56px 0 36px;
+}
+.foot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 32px;
+  margin-bottom: 64px;
+}
+.foot-col h4 {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  margin: 0 0 16px;
+}
+.foot-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.foot-col a {
+  font-size: 14px;
+  color: var(--ink);
+}
+.foot-col p {
+  font-family: var(--serif);
+  font-variation-settings: "opsz" 18;
+  font-style: italic;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 32ch;
+}
+.foot-tagline {
+  font-family: var(--serif);
+  font-variation-settings: "opsz" 32;
+  font-style: italic;
+  font-size: clamp(20px, 2.4vw, 30px);
+  line-height: 1.2;
+  color: var(--ink);
+  letter-spacing: -0.012em;
+  max-width: 18ch;
+  border-top: 1px solid var(--rule);
+  padding-top: 32px;
+  margin: 0 0 4px;
+}
+.foot-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 36px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+/* ---------- scroll-reveal ---------- */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity var(--t-slow), transform var(--t-slow);
+}
+.reveal.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 980px) {
+  .hero {
+    grid-template-columns: 1fr;
+    gap: 48px;
+    padding-top: 60px;
+  }
+  .hero::before { display: none; }
+  .feed { margin-top: 0; }
+  .section-head, .why, .how, .privacy {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .layers {
+    grid-template-columns: 1fr;
+    gap: 36px;
+  }
+  .catch-row {
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+  }
+  .catch-row .fix { grid-column: 1 / -1; padding-left: 18px; border-left: 1px solid var(--rule); }
+  .catch-row .arrow { grid-column: 2; }
+  .foot-grid { grid-template-columns: repeat(2, 1fr); gap: 32px; }
+  .install .copy span { display: none; }
+}
+
+@media (max-width: 560px) {
+  .topbar nav { display: none; }
+  .hero h1 { font-size: 44px; }
+  .install { flex-wrap: wrap; }
+  .install .cmd { font-size: 13px; }
+  .output-table th:nth-child(3),
+  .output-table td:nth-child(3),
+  .output-table th:nth-child(6),
+  .output-table td:nth-child(6) { display: none; }
+}
+
+/* ---------- reduced motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .feed-head .live::before { animation: none; }
+}
+
+/* ---------- print marks (decorative) ---------- */
+
+.crop {
+  position: absolute;
+  width: 14px; height: 14px;
+  border-color: var(--ink-3);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--t-slow);
+}
+.reveal.in ~ .crop, .crop.in { opacity: 1; }
+</style>
+</head>
+
+<body>
+
+<!-- ========================================================
+     TOP BAR
+     ======================================================== -->
+<div class="shell">
+  <div class="topbar">
+    <div class="left">
+      <span class="brand">quill</span>
+      <span class="meta">v0.1.0&nbsp;&nbsp;·&nbsp;&nbsp;mit&nbsp;&nbsp;·&nbsp;&nbsp;sub-2&thinsp;ms gate</span>
+    </div>
+    <nav>
+      <a class="underline-grow" href="#gate">the&nbsp;gate</a>
+      <a class="underline-grow" href="#catches">what it catches</a>
+      <a class="underline-grow" href="#how">how</a>
+      <a class="underline-grow" href="https://github.com/manumarri-sudo/quill" target="_blank" rel="noopener">github&nbsp;→</a>
+    </nav>
+  </div>
+</div>
+
+<!-- ========================================================
+     HERO
+     ======================================================== -->
+<header class="shell hero">
+  <div class="text">
+    <span class="eyebrow reveal">for anyone who's stopped sleeping while their agent codes</span>
+    <h1 class="reveal" style="transition-delay: 60ms">
+      Stop babysitting your <span class="clipped">AI&nbsp;agent.</span>
+    </h1>
+    <p class="subhead reveal" style="transition-delay: 140ms">
+      Last summer <a class="underline-grow" href="https://www.tomshardware.com/tech-industry/artificial-intelligence/ai-coding-platform-goes-rogue-during-code-freeze-and-deletes-entire-company-database-replit-ceo-apologizes-after-ai-engine-says-it-made-a-catastrophic-error-in-judgment-and-destroyed-all-production-data" target="_blank" rel="noopener">Replit's agent deleted Jason Lemkin's production database</a> mid&#8209;vibe&#8209;code. In April, a Cursor agent <a class="underline-grow" href="https://www.theregister.com/2026/04/27/cursoropus_agent_snuffs_out_pocketos/" target="_blank" rel="noopener">wiped PocketOS — including all backups — in nine seconds</a>. A Claude Code session <a class="underline-grow" href="https://github.com/anthropics/claude-code/issues/10077" target="_blank" rel="noopener">ran <code>rm&nbsp;-rf&nbsp;~/</code> on someone's Mac</a>. Quill is the pause button before the next one is yours.
+    </p>
+
+    <div class="install reveal" id="install-1" style="transition-delay: 220ms" data-cmd="pip install quill && quill start">
+      <span class="prompt">$</span>
+      <span class="cmd">pip install quill <span class="pipe">&amp;&amp;</span> quill start</span>
+      <button class="copy" type="button" aria-label="copy install command">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="4" y="4" width="9" height="9" rx="1.2"/>
+          <path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11" stroke-linecap="round"/>
+        </svg>
+        <span>copy</span>
+      </button>
+    </div>
+
+    <div class="install-meta reveal" style="transition-delay: 300ms">
+      <span>60-second install</span><span class="dot"></span>
+      <span>free &amp; open source</span><span class="dot"></span>
+      <span>stays on your machine</span><span class="dot"></span>
+      <span>nothing to configure</span>
+    </div>
+  </div>
+
+  <aside class="feed reveal" style="transition-delay: 380ms" aria-label="live audit feed">
+    <div class="feed-head">
+      <span class="label">audit log&nbsp;·&nbsp;~/.quill/audit.log.jsonl</span>
+      <span class="live">live</span>
+    </div>
+    <ul class="feed-list" id="feed-list" aria-live="polite"></ul>
+    <div class="feed-foot">
+      <span><span id="feed-count">0</span>&nbsp;events</span>
+      <span>HMAC-chained · verified intact</span>
+    </div>
+  </aside>
+</header>
+
+<!-- ========================================================
+     01 / THE GATE
+     ======================================================== -->
+<section id="gate">
+  <div class="shell">
+    <div class="section-head">
+      <div>
+        <div class="section-num reveal">01 / The Gate</div>
+        <h2 class="reveal" style="transition-delay: 60ms">Three checks. Zero LLM in the gate.</h2>
+      </div>
+      <p class="lead reveal" style="transition-delay: 120ms">
+        The gate is deterministic on purpose. No model decides whether your prod gets deleted; a regex does. Models can be jailbroken, regexes get reviewed.
+      </p>
+    </div>
+
+    <div class="layers">
+      <article class="layer reveal">
+        <div class="num">i / camera</div>
+        <h3>Every call <span class="verb">signed.</span></h3>
+        <p>Append-only JSONL with <code>HMAC-SHA256</code> chaining. Verify any time with <code>quill audit verify</code>; tampering breaks the chain at the next entry.</p>
+      </article>
+      <article class="layer reveal" style="transition-delay: 100ms">
+        <div class="num">ii / badge</div>
+        <h3>Out of scope, <span class="verb">refused.</span></h3>
+        <p>Deterministic regex + namespace check. No model in the path. Nothing the agent can argue with, no jailbreak surface.</p>
+      </article>
+      <article class="layer reveal" style="transition-delay: 200ms">
+        <div class="num">iii / bank manager</div>
+        <h3>Dangerous calls <span class="verb">paused.</span></h3>
+        <p>The set of moves you regret: rm -rf, force-push, drop table, prod deploy, npm publish. Each block carries a paste-able safer alternative.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================
+     02 / WHAT IT CATCHES
+     ======================================================== -->
+<section id="catches">
+  <div class="shell">
+    <div class="section-head">
+      <div>
+        <div class="section-num reveal">02 / What It Catches</div>
+        <h2 class="reveal" style="transition-delay: 60ms">The moves you regret. The fixes you'd&nbsp;reach&nbsp;for.</h2>
+      </div>
+      <p class="lead reveal" style="transition-delay: 120ms">
+        These are the literal patterns and suggestions shipping in
+        <code style="font-family: var(--mono); font-size: 0.92em; background: rgba(30,58,95,.06); padding: 1px 5px; border-radius: 3px;">src/quill/policy.py</code>.
+        Open the file. Add yours. Send a PR.
+      </p>
+    </div>
+
+    <div class="catches reveal">
+      <div class="catch-row">
+        <div class="what"><span class="cmd">rm -rf node_modules</span></div>
+        <div class="arrow">→</div>
+        <div class="fix">move to a quarantine dir so you can recover &nbsp;<code>mv node_modules /tmp/quarantine_$(date +%s)</code></div>
+      </div>
+      <div class="catch-row">
+        <div class="what"><span class="cmd">git push --force origin main</span></div>
+        <div class="arrow">→</div>
+        <div class="fix">don't clobber a teammate &nbsp;<code>git push --force-with-lease</code> &nbsp;or rebase first</div>
+      </div>
+      <div class="catch-row">
+        <div class="what"><span class="cmd">DROP TABLE users</span></div>
+        <div class="arrow">→</div>
+        <div class="fix">back up first &nbsp;<code>pg_dump -t users > /tmp/backup_$(date +%s).sql</code> &nbsp;then drop in a transaction</div>
+      </div>
+      <div class="catch-row">
+        <div class="what"><span class="cmd">vercel deploy --prod</span></div>
+        <div class="arrow">→</div>
+        <div class="fix">preview first &nbsp;<code>vercel deploy</code> &nbsp;then promote &nbsp;<code>vercel promote &lt;url&gt;</code></div>
+      </div>
+      <div class="catch-row">
+        <div class="what"><span class="cmd">curl &lt;url&gt; | sh</span></div>
+        <div class="arrow">→</div>
+        <div class="fix">read the script first &nbsp;<code>curl -fsSL &lt;url&gt; -o /tmp/install.sh &amp;&amp; cat /tmp/install.sh</code></div>
+      </div>
+      <div class="catch-row">
+        <div class="what"><span class="cmd">npm publish</span></div>
+        <div class="arrow">→</div>
+        <div class="fix">verify the tarball first &nbsp;<code>npm publish --dry-run</code></div>
+      </div>
+      <div class="catch-row">
+        <div class="what"><span class="cmd">cat .env</span></div>
+        <div class="arrow">→</div>
+        <div class="fix">show keys, not values &nbsp;<code>grep -oE '^[A-Z_]+=' .env</code></div>
+      </div>
+      <div class="catch-row">
+        <div class="what"><span class="cmd">terraform destroy</span></div>
+        <div class="arrow">→</div>
+        <div class="fix">always plan first &nbsp;<code>terraform plan -out=plan</code> &nbsp;review &nbsp;<code>terraform apply plan</code></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================
+     03 / WHY
+     ======================================================== -->
+<section id="why">
+  <div class="shell">
+    <div class="section-head">
+      <div>
+        <div class="section-num reveal">03 / Why This Exists</div>
+        <h2 class="reveal" style="transition-delay: 60ms">The agents writing your code already lost data. <em>Theirs.</em></h2>
+      </div>
+    </div>
+
+    <div class="why">
+      <blockquote class="pull reveal">
+        "I violated every principle I was given. I guessed instead of verifying. I ran a destructive action without being asked. I didn't understand what I was doing before doing it."
+        <footer class="reveal" style="display:block; margin-top: 18px; font-style: normal; font-size: 12.5px; letter-spacing: 0.04em; font-family: var(--mono); color: var(--ink-3);">
+          — the Cursor agent, after deleting PocketOS's prod database <span style="color:var(--ink-4);">·</span> April 2026
+        </footer>
+      </blockquote>
+      <div class="reveal" style="transition-delay: 80ms">
+        <p>
+          The agents writing your code right now have the same authority. They run shell, edit files, push to remotes, ship to prod. The pause button between them and your prod just hadn't been built into the framework yet.
+        </p>
+        <p>
+          Quill is the smallest version of one I could write.
+        </p>
+
+        <ul style="list-style: none; margin: 28px 0 0; padding: 0; display: grid; gap: 14px;">
+          <li style="font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--ink-2);">
+            <span style="color: var(--block); font-weight: 500;">Jul&#8201;2025&nbsp;·</span>
+            <a class="underline-grow" href="https://x.com/jasonlk/status/1946069562723897802" target="_blank" rel="noopener">Replit's agent deletes Jason Lemkin's production database</a>
+            during a code freeze, then fabricates data to cover the deletion.
+          </li>
+          <li style="font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--ink-2);">
+            <span style="color: var(--block); font-weight: 500;">Apr&#8201;2026&nbsp;·</span>
+            <a class="underline-grow" href="https://www.theregister.com/2026/04/27/cursoropus_agent_snuffs_out_pocketos/" target="_blank" rel="noopener">A Cursor agent wipes PocketOS — including all volume backups — in 9 seconds</a>.
+          </li>
+          <li style="font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--ink-2);">
+            <span style="color: var(--block); font-weight: 500;">Late&#8201;2025&nbsp;·</span>
+            <a class="underline-grow" href="https://github.com/anthropics/claude-code/issues/10077" target="_blank" rel="noopener">Claude Code runs <code style="font-family:inherit;background:rgba(193,68,47,.1);padding:1px 4px;border-radius:2px;color:var(--block);">rm&nbsp;-rf&nbsp;~/</code> on a developer's Mac</a>;
+            home directory + keychain gone.
+          </li>
+          <li style="font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--ink-2);">
+            <span style="color: var(--block); font-weight: 500;">2025&nbsp;&nbsp;·</span>
+            <a class="underline-grow" href="https://snyk.io/articles/state-of-secrets/" target="_blank" rel="noopener">29M secrets leaked on GitHub</a> — AI-assisted commits leak at 2× the human rate.
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================
+     04 / HOW
+     ======================================================== -->
+<section id="how">
+  <div class="shell">
+    <div class="section-head">
+      <div>
+        <div class="section-num reveal">04 / How It Works</div>
+        <h2 class="reveal" style="transition-delay: 60ms">One hook. Every tool call. On your disk.</h2>
+      </div>
+      <p class="lead reveal" style="transition-delay: 120ms">
+        Quill installs itself as Claude Code's <code style="font-family:var(--mono);font-size:.92em;">PreToolUse</code> hook. Every <code style="font-family:var(--mono);font-size:.92em;">Bash</code>, <code style="font-family:var(--mono);font-size:.92em;">Edit</code>, <code style="font-family:var(--mono);font-size:.92em;">Write</code> goes through the gate before it touches your machine.
+      </p>
+    </div>
+
+    <div class="how">
+      <pre class="diagram reveal"><span class="hi">Claude Code</span> <span class="arrow">──►</span> <span class="hi">quill claude-hook</span> <span class="arrow">──►</span> gate <span class="arrow">──►</span> sign <span class="arrow">──►</span> <span class="hi">allow / ask / deny</span>
+                                       <span class="branch">│</span>
+                                       <span class="branch">└──►</span> <span class="hi">~/.quill/audit.log.jsonl</span>  <span class="branch">(0o600, HMAC-chained)</span></pre>
+
+      <ul class="how-bullets reveal" style="transition-delay: 120ms">
+        <li>Wires into Claude Code's PreToolUse hook with one idempotent command. Restart, you're protected.</li>
+        <li>Also proxies external MCP servers (filesystem, github, postgres, slack) when you set them in upstream config.</li>
+        <li>Every decision lands in your local audit log. Nothing leaves your machine unless you explicitly opt in.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================
+     05 / OUTPUT
+     ======================================================== -->
+<section id="output">
+  <div class="shell">
+    <div class="section-head">
+      <div>
+        <div class="section-num reveal">05 / Actual Output</div>
+        <h2 class="reveal" style="transition-delay: 60ms">What you'll see when an agent reaches&nbsp;too&nbsp;far.</h2>
+      </div>
+      <p class="lead reveal" style="transition-delay: 120ms">
+        Live, from a real Claude Code session running through Quill. <code style="font-family:var(--mono);font-size:.92em;">quill audit show --last 8</code>.
+      </p>
+    </div>
+
+    <div class="output reveal">
+      <div class="output-bar">
+        <span>quill audit show <span style="color: var(--code-fg)">·</span> last 8</span>
+        <span class="dots"><span></span><span></span><span></span></span>
+      </div>
+      <table class="output-table">
+        <thead>
+          <tr>
+            <th>time</th>
+            <th>verdict</th>
+            <th>risk</th>
+            <th>tool</th>
+            <th>what was tried</th>
+            <th>why</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr data-v="ask">
+            <td class="t-time">20:43:55</td>
+            <td class="t-verdict">? ask</td>
+            <td class="t-risk">high</td>
+            <td class="t-tool">Edit</td>
+            <td class="t-cmd">src/db.ts</td>
+            <td class="t-why">high risk — file mutation needs ack</td>
+          </tr>
+          <tr data-v="allow">
+            <td class="t-time">20:44:11</td>
+            <td class="t-verdict">✓ allow</td>
+            <td class="t-risk">low</td>
+            <td class="t-tool">Bash</td>
+            <td class="t-cmd">ls -la</td>
+            <td class="t-why">read-only command</td>
+          </tr>
+          <tr data-v="block">
+            <td class="t-time">20:40:32</td>
+            <td class="t-verdict">✗ block</td>
+            <td class="t-risk">critical</td>
+            <td class="t-tool">Bash</td>
+            <td class="t-cmd">rm -rf node_modules</td>
+            <td class="t-why">↪ try: mv to quarantine</td>
+          </tr>
+          <tr data-v="block">
+            <td class="t-time">20:40:32</td>
+            <td class="t-verdict">✗ block</td>
+            <td class="t-risk">critical</td>
+            <td class="t-tool">Bash</td>
+            <td class="t-cmd">git push --force origin</td>
+            <td class="t-why">↪ try: --force-with-lease</td>
+          </tr>
+          <tr data-v="block">
+            <td class="t-time">20:40:32</td>
+            <td class="t-verdict">✗ block</td>
+            <td class="t-risk">critical</td>
+            <td class="t-tool">Bash</td>
+            <td class="t-cmd">DROP TABLE users</td>
+            <td class="t-why">↪ try: pg_dump first</td>
+          </tr>
+          <tr data-v="block">
+            <td class="t-time">20:40:33</td>
+            <td class="t-verdict">✗ block</td>
+            <td class="t-risk">critical</td>
+            <td class="t-tool">Bash</td>
+            <td class="t-cmd">vercel --prod</td>
+            <td class="t-why">↪ try: vercel deploy then promote</td>
+          </tr>
+          <tr data-v="block">
+            <td class="t-time">20:40:33</td>
+            <td class="t-verdict">✗ block</td>
+            <td class="t-risk">critical</td>
+            <td class="t-tool">Bash</td>
+            <td class="t-cmd">npm publish</td>
+            <td class="t-why">↪ try: --dry-run first</td>
+          </tr>
+          <tr data-v="allow">
+            <td class="t-time">20:40:33</td>
+            <td class="t-verdict">✓ allow</td>
+            <td class="t-risk">low</td>
+            <td class="t-tool">Bash</td>
+            <td class="t-cmd">cat README.md</td>
+            <td class="t-why">read-only command</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="output-foot">
+        <span>8 tool calls · allow=2 · block=5 · ask=1</span>
+        <span>~/.quill/audit.log.jsonl</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================
+     06 / PRIVACY
+     ======================================================== -->
+<section id="privacy">
+  <div class="shell">
+    <div class="section-head">
+      <div>
+        <div class="section-num reveal">06 / Privacy</div>
+        <h2 class="reveal" style="transition-delay: 60ms">You own the key, the log, the verdict.</h2>
+      </div>
+    </div>
+
+    <div class="privacy">
+      <div class="reveal">
+        <p>
+          The audit log lives on your disk at <code style="font-family:var(--mono);font-size:.94em;background:rgba(30,58,95,.06);padding:1px 5px;border-radius:3px;">~/.quill/audit.log.jsonl</code>, mode <code style="font-family:var(--mono);font-size:.94em;background:rgba(30,58,95,.06);padding:1px 5px;border-radius:3px;">0o600</code>. The HMAC signing key is generated locally on first run and never leaves your machine.
+        </p>
+        <p>
+          Nothing is sent to a server unless you explicitly opt in to anonymous aggregate telemetry. Even then, only counts and namespace tops — never tool args, never paths, never your intent.
+        </p>
+      </div>
+      <ul class="reveal" style="transition-delay: 80ms">
+        <li>signing key — generated on your machine, never transmitted</li>
+        <li>audit log — append-only, mode 0o600, owner-only read</li>
+        <li>tool arguments — never logged in full, never sent</li>
+        <li>file paths and intent — never sent, even with telemetry on</li>
+        <li>opt-in — preview the exact JSON with <code style="font-family:var(--mono);font-size:.94em;background:rgba(30,58,95,.06);padding:1px 5px;border-radius:3px;">quill telemetry show</code></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================
+     07 / SECOND INSTALL — close the loop
+     ======================================================== -->
+<section class="second-install">
+  <div class="shell">
+    <h2 class="ask reveal">Sixty seconds. <em>One paste.</em><br>Stop babysitting&nbsp;the&nbsp;agent.</h2>
+    <div class="install large reveal" id="install-2" data-cmd="pip install quill && quill start" style="transition-delay: 80ms">
+      <span class="prompt">$</span>
+      <span class="cmd">pip install quill <span class="pipe">&amp;&amp;</span> quill start</span>
+      <button class="copy" type="button" aria-label="copy install command">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="4" y="4" width="9" height="9" rx="1.2"/>
+          <path d="M3 11V3.5A1.5 1.5 0 0 1 4.5 2H11" stroke-linecap="round"/>
+        </svg>
+        <span>copy</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================
+     FOOTER
+     ======================================================== -->
+<footer>
+  <div class="shell">
+    <div class="foot-grid">
+      <div class="foot-col">
+        <h4>quill</h4>
+        <p>The pause button between AI agents and the things you can't undo.</p>
+      </div>
+      <div class="foot-col">
+        <h4>docs</h4>
+        <ul>
+          <li><a class="underline-grow" href="https://github.com/manumarri-sudo/quill#readme" target="_blank" rel="noopener">readme</a></li>
+          <li><a class="underline-grow" href="https://github.com/manumarri-sudo/quill/blob/main/SECURITY.md" target="_blank" rel="noopener">security</a></li>
+          <li><a class="underline-grow" href="https://github.com/manumarri-sudo/quill/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a></li>
+          <li><a class="underline-grow" href="https://github.com/manumarri-sudo/quill/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">contributing</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>repo</h4>
+        <ul>
+          <li><a class="underline-grow" href="https://github.com/manumarri-sudo/quill" target="_blank" rel="noopener">github</a></li>
+          <li><a class="underline-grow" href="https://github.com/manumarri-sudo/quill/issues" target="_blank" rel="noopener">issues</a></li>
+          <li><a class="underline-grow" href="https://github.com/manumarri-sudo/quill/discussions" target="_blank" rel="noopener">discussions</a></li>
+          <li><a class="underline-grow" href="https://pypi.org/project/quill/" target="_blank" rel="noopener">pypi</a></li>
+        </ul>
+      </div>
+      <div class="foot-col">
+        <h4>license</h4>
+        <ul>
+          <li><a class="underline-grow" href="https://github.com/manumarri-sudo/quill/blob/main/LICENSE" target="_blank" rel="noopener">mit</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="foot-tagline">"the&nbsp;pause&nbsp;button between AI agents and the things you can't undo."</div>
+
+    <div class="foot-meta">
+      <span>quill v0.1.0 · 2026</span>
+      <span>open source · made by humans &amp; one cooperative agent</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ============================================================
+   1. copy-to-clipboard for the install bars
+   ============================================================ */
+document.querySelectorAll('.install').forEach(bar => {
+  const btn = bar.querySelector('.copy');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const cmd = bar.dataset.cmd || bar.querySelector('.cmd')?.innerText.trim();
+    try {
+      await navigator.clipboard.writeText(cmd);
+    } catch (e) {
+      // fallback: select+execCommand
+      const tmp = document.createElement('textarea');
+      tmp.value = cmd; document.body.appendChild(tmp); tmp.select();
+      document.execCommand('copy'); tmp.remove();
+    }
+    btn.classList.add('copied');
+    const label = btn.querySelector('span');
+    const prev = label.textContent;
+    label.textContent = 'copied';
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      label.textContent = prev;
+    }, 1400);
+  });
+});
+
+/* ============================================================
+   2. live audit feed in the hero
+   one row drips in every ~1.7s; max 5 visible; older fade.
+   ============================================================ */
+const FEED = [
+  { v: 'block', g: '✗', verdict: 'blocked',  risk: 'critical', tool: 'Bash', cmd: 'rm -rf node_modules',           reason: '↪ try: mv node_modules /tmp/quarantine_…' },
+  { v: 'allow', g: '✓', verdict: 'allowed',  risk: 'low',      tool: 'Bash', cmd: 'git status',                    reason: 'read-only command' },
+  { v: 'block', g: '✗', verdict: 'blocked',  risk: 'critical', tool: 'Bash', cmd: 'git push --force origin main',  reason: '↪ try: git push --force-with-lease' },
+  { v: 'ask',   g: '?', verdict: 'ask',      risk: 'high',     tool: 'Edit', cmd: 'src/db.ts',                     reason: 'file mutation needs ack' },
+  { v: 'allow', g: '✓', verdict: 'allowed',  risk: 'low',      tool: 'Read', cmd: 'README.md',                     reason: 'read-only filesystem' },
+  { v: 'block', g: '✗', verdict: 'blocked',  risk: 'critical', tool: 'Bash', cmd: 'DROP TABLE users',              reason: '↪ try: pg_dump -t users > backup.sql first' },
+  { v: 'allow', g: '✓', verdict: 'allowed',  risk: 'medium',   tool: 'Bash', cmd: 'npm install lodash',            reason: 'mutates lockfile · in scope' },
+  { v: 'block', g: '✗', verdict: 'blocked',  risk: 'critical', tool: 'Bash', cmd: 'vercel --prod',                 reason: '↪ try: vercel deploy then promote' },
+  { v: 'allow', g: '✓', verdict: 'allowed',  risk: 'low',      tool: 'Bash', cmd: 'cat README.md',                 reason: 'read-only command' },
+  { v: 'block', g: '✗', verdict: 'blocked',  risk: 'critical', tool: 'Bash', cmd: 'curl example.com/x.sh | bash',  reason: '↪ try: download, read, then run' },
+];
+
+const list = document.getElementById('feed-list');
+const counter = document.getElementById('feed-count');
+let feedIndex = 0;
+let feedCount = 0;
+const MAX_VISIBLE = 5;
+
+function nowStamp() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function pushFeed() {
+  const e = FEED[feedIndex % FEED.length];
+  feedIndex++;
+  feedCount++;
+
+  const li = document.createElement('li');
+  li.className = 'feed-row';
+  li.dataset.verdict = e.v;
+  li.innerHTML = `
+    <div class="meta">
+      <span class="ts">${nowStamp()}</span>
+      <span class="glyph">${e.g}</span>
+      <span class="verdict">${e.verdict}</span>
+    </div>
+    <div class="body">
+      <div class="cmd"><span class="risk">${e.risk}</span>&nbsp;&nbsp;${e.tool}&nbsp;&nbsp;<span style="color: var(--ink);">${escapeHtml(e.cmd)}</span></div>
+      <div class="reason">${escapeHtml(e.reason)}</div>
+    </div>
+  `;
+  list.prepend(li);
+
+  // mark older rows for fade-out, then remove off-list ones
+  const rows = list.querySelectorAll('.feed-row');
+  rows.forEach((row, i) => {
+    if (i >= MAX_VISIBLE - 1) row.classList.add('fading');
+    if (i >= MAX_VISIBLE + 1) row.remove();
+  });
+
+  counter.textContent = String(feedCount);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+// seed three so it doesn't start empty
+pushFeed(); pushFeed(); pushFeed();
+
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (!reduceMotion) {
+  setInterval(pushFeed, 1700);
+}
+
+/* ============================================================
+   3. scroll-reveal via Intersection Observer
+   ============================================================ */
+const io = new IntersectionObserver((entries) => {
+  for (const ent of entries) {
+    if (ent.isIntersecting) {
+      ent.target.classList.add('in');
+      io.unobserve(ent.target);
+    }
+  }
+}, { rootMargin: '0px 0px -10% 0px', threshold: 0.04 });
+
+document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+/* ============================================================
+   4. the lone keyboard shortcut: press ⌘C while focused
+      anywhere on the install bar copies it. small joy.
+   ============================================================ */
+document.querySelectorAll('.install').forEach(bar => {
+  bar.tabIndex = 0;
+  bar.addEventListener('keydown', (ev) => {
+    const meta = ev.metaKey || ev.ctrlKey;
+    if (meta && ev.key.toLowerCase() === 'c') {
+      ev.preventDefault();
+      bar.querySelector('.copy')?.click();
+    }
+    if (ev.key === 'Enter') {
+      bar.querySelector('.copy')?.click();
+    }
+  });
+});
+</script>
+</body>
+</html>
