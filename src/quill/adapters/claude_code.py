@@ -377,11 +377,11 @@ def main() -> int:
 
     Wired to `quill claude-hook` via the CLI module. Routes the audit
     log to <cwd>/.quill/audit.log.jsonl when the user has opted in to
-    per-project mode by creating that directory.
+    per-project mode. ALSO lazily ensures the watch dashboard daemon is
+    alive so users never need to re-type `quill watch` after a reboot.
     """
     stdin_text = sys.stdin.read()
     # Peek at cwd from the payload so we can route the log per-project.
-    # Done via shallow parse so the rest of the hook logic is unchanged.
     cwd_for_routing = ""
     try:
         peek = json.loads(stdin_text or "{}")
@@ -391,6 +391,14 @@ def main() -> int:
         pass
     log_path, _ = _resolve_project_paths(cwd_for_routing)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Lazily ensure the dashboard daemon is alive. Cheap (PID-file probe +
+    # localhost bind-check) when it's already running, idempotent re-spawn
+    # when it isn't. Skipped via QUILL_NO_AUTO_WATCH for power users / CI.
+    if not os.environ.get("QUILL_NO_AUTO_WATCH"):
+        with contextlib.suppress(Exception):
+            from quill import watch as _watch  # local import to avoid cycles
+            _watch.ensure_daemon(log_path, open_browser=False)
     try:
         with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:
             response = run_hook(stdin_text, audit=audit)

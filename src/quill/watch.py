@@ -4,6 +4,13 @@
 events to a single-page dashboard via Server-Sent Events. Auto-opens
 the user's default browser. Stays running until Ctrl-C.
 
+`quill watch --daemon` detaches the server from the terminal so it
+survives Ctrl-C, terminal close, and Claude Code exit. The PID is
+written to ~/.quill/watch.pid; subsequent invocations reuse the
+running daemon instead of spawning a duplicate. The hook adapter
+calls this lazily on every tool call so the dashboard self-heals
+after a laptop reboot — no user action required.
+
 No external dependencies — stdlib http.server + threading + a self-
 contained HTML page. Cross-platform.
 
@@ -15,8 +22,11 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import signal
 import socket
 import socketserver
+import subprocess
+import sys
 import threading
 import time
 import webbrowser
@@ -24,6 +34,142 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_PORT = 9099
+
+
+# ---- daemon helpers --------------------------------------------------------
+
+
+def _pid_file() -> Path:
+    return Path(
+        os.environ.get("QUILL_WATCH_PID", "~/.quill/watch.pid"),
+    ).expanduser()
+
+
+def _is_alive(pid: int) -> bool:
+    """True if a process with this PID is alive on this machine."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def daemon_status() -> tuple[int | None, int | None]:
+    """Return (pid, port) if a watcher is running, else (None, None).
+
+    The PID file's first line is the PID, the second is the bound port.
+    """
+    p = _pid_file()
+    if not p.exists():
+        return None, None
+    try:
+        lines = p.read_text().splitlines()
+        pid = int(lines[0])
+        port = int(lines[1]) if len(lines) > 1 else DEFAULT_PORT
+    except (OSError, ValueError, IndexError):
+        return None, None
+    if not _is_alive(pid):
+        # Stale PID file — clean it up
+        with _quiet_oserror():
+            p.unlink()
+        return None, None
+    # Confirm something is actually listening on the port
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.2)
+    try:
+        s.connect(("127.0.0.1", port))
+        s.close()
+        return pid, port
+    except OSError:
+        s.close()
+        return None, None
+
+
+class _quiet_oserror:
+    def __enter__(self): return self
+    def __exit__(self, *exc): return exc[0] is OSError or exc[0] is None
+
+
+def write_pid(pid: int, port: int) -> None:
+    p = _pid_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"{pid}\n{port}\n")
+    with _quiet_oserror():
+        p.chmod(0o600)
+
+
+def stop_daemon() -> tuple[bool, str]:
+    """Send SIGTERM to the running daemon. Returns (was_running, message)."""
+    pid, port = daemon_status()
+    if pid is None:
+        return False, "no daemon running"
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError as e:
+        return False, f"could not signal pid {pid}: {e}"
+    # wait briefly for it to die
+    for _ in range(20):
+        if not _is_alive(pid):
+            break
+        time.sleep(0.1)
+    with _quiet_oserror():
+        _pid_file().unlink()
+    return True, f"stopped pid {pid} (port {port})"
+
+
+def ensure_daemon(
+    log_path: Path,
+    *,
+    port: int = DEFAULT_PORT,
+    open_browser: bool = False,
+) -> tuple[int, int]:
+    """Start the watch daemon if it isn't already running.
+
+    Returns (pid, port). Idempotent — calling repeatedly is cheap if a
+    daemon is already alive (just probes the PID file + connects to the
+    port). Designed to be called from the Claude Code hook adapter so
+    the dashboard self-heals across reboots without user intervention.
+    """
+    pid, p = daemon_status()
+    if pid is not None and p is not None:
+        return pid, p
+
+    # Spawn a detached child running `quill watch --daemon-child`.
+    cmd = [
+        sys.executable, "-m", "quill", "watch",
+        "--daemon-child",
+        "--port", str(port),
+        "--log", str(log_path),
+    ]
+    if not open_browser:
+        cmd.append("--no-browser")
+    devnull = open(os.devnull, "wb")  # noqa: SIM115
+    proc = subprocess.Popen(  # noqa: S603 — controlled args
+        cmd,
+        stdin=devnull,
+        stdout=devnull,
+        stderr=devnull,
+        start_new_session=True,  # POSIX: detach from current session
+        close_fds=True,
+    )
+    # poll briefly for the port to come up
+    deadline = time.time() + 6.0
+    while time.time() < deadline:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.2)
+            s.connect(("127.0.0.1", port))
+            s.close()
+            write_pid(proc.pid, port)
+            return proc.pid, port
+        except OSError:
+            time.sleep(0.15)
+    # Could not bring up on the requested port — leave the child to its
+    # own port-finder logic; record what we know.
+    write_pid(proc.pid, port)
+    return proc.pid, port
 
 
 # A self-contained HTML page; one file, no external assets.
@@ -295,8 +441,18 @@ def _tail_events(log: Path, q: list[dict[str, Any]],
             pos = f.tell()
 
 
-def serve(log_path: Path, port: int = DEFAULT_PORT, open_browser: bool = True) -> None:
-    """Run the watch server until Ctrl-C."""
+def serve(
+    log_path: Path,
+    port: int = DEFAULT_PORT,
+    open_browser: bool = True,
+    *,
+    write_pid_file: bool = False,
+) -> None:
+    """Run the watch server until Ctrl-C.
+
+    `write_pid_file=True` records the PID + bound port at ~/.quill/watch.pid
+    on startup, and unlinks the file on shutdown — used by `--daemon-child`.
+    """
     port = _free_port(port)
     q: list[dict[str, Any]] = []
     lock = threading.Lock()
@@ -367,8 +523,13 @@ def serve(log_path: Path, port: int = DEFAULT_PORT, open_browser: bool = True) -
 
     httpd = ThreadedServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
-    print(f"  quill watch: {url}    (log: {log_path})")
-    print("  Ctrl-C to stop.")
+
+    if write_pid_file:
+        write_pid(os.getpid(), port)
+    else:
+        # Foreground mode — print so the user sees the URL
+        print(f"  quill watch: {url}    (log: {log_path})")
+        print("  Ctrl-C to stop.")
 
     if open_browser and not os.environ.get("QUILL_WATCH_NOBROWSER"):
         try:
@@ -376,10 +537,24 @@ def serve(log_path: Path, port: int = DEFAULT_PORT, open_browser: bool = True) -
         except Exception:  # noqa: BLE001
             pass
 
+    # Be a good daemon: clean up the PID file on graceful shutdown.
+    def _cleanup(*_a: Any) -> None:
+        stop.set()
+        try:
+            httpd.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+        if write_pid_file:
+            with _quiet_oserror():
+                _pid_file().unlink()
+
+    if write_pid_file:
+        signal.signal(signal.SIGTERM, lambda *_: _cleanup())
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        stop.set()
+        _cleanup()
         httpd.server_close()

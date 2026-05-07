@@ -196,28 +196,36 @@ def start(
     else:
         out.print("  [green]✓[/green] install looks clean")
 
-    # 4. Open the live dashboard
+    # 4. Start the live dashboard as a background daemon.
+    # The daemon survives Ctrl-C, terminal close, and Claude Code exit.
+    # The hook re-checks on every tool call and respawns if it died.
     out.print()
     log = default_audit_path()
     n_events = 0
     if log.exists():
         with log.open() as f:
             n_events = sum(1 for _ in f)
-    out.print(f"  [bold cyan]quill is live.[/bold cyan]  audit log: "
-              f"[dim]{log}[/dim] ([dim]{n_events} entries[/dim])")
-    out.print()
-    out.print("  starting the live dashboard at "
-              "[bold]http://127.0.0.1:9099[/bold]")
-    out.print("  [dim]Ctrl-C to stop the dashboard. quill keeps running "
-              "in Claude Code regardless.[/dim]")
-    out.print()
 
-    try:
-        watch_mod.serve(log, port=watch_mod.DEFAULT_PORT,
-                        open_browser=not no_browser)
-    except KeyboardInterrupt:
-        out.print()
-        out.print("  [dim]dashboard stopped. quill is still gating Claude Code.[/dim]")
+    pid, bound_port = watch_mod.ensure_daemon(
+        log, port=watch_mod.DEFAULT_PORT, open_browser=False,
+    )
+    url = f"http://127.0.0.1:{bound_port}/"
+
+    out.print(f"  [bold cyan]quill is live.[/bold cyan]  "
+              f"dashboard: [bold]{url}[/bold]  [dim](pid {pid})[/dim]")
+    out.print(f"  [dim]audit log: {log} · {n_events} entries[/dim]")
+    out.print()
+    out.print("  [green]you're done.[/green] open Claude Code in any project; "
+              "every Bash / Edit / Write goes through the gate.")
+    out.print("  [dim]bookmark the dashboard URL — daemon survives terminal "
+              "close. stop with: quill stop[/dim]")
+
+    if not no_browser:
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 # --------------------------------------------------------------------------
@@ -998,12 +1006,30 @@ def watch(
                  "Useful in SessionStart hooks so windows don't stack.",
         ),
     ] = False,
+    daemon: Annotated[
+        bool,
+        typer.Option(
+            "--daemon",
+            help="start the dashboard as a detached background process and "
+                 "return immediately. Idempotent: re-running attaches to the "
+                 "already-live daemon. Default for `quill start`.",
+        ),
+    ] = False,
+    daemon_child: Annotated[
+        bool,
+        typer.Option(
+            "--daemon-child",
+            help="(internal) the actual daemon process — runs the server "
+                 "and writes the PID file. Spawned by --daemon.",
+            hidden=True,
+        ),
+    ] = False,
 ) -> None:
     """Live dashboard of every audit event as it's signed.
 
-    Default: opens a localhost browser tab with a streaming SSE feed.
-    With --terminal: spawns a new Terminal window running `quill tree
-    --live` (macOS; falls back to printing the command on other OSes).
+    Default: opens a localhost browser tab with a streaming SSE feed in
+    the foreground. Use --daemon to detach so the dashboard survives
+    Ctrl-C and terminal close.
     """
     p = log_path or default_audit_path()
 
@@ -1011,9 +1037,40 @@ def watch(
         _spawn_terminal_tree(p, once=once)
         return
 
+    if daemon_child:
+        # We ARE the daemon. Just serve, with PID-file management on.
+        watch_mod.serve(p, port=port, open_browser=False, write_pid_file=True)
+        return
+
+    if daemon:
+        pid, bound_port = watch_mod.ensure_daemon(
+            p, port=port, open_browser=False,
+        )
+        url = f"http://127.0.0.1:{bound_port}/"
+        Console().print(
+            f"  [green]quill watch is running[/green] at [bold]{url}[/bold]"
+            f"  [dim](pid {pid})[/dim]\n"
+            "  open the URL anytime — daemon survives terminal close.\n"
+            "  stop:  [bold]quill stop[/bold]",
+        )
+        if not no_browser:
+            try:
+                import webbrowser
+                webbrowser.open(url)
+            except Exception:  # noqa: BLE001
+                pass
+        return
+
     if once and _watcher_already_running(port):
         return
     watch_mod.serve(p, port=port, open_browser=not no_browser)
+
+
+@app.command("stop")
+def stop_daemon() -> None:
+    """Stop the background watch daemon if one is running."""
+    ok, msg = watch_mod.stop_daemon()
+    Console().print(("[green]" if ok else "[dim]") + msg + ("[/green]" if ok else "[/dim]"))
 
 
 def _watcher_already_running(port: int) -> bool:
