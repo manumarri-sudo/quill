@@ -250,7 +250,8 @@ def main() -> int:
     Wired to `quill claude-hook` via the CLI module.
     """
     stdin_text = sys.stdin.read()
-    log_path = Path(os.environ.get("QUILL_LOG", "")).expanduser() or default_audit_path()
+    raw = os.environ.get("QUILL_LOG", "").strip()
+    log_path = Path(raw).expanduser() if raw else default_audit_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:

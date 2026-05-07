@@ -104,7 +104,10 @@ CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str], ...]] = (
     (r"\bwget\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b", "wget | sh"),
     (r"\beval\b\s+[\"']?\$\(", "eval $(...)"),
     # Privilege & deploys
-    (r"\bsudo\b", "sudo invocation"),
+    # `\bsudo\b` over-matched URL slugs like "manumarri-sudo/quill" because
+    # `-` and `/` are regex word boundaries. Anchor sudo at command-start
+    # (line-start, ; && || | ` (` or whitespace before).
+    (r"(?:^|[;&|`(\s])sudo(?=\s)", "sudo invocation"),
     (r"\bchmod\s+(?:[0-7]*7[0-7]?7|\+s)", "chmod 777 / setuid"),
     (r"\bnpm\s+publish\b", "npm publish"),
     (r"\byarn\s+publish\b", "yarn publish"),
