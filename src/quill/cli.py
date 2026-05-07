@@ -27,7 +27,9 @@ from quill._version import __version__
 from quill.adapters import claude_code as cc_adapter
 from quill.audit import AuditLog, verify_chain
 from quill.doctor import run_doctor
+from quill import journal as journal_mod
 from quill import telemetry as tel
+from quill import watch as watch_mod
 from quill.config import (
     QuillConfig,
     default_audit_path,
@@ -48,6 +50,11 @@ app = typer.Typer(
 )
 audit_app = typer.Typer(no_args_is_help=True, help="audit-log subcommands.")
 app.add_typer(audit_app, name="audit")
+journal_app = typer.Typer(
+    no_args_is_help=True,
+    help="session-journal subcommands (writes to your AgentOS vault).",
+)
+app.add_typer(journal_app, name="journal")
 telemetry_app = typer.Typer(
     no_args_is_help=True,
     help="opt-in anonymous usage telemetry (off by default).",
@@ -499,6 +506,163 @@ def telemetry_show(
         aggregate = tel.aggregate_events(events)
     out = Console()
     out.print(tel.preview_event_for_user(s, aggregate))
+
+
+# --------------------------------------------------------------------------
+# journal — write a session log to the AgentOS vault
+# --------------------------------------------------------------------------
+
+@journal_app.command("save")
+def journal_save(
+    transcript: Annotated[
+        Path | None,
+        typer.Option(
+            "--transcript",
+            help="path to the Claude Code transcript JSONL (read from "
+                 "stdin's transcript_path if not given)",
+        ),
+    ] = None,
+    sessions_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--out", help="vault Sessions/ directory (default: "
+                          "~/agentbrain/AgentOS-Vault/ClaudeCode/Sessions/)",
+        ),
+    ] = None,
+) -> None:
+    """Render an auto-summary of a Claude Code transcript to the vault.
+
+    Designed to be called from a SessionEnd hook. When called by the
+    hook, Claude Code passes the transcript path on stdin as JSON.
+    """
+    if transcript is None:
+        try:
+            payload = json.loads(sys.stdin.read() or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        if isinstance(payload, dict):
+            tp = payload.get("transcript_path")
+            if isinstance(tp, str) and tp:
+                transcript = Path(tp).expanduser()
+    if transcript is None:
+        Console(stderr=True).print(
+            "[red]quill journal save[/red]: no --transcript and no "
+            "transcript_path on stdin.",
+        )
+        raise typer.Exit(code=1)
+
+    out = sessions_dir or journal_mod.DEFAULT_VAULT_SESSIONS
+    written = journal_mod.save_from_transcript(transcript)
+    Console().print(f"[green]wrote[/green] {written}")
+
+
+# --------------------------------------------------------------------------
+# watch — live observability dashboard
+# --------------------------------------------------------------------------
+
+@app.command("watch")
+def watch(
+    log_path: Annotated[
+        Path | None,
+        typer.Option("--log", "-l", help="audit log to stream"),
+    ] = None,
+    port: Annotated[
+        int,
+        typer.Option("--port", "-p", help="local HTTP port (default: 9099)"),
+    ] = watch_mod.DEFAULT_PORT,
+    no_browser: Annotated[
+        bool,
+        typer.Option("--no-browser", help="don't auto-open the browser"),
+    ] = False,
+    terminal: Annotated[
+        bool,
+        typer.Option(
+            "--terminal", "-t",
+            help="spawn a Terminal window running `quill tree --live` "
+                 "instead of the browser dashboard (macOS only)",
+        ),
+    ] = False,
+    once: Annotated[
+        bool,
+        typer.Option(
+            "--once",
+            help="if a Quill watcher is already running, exit silently. "
+                 "Useful in SessionStart hooks so windows don't stack.",
+        ),
+    ] = False,
+) -> None:
+    """Live dashboard of every audit event as it's signed.
+
+    Default: opens a localhost browser tab with a streaming SSE feed.
+    With --terminal: spawns a new Terminal window running `quill tree
+    --live` (macOS; falls back to printing the command on other OSes).
+    """
+    p = log_path or default_audit_path()
+
+    if terminal:
+        _spawn_terminal_tree(p, once=once)
+        return
+
+    if once and _watcher_already_running(port):
+        return
+    watch_mod.serve(p, port=port, open_browser=not no_browser)
+
+
+def _watcher_already_running(port: int) -> bool:
+    """Cheap probe: bind-check the port. If something is listening, assume
+    it's a prior `quill watch` so the SessionStart hook doesn't stack."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.2)
+    try:
+        s.connect(("127.0.0.1", port))
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def _spawn_terminal_tree(log_path: Path, *, once: bool) -> None:
+    """Open a new Terminal.app window running `quill tree --live <log>`.
+
+    macOS-only via osascript. If `once` is set, the SessionStart hook
+    semantics: don't stack. We tag the window title with a sentinel so a
+    second invocation can detect-and-skip.
+    """
+    if sys.platform != "darwin":
+        Console().print(
+            "  [yellow]--terminal currently macOS-only.[/yellow]\n"
+            f"  Run this in a side terminal: [bold]quill tree --live --log {log_path}[/bold]",
+        )
+        return
+
+    import subprocess
+    sentinel = "QUILL_TREE_LIVE"
+    if once:
+        # Already-open detection: AppleScript looks for a window with the sentinel.
+        check = subprocess.run(
+            ["osascript", "-e",
+             'tell application "Terminal" to '
+             'get count of (windows whose name contains "' + sentinel + '")'],
+            capture_output=True, text=True, check=False,
+        )
+        if (check.stdout or "").strip().isdigit() and int(check.stdout.strip()) > 0:
+            return  # already showing
+
+    cmd = (
+        f'echo "[{sentinel}]"; export PS1="" ; '
+        f'quill tree --live --log {log_path}'
+    )
+    osa = (
+        f'tell application "Terminal" to do script "{cmd}"\n'
+        f'tell application "Terminal" to set custom title of front window to '
+        f'"{sentinel} · quill tree"\n'
+    )
+    try:
+        subprocess.run(["osascript", "-e", osa], check=False, capture_output=True)
+        Console().print(f"  [green]opened[/green] Terminal window: quill tree --live")
+    except Exception as e:  # noqa: BLE001
+        Console().print(f"  [yellow]could not spawn Terminal:[/yellow] {e}")
 
 
 # --------------------------------------------------------------------------
