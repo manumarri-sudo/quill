@@ -15,25 +15,35 @@ the gate, you can breathe.
 License: MIT
 """
 from quill._version import __version__
-from quill.policy import Risk, Scope, SessionIntent
 from quill.audit import AuditLog
 from quill.errors import (
-    QuillError,
-    PolicyDenied,
-    ScopeViolation,
-    HumanDeclined,
     ConfirmationMismatch,
+    HumanDeclined,
+    PolicyDenied,
+    QuillError,
+    ScopeViolation,
+)
+from quill.policy import (
+    CommandClassification,
+    Risk,
+    Scope,
+    SessionIntent,
+    classify,
+    classify_command,
 )
 
 __all__ = [
-    "__version__",
+    "AuditLog",
+    "CommandClassification",
+    "ConfirmationMismatch",
+    "HumanDeclined",
+    "PolicyDenied",
+    "QuillError",
     "Risk",
     "Scope",
-    "SessionIntent",
-    "AuditLog",
-    "QuillError",
-    "PolicyDenied",
     "ScopeViolation",
-    "HumanDeclined",
-    "ConfirmationMismatch",
+    "SessionIntent",
+    "__version__",
+    "classify",
+    "classify_command",
 ]

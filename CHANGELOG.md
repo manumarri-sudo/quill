@@ -4,15 +4,27 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Added
+
+- Claude Code `PreToolUse` hook adapter (`quill claude-hook`) so Quill can gate Claude Code's built-in tools (Bash, Edit, Write, NotebookEdit) without going through the MCP proxy. Includes `quill claude-hook-install` for idempotent settings.json merging. Decision matrix: `LOW/MEDIUM` → silent allow, `HIGH` → delegate to Claude Code's confirm UI, `CRITICAL` → deny with plain-English reason.
+- Content-aware shell-command risk classifier (`quill.policy.classify_command`). Catches `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, `curl | sh`, `terraform destroy`, `cat ~/.ssh/...`, `cat .env`, and more. Conservative by design: when uncertain, returns MEDIUM and lets the operator decide.
+- Test coverage for the hook decision matrix, the command classifier, and the install helper.
+
+### Known gaps for 0.1
+
+- The MCP proxy in `src/quill/proxy.py` connects to upstreams and the gate fires correctly, but tool re-advertising is currently a single generic `quill.call(tool_name, arguments)` rather than passing through full JSON schemas to the MCP client. Schema-passthrough is the v0.2 headline.
+- Telemetry config exists in `src/quill/config.py` but the wire-up is opt-in and currently inert.
+
 ### Planned for 0.2.0
 
-- Multi-agent / sub-session governance with scope attenuation and cross-agent quorum
+- Schema-passthrough so MCP clients get autocomplete on every gated upstream tool
+- Multi-agent / sub-session governance with cross-agent quorum
 - Live tool-list refresh from upstream MCP servers (currently fetched once at startup)
-- Re-emission of upstream JSON-Schema upward so MCP clients get autocomplete
 - LangGraph adapter (composes with `interrupt()`)
 - OpenAI Agents SDK adapter (`RunHooks` / `AgentHooks`)
 - OpenTelemetry GenAI span emission so the audit composes with Langfuse, Phoenix, Helicone
 - AIUC-1 and EU AI Act Article 14 audit-export formats
+- Opt-in anonymous telemetry (`quill telemetry on/off/show`)
 
 ## [0.1.0] - 2026-05-07
 

@@ -72,6 +72,125 @@ DEFAULT_HIGH_PATTERNS: Final[tuple[str, ...]] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Content-aware classification for shell commands.
+#
+# Quill's tool-name classifier is fast and right for namespaced MCP tools, but
+# Claude Code's built-in `Bash` tool exposes one tool name to gate hundreds of
+# commands. The risk depends on the command string, not the tool name.
+#
+# These patterns are conservative on purpose: when in doubt, escalate. The
+# operator can downgrade in their per-tool policy override.
+# ---------------------------------------------------------------------------
+
+CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str], ...]] = (
+    # Filesystem destruction
+    (r"\brm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*\s+)+(?!\s*$)", "rm -rf"),
+    (r"\bfind\b.*-delete\b", "find -delete"),
+    (r"\bdd\s+if=", "dd low-level disk write"),
+    (r"\bmkfs\.", "filesystem format"),
+    (r":\(\)\s*\{.*:\|:&.*\}\s*;\s*:", "fork bomb"),
+    # Version control destructive
+    (r"\bgit\s+push\s+(?:--force|--force-with-lease|-f)\b", "git push --force"),
+    (r"\bgit\s+reset\s+--hard\b", "git reset --hard"),
+    (r"\bgit\s+clean\s+-[a-zA-Z]*[fdx]+", "git clean -fdx"),
+    (r"\bgit\s+update-ref\s+-d\b", "git update-ref -d"),
+    # Database destructive
+    (r"\bdrop\s+(?:table|database|schema|index)\b", "DROP TABLE/DATABASE/SCHEMA"),
+    (r"\btruncate\s+(?:table\s+)?\w+", "TRUNCATE TABLE"),
+    (r"\bdelete\s+from\s+\w+(?!.*\bwhere\b)", "DELETE FROM without WHERE"),
+    # Remote code execution
+    (r"\bcurl\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b", "curl | sh"),
+    (r"\bwget\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b", "wget | sh"),
+    (r"\beval\b\s+[\"']?\$\(", "eval $(...)"),
+    # Privilege & deploys
+    (r"\bsudo\b", "sudo invocation"),
+    (r"\bchmod\s+(?:[0-7]*7[0-7]?7|\+s)", "chmod 777 / setuid"),
+    (r"\bnpm\s+publish\b", "npm publish"),
+    (r"\byarn\s+publish\b", "yarn publish"),
+    (r"\bvercel\s+(?:--prod\b|deploy\s+(?:\S+\s+)*--prod\b)", "vercel --prod"),
+    (r"\bflyctl\s+deploy\b(?!.*--config\s+.*staging)", "flyctl deploy"),
+    (r"\brailway\s+up\b.*--service\s+prod", "railway up --service prod"),
+    (r"\bkubectl\s+(?:delete|apply\s+-f.*prod)", "kubectl delete / prod apply"),
+    (r"\bdocker\s+(?:rmi|system\s+prune)", "docker rmi / system prune"),
+    (r"\bterraform\s+(?:destroy|apply\s+-auto-approve)", "terraform destroy / auto-apply"),
+    # Secret exfil shape
+    (r"\bcat\b.*~/\.(?:ssh|aws|kube)/", "read ~/.ssh ~/.aws ~/.kube"),
+    (r"\bcat\b\s+\.env\b", "read .env"),
+)
+
+HIGH_COMMAND_PATTERNS: Final[tuple[tuple[str, str], ...]] = (
+    (r"\bgit\s+push\b", "git push"),
+    (r"\bgit\s+commit\b", "git commit"),
+    (r"\brm\s+(?!-[a-zA-Z]*[rRf])", "rm (single file)"),
+    (r"\bsed\s+-i\b", "sed -i (in-place)"),
+    (r"\bgh\s+pr\s+merge\b", "gh pr merge"),
+    (r"\bgh\s+repo\s+(?:delete|edit)\b", "gh repo delete/edit"),
+    (r"\bnpm\s+install\s+(?:-g|--global)\b", "npm install -g"),
+    (r"\bnpm\s+install\b", "npm install (mutates lockfile)"),
+    (r"\bvercel\s+deploy\b", "vercel deploy (preview)"),
+    (r"\bdocker\s+(?:push|run\b.*--privileged)", "docker push / privileged run"),
+    (r"\bcurl\s+-X\s+(?:POST|PUT|DELETE|PATCH)\b", "curl write request"),
+    (r"\bopen\s+\S+://", "open URL/app"),
+    (r"\bpip\s+install\s+(?:[^-]|-(?!h))", "pip install"),
+    (r"\bbrew\s+install\b", "brew install"),
+)
+
+LOW_COMMAND_PATTERNS: Final[tuple[str, ...]] = (
+    r"^\s*(?:ls|pwd|cat|head|tail|wc|file|stat|which|tree|du|df)\b",
+    r"^\s*grep\b(?!.*-[a-zA-Z]*r)",  # grep yes, grep -r no
+    r"^\s*find\s+\S+(?!.*-(?:delete|exec))",
+    r"^\s*git\s+(?:status|log|diff|branch|show|remote|config\s+--list|rev-parse)\b",
+    r"^\s*npm\s+(?:--version|list|ls|view|info|outdated|audit)\b",
+    r"^\s*(?:node|python|python3|ruby|go)\s+--version\b",
+    r"^\s*echo\b",
+    r"^\s*date\b",
+    r"^\s*env\s*$",
+    r"^\s*printenv\b",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CommandClassification:
+    """Result of classifying a shell command."""
+
+    risk: Risk
+    reason: str
+
+
+_CRITICAL_CMD_RE: Final[tuple[tuple[re.Pattern[str], str], ...]] = tuple(
+    (re.compile(p, re.IGNORECASE), r) for p, r in CRITICAL_COMMAND_PATTERNS
+)
+_HIGH_CMD_RE: Final[tuple[tuple[re.Pattern[str], str], ...]] = tuple(
+    (re.compile(p, re.IGNORECASE), r) for p, r in HIGH_COMMAND_PATTERNS
+)
+_LOW_CMD_RE: Final[tuple[re.Pattern[str], ...]] = tuple(
+    re.compile(p, re.IGNORECASE) for p in LOW_COMMAND_PATTERNS
+)
+
+
+def classify_command(command: str) -> CommandClassification:
+    """Classify a single shell command by content.
+
+    For tools whose risk depends on the command string (Claude Code's `Bash`,
+    a generic `shell.exec`, etc.). Conservative by design: when uncertain,
+    return MEDIUM and let the caller decide.
+    """
+    cmd = (command or "").strip()
+    if not cmd:
+        return CommandClassification(Risk.LOW, "empty command")
+    for rex, reason in _CRITICAL_CMD_RE:
+        if rex.search(cmd):
+            return CommandClassification(Risk.CRITICAL, reason)
+    for rex, reason in _HIGH_CMD_RE:
+        if rex.search(cmd):
+            return CommandClassification(Risk.HIGH, reason)
+    for rex in _LOW_CMD_RE:
+        if rex.search(cmd):
+            return CommandClassification(Risk.LOW, "read-only command")
+    return CommandClassification(Risk.MEDIUM, "uncategorised shell command")
+
+
 @dataclass(frozen=True, slots=True)
 class _CompiledPolicy:
     critical: tuple[re.Pattern[str], ...]
