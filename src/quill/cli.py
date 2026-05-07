@@ -1010,9 +1010,8 @@ def watch(
         bool,
         typer.Option(
             "--daemon",
-            help="start the dashboard as a detached background process and "
-                 "return immediately. Idempotent: re-running attaches to the "
-                 "already-live daemon. Default for `quill start`.",
+            help="start the BROWSER dashboard as a detached background "
+                 "process and return immediately. Idempotent.",
         ),
     ] = False,
     daemon_child: Annotated[
@@ -1024,12 +1023,21 @@ def watch(
             hidden=True,
         ),
     ] = False,
+    browser: Annotated[
+        bool,
+        typer.Option(
+            "--browser",
+            help="use the localhost browser dashboard instead of the "
+                 "in-terminal TUI. Default is now the TUI.",
+        ),
+    ] = False,
 ) -> None:
-    """Live dashboard of every audit event as it's signed.
+    """In-terminal live dashboard of every audit event as it's signed.
 
-    Default: opens a localhost browser tab with a streaming SSE feed in
-    the foreground. Use --daemon to detach so the dashboard survives
-    Ctrl-C and terminal close.
+    By default `quill watch` opens a beautiful TUI in the same terminal —
+    no separate browser tab, no port to remember. Use --browser for the
+    old localhost HTTP dashboard, --daemon to run that browser dashboard
+    in the background.
     """
     p = log_path or default_audit_path()
 
@@ -1038,7 +1046,7 @@ def watch(
         return
 
     if daemon_child:
-        # We ARE the daemon. Just serve, with PID-file management on.
+        # We ARE the browser-dashboard daemon. Run with PID-file management.
         watch_mod.serve(p, port=port, open_browser=False, write_pid_file=True)
         return
 
@@ -1048,10 +1056,9 @@ def watch(
         )
         url = f"http://127.0.0.1:{bound_port}/"
         Console().print(
-            f"  [green]quill watch is running[/green] at [bold]{url}[/bold]"
+            f"  [green]quill watch (browser) is running[/green] at [bold]{url}[/bold]"
             f"  [dim](pid {pid})[/dim]\n"
-            "  open the URL anytime — daemon survives terminal close.\n"
-            "  stop:  [bold]quill stop[/bold]",
+            "  daemon survives terminal close. stop with: [bold]quill stop[/bold]",
         )
         if not no_browser:
             try:
@@ -1061,9 +1068,15 @@ def watch(
                 pass
         return
 
-    if once and _watcher_already_running(port):
+    if browser:
+        if once and _watcher_already_running(port):
+            return
+        watch_mod.serve(p, port=port, open_browser=not no_browser)
         return
-    watch_mod.serve(p, port=port, open_browser=not no_browser)
+
+    # Default: in-terminal TUI. Lives in this terminal until `q`.
+    from quill.tui import run_tui
+    run_tui(p)
 
 
 @app.command("stop")
