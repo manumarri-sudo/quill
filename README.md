@@ -40,48 +40,45 @@ quill init
 
 This writes a starter config to `~/.quill/config.toml`. Edit it to declare your session intent, scope, and the upstream MCP servers Quill should proxy.
 
-## A 60-second demo
+## Two integration paths
+
+Quill governs two different surfaces. Both ship in v0.1; pick whichever fits how you code.
+
+### Path A: Claude Code's built-in tools (recommended for vibe coders)
+
+Claude Code's `Bash`, `Edit`, `Write`, and `NotebookEdit` are *not* MCP tools — they're internal. Quill plugs into Claude Code's `PreToolUse` hook so every built-in tool call is gated before it executes.
 
 ```bash
-# 1. Configure quill to proxy a filesystem MCP server scoped to /tmp/safe
-cat > ~/.quill/config.toml <<'EOF'
-[session]
-intent = "explore the safe sandbox folder"
-scope  = ["filesystem:read:/tmp/safe", "filesystem:write:/tmp/safe"]
-
-[audit]
-path = "~/.quill/audit.log.jsonl"
-
-[[upstream]]
-name    = "filesystem"
-command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp/safe"]
-EOF
-
-# 2. Start the proxy
-quill serve
-
-# 3. In another terminal, watch the audit log live
-quill tail
-
-# 4. Point Claude Code at quill instead of the raw filesystem server (see below)
+pip install quill
+quill claude-hook-install        # idempotently merges the hook into ~/.claude/settings.json
+# restart Claude Code
 ```
 
-## Wire it into Claude Code
+That's it. From the next session on, every Bash command, every Edit, every Write goes through Quill's classifier. `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, and `npm publish` are denied by default with a plain-English reason. Edits to files prompt Claude Code's confirm-this-action UI. Reads pass silently. Every decision lands in `~/.quill/audit.log.jsonl` with an HMAC-chained signature.
 
-Add `quill` to your Claude Code `mcpServers` config (`~/.config/claude-code/mcp.json` or wherever your distribution keeps it):
+The hook is a content-aware classifier: `Bash("ls")` is low-risk, `Bash("rm -rf /")` is critical. The decision logic lives in [`quill.policy.classify_command`](src/quill/policy.py); patterns are explicit and testable.
+
+### Path B: External MCP servers (filesystem, github, postgres, slack)
+
+If you also use Claude Code's `mcpServers` config to point at upstream MCP servers (filesystem, github, postgres, slack, ...), Quill can sit in front of those too.
+
+```bash
+quill init
+# edit ~/.quill/config.toml — declare your session intent, scope, and upstreams
+quill serve
+```
+
+Then in your Claude Code `mcpServers` config:
 
 ```jsonc
 {
   "mcpServers": {
-    "quill": {
-      "command": "quill",
-      "args": ["serve"]
-    }
+    "quill": { "command": "quill", "args": ["serve"] }
   }
 }
 ```
 
-That's it. Claude Code now talks to your filesystem (or GitHub, Postgres, Slack&mdash;whatever you put in `[[upstream]]`) through Quill. Every dangerous call pauses on your terminal.
+> **v0.1 status:** the proxy connects to upstreams and the gate fires correctly, but tool re-advertising is currently a single generic `quill.call(tool_name, arguments)` rather than full schema passthrough. Schema-level passthrough is the headline feature for v0.2. For v0.1, prefer Path A for built-ins; use Path B if you want every external-MCP call signed and scope-checked but are willing to call upstream tools via the generic `call` adapter for now.
 
 ## What it does, concretely
 

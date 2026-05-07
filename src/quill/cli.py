@@ -24,6 +24,7 @@ from rich.console import Console
 from rich.table import Table
 
 from quill._version import __version__
+from quill.adapters import claude_code as cc_adapter
 from quill.audit import AuditLog, verify_chain
 from quill.config import (
     QuillConfig,
@@ -308,6 +309,61 @@ def tree(
         render_tree_live(p)
     else:
         render_tree_static(p)
+
+
+# --------------------------------------------------------------------------
+# claude-hook  (Claude Code PreToolUse adapter)
+# --------------------------------------------------------------------------
+
+@app.command("claude-hook")
+def claude_hook() -> None:
+    """Run as Claude Code's PreToolUse hook.
+
+    Wired into ~/.claude/settings.json so every Claude Code tool call
+    (Bash, Edit, Write, ...) is gated by Quill before it executes.
+    Reads JSON on stdin, writes JSON on stdout, exits 0.
+
+    Install with:  quill claude-hook-install
+    """
+    raise typer.Exit(code=cc_adapter.main())
+
+
+@app.command("claude-hook-install")
+def claude_hook_install(
+    settings_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--settings",
+            help="path to Claude Code settings.json (default: ~/.claude/settings.json)",
+        ),
+    ] = None,
+    matcher: Annotated[
+        str,
+        typer.Option(
+            "--matcher",
+            help="which built-in tools to gate (Claude Code matcher syntax)",
+        ),
+    ] = "Bash|Edit|Write|NotebookEdit",
+    timeout: Annotated[
+        int,
+        typer.Option("--timeout", help="hook timeout in seconds"),
+    ] = 10,
+) -> None:
+    """Idempotently merge the Quill hook into Claude Code's settings.json.
+
+    Safe to re-run; if Quill is already installed at this matcher, it does
+    nothing.
+    """
+    p, already = cc_adapter.install_into_settings(
+        settings_path, matcher=matcher, timeout=timeout,
+    )
+    if already:
+        console.print(f"[dim]already installed in[/dim] {p}")
+    else:
+        console.print(f"[green]installed[/green] in {p}")
+        console.print("  Restart Claude Code to pick up the new hook.")
+    console.print(f"  matcher: [bold]{matcher}[/bold]")
+    console.print(f"  audit log: {default_audit_path()}")
 
 
 # --------------------------------------------------------------------------
