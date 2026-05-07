@@ -216,28 +216,63 @@ def tail(
         console.print(f"[yellow]no log yet:[/yellow] {p}")
         raise typer.Exit(code=1)
 
-    glyph = {
-        "session.start": ("cyan", "▸"),
-        "tool.attempted": ("dim", "·"),
-        "tool.completed": ("green", "✓"),
-        "tool.errored": ("red", "✗"),
-        "verdict.allowed": ("green", "·"),
-        "verdict.blocked": ("red", "✗"),
-        "verdict.scope_violation": ("red", "✗"),
+    risk_color = {
+        "low": "green",
+        "medium": "cyan",
+        "high": "yellow",
+        "critical": "bold red",
     }
+    type_glyph = {
+        "session.start": ("cyan", "▸ session start"),
+        "session.end":   ("cyan", "◂ session end"),
+        "agent.spawned": ("cyan", "▸ agent spawned"),
+        "agent.closed":  ("cyan", "◂ agent closed"),
+        "tool.attempted": ("dim",  "·  attempt"),
+        "tool.completed": ("green","✓  completed"),
+        "tool.errored":   ("red",  "✗  errored"),
+        "verdict.allowed":         ("green",   "✓  allowed"),
+        "verdict.blocked":         ("bold red","✗  BLOCKED"),
+        "verdict.scope_violation": ("magenta", "✗  scope_violation"),
+        "verdict.ask":             ("yellow",  "?  ask human"),
+    }
+
+    def _summarise(evt: dict[str, object]) -> str:
+        """One-line plain-English summary of what's interesting in this event."""
+        p = evt.get("payload", {}) or {}
+        if not isinstance(p, dict):
+            return ""
+        tool = str(p.get("tool_name") or "")
+        ap = p.get("args_preview") or {}
+        snippet = ""
+        if isinstance(ap, dict):
+            v = ap.get("command") or ap.get("path") or ap.get("file_path") or ""
+            if isinstance(v, str) and v:
+                snippet = v.replace("\n", " ")[:90]
+        reason = p.get("reason") or p.get("risk_reason") or ""
+        bits: list[str] = []
+        if tool:
+            bits.append(f"[bold]{tool}[/bold]")
+        if snippet:
+            bits.append(f"[dim]{snippet}[/dim]")
+        if reason:
+            bits.append(f"[dim italic]— {reason}[/dim italic]")
+        return "  ".join(bits)
 
     def _print(line: str) -> None:
         try:
             evt = json.loads(line)
         except json.JSONDecodeError:
             return
-        color, g = glyph.get(evt.get("type", ""), ("dim", "·"))
-        ts = evt.get("ts", "")[11:19]
-        action = evt.get("payload", {}).get("tool_name") or evt.get("payload", {}).get("intent", "")
-        risk = evt.get("risk", "")
+        ts = str(evt.get("ts", ""))[11:19]
+        risk = str(evt.get("risk", "low"))
+        rcolor = risk_color.get(risk, "white")
+        tcolor, tlabel = type_glyph.get(str(evt.get("type", "")), ("dim", str(evt.get("type", ""))))
+        line_summary = _summarise(evt)
         console.print(
-            f"  [dim]{ts}[/dim]  [{color}]{g} {evt.get('type', ''):24}[/{color}]  "
-            f"[dim]{risk:9}[/dim]  {action}",
+            f"  [dim]{ts}[/dim]  "
+            f"[{rcolor}]{risk:<8}[/{rcolor}]  "
+            f"[{tcolor}]{tlabel:<22}[/{tcolor}]  "
+            f"{line_summary}",
         )
 
     # Initial drain
@@ -290,33 +325,169 @@ def audit_show(
         Path | None,
         typer.Option("--log", "-l"),
     ] = None,
-    last: Annotated[int, typer.Option("--last", "-n")] = 50,
+    last: Annotated[
+        int,
+        typer.Option("--last", "-n", help="how many tool calls to show"),
+    ] = 30,
+    only: Annotated[
+        str | None,
+        typer.Option(
+            "--only",
+            help="filter by verdict: 'blocked', 'allowed', 'ask', 'scope'",
+        ),
+    ] = None,
+    raw: Annotated[
+        bool,
+        typer.Option(
+            "--raw",
+            help="show every audit event separately instead of pairing "
+                 "tool.attempted with its verdict",
+        ),
+    ] = False,
 ) -> None:
-    """Pretty-print the most recent audit entries."""
+    """Pretty-print recent gate decisions.
+
+    By default each tool call is rendered as ONE row: the command/path
+    that was attempted, the risk, the verdict, the plain-English reason.
+    Use --raw to see every audit event separately (for debugging).
+    """
     p = log_path or default_audit_path()
     if not p.exists():
         console.print(f"[yellow]no log:[/yellow] {p}")
         raise typer.Exit(code=1)
     with p.open() as f:
-        lines = f.readlines()[-last:]
-    table = Table(show_header=True, header_style="dim")
-    table.add_column("ts", style="dim", no_wrap=True)
-    table.add_column("type")
-    table.add_column("risk", style="dim")
-    table.add_column("action")
-    for raw in lines:
-        try:
-            evt = json.loads(raw)
-        except json.JSONDecodeError:
+        events = [json.loads(line) for line in f if line.strip()]
+
+    risk_style = {
+        "low": "green",
+        "medium": "cyan",
+        "high": "yellow",
+        "critical": "bold red",
+    }
+    verdict_glyph = {
+        "verdict.allowed":         ("green",    "✓ allow"),
+        "verdict.blocked":         ("bold red", "✗ block"),
+        "verdict.scope_violation": ("magenta",  "✗ scope"),
+        "verdict.ask":             ("yellow",   "? ask "),
+    }
+
+    out = Console()
+    table = Table(
+        show_header=True, header_style="dim",
+        box=None, pad_edge=False, show_lines=False,
+    )
+
+    if raw:
+        # Per-event view (legacy / debug)
+        type_label = {
+            "session.start":          ("cyan",     "▸ session start"),
+            "session.end":            ("cyan",     "◂ session end"),
+            "agent.spawned":          ("cyan",     "▸ spawn"),
+            "agent.closed":           ("cyan",     "◂ close"),
+            "tool.attempted":         ("dim",      "· attempt"),
+            "tool.completed":         ("green",    "✓ completed"),
+            "tool.errored":           ("red",      "✗ errored"),
+            **{k: v for k, v in verdict_glyph.items()},
+        }
+        table.add_column("time", style="dim", no_wrap=True, width=8)
+        table.add_column("risk", no_wrap=True, width=8)
+        table.add_column("event", no_wrap=True, width=18)
+        table.add_column("tool", no_wrap=True, max_width=14)
+        table.add_column("what / reason", no_wrap=False)
+        for evt in events[-last:]:
+            etype = str(evt.get("type", ""))
+            if only and only not in etype:
+                continue
+            payload = evt.get("payload") or {}
+            tool = str(payload.get("tool_name") or "—")
+            risk = str(evt.get("risk", "low"))
+            rcolor = risk_style.get(risk, "white")
+            tcolor, tlabel = type_label.get(etype, ("dim", etype))
+            ap = payload.get("args_preview") or {}
+            piece = ""
+            if isinstance(ap, dict):
+                v = ap.get("command") or ap.get("path") or ap.get("file_path") or ""
+                if isinstance(v, str):
+                    piece = v.replace("\n", " ")[:80]
+            reason = payload.get("reason") or payload.get("risk_reason") or ""
+            text = piece + (f"  [dim italic]— {reason}[/dim italic]" if reason else "")
+            table.add_row(
+                str(evt.get("ts", ""))[11:19],
+                f"[{rcolor}]{risk}[/{rcolor}]",
+                f"[{tcolor}]{tlabel}[/{tcolor}]",
+                tool, text,
+            )
+        out.print(table)
+        return
+
+    # Paired view (default): one row per tool call, attempt + verdict joined.
+    table.add_column("time", style="dim", no_wrap=True, width=8)
+    table.add_column("verdict", no_wrap=True, width=8)
+    table.add_column("risk", no_wrap=True, width=8)
+    table.add_column("tool", no_wrap=True, max_width=14)
+    table.add_column("what was tried", no_wrap=False, ratio=2)
+    table.add_column("why", style="dim italic", no_wrap=False, ratio=2)
+
+    pairs: list[dict[str, Any]] = []
+    pending: dict[str, Any] | None = None
+    for evt in events:
+        etype = str(evt.get("type", ""))
+        if etype == "tool.attempted":
+            pending = evt
             continue
-        action = evt.get("payload", {}).get("tool_name") or evt.get("payload", {}).get("intent", "")
+        if etype.startswith("verdict."):
+            row = {
+                "ts": evt.get("ts", ""),
+                "verdict": etype,
+                "risk": evt.get("risk", "low"),
+                "payload_attempt": (pending or {}).get("payload") or {},
+                "payload_verdict": evt.get("payload") or {},
+            }
+            pairs.append(row)
+            pending = None
+
+    if only:
+        pairs = [r for r in pairs if only in r["verdict"]]
+
+    rows = pairs[-last:]
+    if not rows:
+        out.print(f"[dim]no tool calls match.[/dim] log: {p}")
+        return
+
+    for r in rows:
+        risk = str(r["risk"])
+        rcolor = risk_style.get(risk, "white")
+        vcolor, vlabel = verdict_glyph.get(str(r["verdict"]), ("white", str(r["verdict"])))
+        attempt = r["payload_attempt"] or {}
+        verdict = r["payload_verdict"] or {}
+        tool = str(attempt.get("tool_name") or verdict.get("tool_name") or "—")
+        ap = attempt.get("args_preview") or {}
+        what = ""
+        if isinstance(ap, dict):
+            v = ap.get("command") or ap.get("path") or ap.get("file_path") or ""
+            if isinstance(v, str):
+                what = v.replace("\n", " ")[:120]
+        reason = (verdict.get("reason") or verdict.get("risk_reason")
+                  or attempt.get("risk_reason") or "")
+        if isinstance(reason, str):
+            reason = reason[:140]
         table.add_row(
-            evt.get("ts", "")[11:19],
-            evt.get("type", ""),
-            evt.get("risk", ""),
-            str(action),
+            str(r["ts"])[11:19],
+            f"[{vcolor}]{vlabel}[/{vcolor}]",
+            f"[{rcolor}]{risk}[/{rcolor}]",
+            tool, what, str(reason),
         )
-    console.print(table)
+
+    out.print(table)
+    counts = {"allow": 0, "block": 0, "ask  ": 0, "scope": 0}
+    for r in rows:
+        v = str(r["verdict"])
+        if v == "verdict.allowed": counts["allow"] += 1
+        elif v == "verdict.blocked": counts["block"] += 1
+        elif v == "verdict.ask": counts["ask  "] += 1
+        elif v == "verdict.scope_violation": counts["scope"] += 1
+    summary = "  ".join(f"{k.strip()}={v}" for k, v in counts.items() if v)
+    out.print(f"[dim]{len(rows)} tool call(s) · {summary} · log: {p}[/dim]")
 
 
 # --------------------------------------------------------------------------

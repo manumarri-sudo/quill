@@ -124,6 +124,47 @@ def test_unknown_command_is_medium() -> None:
     assert result.risk is Risk.MEDIUM
 
 
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        # The regression case: url slugs containing `sudo` were classified
+        # as `sudo invocation` because regex word-boundaries treat `-` and
+        # `/` as boundary points.
+        'open "https://github.com/manumarri-sudo/quill"',
+        'open "https://github.com/some-pseudo-user/repo"',
+        'curl https://api.example.com/sudo-status',
+        'echo "sudo-bash-style" > note.txt',
+        # `--` flags that contain "sudo" substrings
+        'echo --no-sudo',
+    ],
+)
+def test_url_slugs_with_sudo_are_not_classified_as_critical(cmd: str) -> None:
+    """Regression: `manumarri-sudo` in a URL must not match the sudo
+    invocation pattern. Found live in the audit log when running
+    `open https://github.com/manumarri-sudo/quill`."""
+    result = classify_command(cmd)
+    assert result.risk is not Risk.CRITICAL or "sudo" not in result.reason, (
+        f"{cmd!r} mis-classified as critical sudo: reason={result.reason}"
+    )
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "sudo apt install nodejs",
+        "sudo -i",
+        "echo done; sudo rm -rf /",      # sudo after a separator still fires
+        "true && sudo halt",
+    ],
+)
+def test_real_sudo_invocations_still_critical(cmd: str) -> None:
+    """The sudo pattern must still catch genuine sudo invocations."""
+    result = classify_command(cmd)
+    assert result.risk is Risk.CRITICAL, (
+        f"{cmd!r} should be CRITICAL but got {result.risk.value}"
+    )
+
+
 def test_classification_reason_is_useful_to_humans() -> None:
     """Reason strings should read like English so the audit log is auditable."""
     result = classify_command("git push --force origin main")
