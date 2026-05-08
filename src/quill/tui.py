@@ -304,9 +304,10 @@ class QuillWatchTUI(App):
                 yield Static("(none yet)", id="project-list", classes="item")
                 yield Static("[b]legend[/b]", classes="heading")
                 yield Static(
-                    f"[#{PALETTE['allow'][1:]}]▍ allow[/]   "
-                    f"[#{PALETTE['ask'][1:]}]▍ ask[/]\n"
-                    f"[#{PALETTE['block'][1:]}]▍ BLOCK[/]   "
+                    f"[#{PALETTE['allow'][1:]}]✓ allow[/]   "
+                    f"[#{PALETTE['ask'][1:]}]? ask[/]\n"
+                    f"[#{PALETTE['block'][1:]}]✗ block[/]   "
+                    f"[#{PALETTE['sub'][1:]}]✗ scope[/]\n"
                     f"[#{PALETTE['sub'][1:]}]↳ sub-agent[/]",
                     classes="item",
                 )
@@ -334,6 +335,9 @@ class QuillWatchTUI(App):
         self._table.display = False  # show empty state until first event
         # initial drain
         self._drain_log()
+        # render sidebar counts immediately so counts are populated by
+        # screenshot-time / first-frame, not 1s after load.
+        self._refresh_sidebar()
         # poll for new events ~10 Hz; cheap because we just stat the file
         self.set_interval(0.1, self._drain_log)
         # refresh sidebar counts ~1 Hz

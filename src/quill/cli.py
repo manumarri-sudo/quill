@@ -48,8 +48,10 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,  # `quill` with no args runs `start`
     help="quill: the pause button between AI agents and the things you can't undo.\n\n"
-         "  quill start    set up + watch live (this is the only command most users need)\n"
-         "  quill audit    see what got blocked/allowed\n"
+         "  quill start    set up + open the dashboard (this is the only command most users need)\n"
+         "  quill watch    in-terminal live dashboard\n"
+         "  quill audit    review what got blocked / allowed / asked\n"
+         "  quill decay    permissions that erode without reinforcement\n"
          "  quill doctor   diagnose the install\n",
 )
 
@@ -346,6 +348,9 @@ def tail(
         console.print(f"[yellow]no log yet:[/yellow] {p}")
         raise typer.Exit(code=1)
 
+    # Canonical vocabulary — must match audit_show + TUI + dashboard.
+    # Five labels: allow / ask / block / scope / sub-agent; six glyphs:
+    # ✓ ✗ ? ↳ ▸ · — that's the lexicon every Quill surface uses.
     risk_color = {
         "low": "green",
         "medium": "cyan",
@@ -353,17 +358,17 @@ def tail(
         "critical": "bold red",
     }
     type_glyph = {
-        "session.start": ("cyan", "▸ session start"),
-        "session.end":   ("cyan", "◂ session end"),
-        "agent.spawned": ("cyan", "▸ agent spawned"),
-        "agent.closed":  ("cyan", "◂ agent closed"),
-        "tool.attempted": ("dim",  "·  attempt"),
-        "tool.completed": ("green","✓  completed"),
-        "tool.errored":   ("red",  "✗  errored"),
-        "verdict.allowed":         ("green",   "✓  allowed"),
-        "verdict.blocked":         ("bold red","✗  BLOCKED"),
-        "verdict.scope_violation": ("magenta", "✗  scope_violation"),
-        "verdict.ask":             ("yellow",  "?  ask human"),
+        "session.start": ("cyan",     "▸ session"),
+        "session.end":   ("cyan",     "◂ session"),
+        "agent.spawned": ("magenta",  "▸ spawn"),
+        "agent.closed":  ("magenta",  "◂ close"),
+        "tool.attempted": ("dim",     "· attempt"),
+        "tool.completed": ("green",   "✓ done"),
+        "tool.errored":   ("red",     "✗ error"),
+        "verdict.allowed":         ("green",    "✓ allow"),
+        "verdict.blocked":         ("bold red", "✗ block"),
+        "verdict.scope_violation": ("magenta",  "✗ scope"),
+        "verdict.ask":             ("yellow",   "? ask"),
     }
 
     def _summarise(evt: dict[str, object]) -> str:
@@ -425,25 +430,28 @@ def tail(
             sub_tag = f" [magenta]↳ {tag}[/magenta]"
             indent = "  "
 
-        console.print(
+        out.print(
             f"{indent}  [dim]{ts}[/dim]  "
             f"[{rcolor}]{risk:<8}[/{rcolor}]  "
-            f"[{tcolor}]{tlabel:<22}[/{tcolor}]"
+            f"[{tcolor}]{tlabel:<14}[/{tcolor}]"
             f"{sub_tag}  "
             f"{line_summary}",
         )
 
-    # legend printed once before the stream starts
+    # Tail's output IS data — write to stdout so users can pipe.
+    # The module-level `console` is stderr-only (for warnings); for
+    # tail we want a fresh stdout console.
+    out = Console()
     legend = (
         "[dim]legend:[/dim]  "
-        "[green]✓ allowed[/green]   "
+        "[green]✓ allow[/green]   "
         "[yellow]? ask[/yellow]   "
-        "[bold red]✗ BLOCKED[/bold red]   "
+        "[bold red]✗ block[/bold red]   "
         "[magenta]✗ scope[/magenta]   "
         "[magenta]↳ sub-agent[/magenta]"
     )
-    console.print(legend)
-    console.print()
+    out.print(legend)
+    out.print()
 
     # Initial drain
     with p.open() as f:
@@ -579,21 +587,34 @@ def audit_show(
     )
 
     if raw:
-        # Per-event view (legacy / debug)
+        # Per-event view (one row per audit event, no pairing).
+        # Same vocabulary as the paired view + tail: ✓ allow / ? ask /
+        # ✗ block / ✗ scope / ▸ spawn / ↳ sub.
         type_label = {
-            "session.start":          ("cyan",     "▸ session start"),
-            "session.end":            ("cyan",     "◂ session end"),
-            "agent.spawned":          ("cyan",     "▸ spawn"),
-            "agent.closed":           ("cyan",     "◂ close"),
+            "session.start":          ("cyan",     "▸ session"),
+            "session.end":            ("cyan",     "◂ session"),
+            "agent.spawned":          ("magenta",  "▸ spawn"),
+            "agent.closed":           ("magenta",  "◂ close"),
             "tool.attempted":         ("dim",      "· attempt"),
-            "tool.completed":         ("green",    "✓ completed"),
-            "tool.errored":           ("red",      "✗ errored"),
+            "tool.completed":         ("green",    "✓ done"),
+            "tool.errored":           ("red",      "✗ error"),
             **{k: v for k, v in verdict_glyph.items()},
         }
+
+        # Pre-pass to assign stable sub·N labels in spawn order.
+        sub_labels: dict[str, str] = {}
+        n = 0
+        for evt in events:
+            if evt.get("type") == "agent.spawned":
+                sid = str(evt.get("session_id", ""))
+                if sid and sid not in sub_labels:
+                    n += 1
+                    sub_labels[sid] = f"sub·{n}"
+
         table.add_column("time", style="dim", no_wrap=True, width=8)
         table.add_column("risk", no_wrap=True, width=8)
-        table.add_column("event", no_wrap=True, width=18)
-        table.add_column("tool", no_wrap=True, max_width=14)
+        table.add_column("event", no_wrap=True, width=14)
+        table.add_column("tool", no_wrap=True, max_width=18)
         table.add_column("what / reason", no_wrap=False)
         for evt in events[-last:]:
             etype = str(evt.get("type", ""))
@@ -612,12 +633,32 @@ def audit_show(
                     piece = v.replace("\n", " ")[:80]
             reason = payload.get("reason") or payload.get("risk_reason") or ""
             text = piece + (f"  [dim italic]— {reason}[/dim italic]" if reason else "")
+
+            # sub-agent decoration — same as the paired view
+            parent = payload.get("parent_session_id") if isinstance(payload, dict) else ""
+            sid = str(evt.get("session_id", ""))
+            if parent and sid in sub_labels:
+                tool_cell = f"[magenta]↳ {sub_labels[sid]}[/magenta]  [dim]{tool}[/dim]"
+            elif parent:
+                tool_cell = f"[magenta]↳ sub[/magenta]  [dim]{tool}[/dim]"
+            else:
+                tool_cell = tool
+
             table.add_row(
                 str(evt.get("ts", ""))[11:19],
                 f"[{rcolor}]{risk}[/{rcolor}]",
                 f"[{tcolor}]{tlabel}[/{tcolor}]",
-                tool, text,
+                tool_cell, text,
             )
+        legend_bits = [
+            "[green]✓ allow[/green]",
+            "[yellow]? ask[/yellow]",
+            "[bold red]✗ block[/bold red]",
+            "[magenta]✗ scope[/magenta]",
+            "[magenta]↳ sub-agent[/magenta]",
+        ]
+        out.print("[dim]legend:[/dim]  " + "   ".join(legend_bits))
+        out.print()
         out.print(table)
         return
 
