@@ -522,6 +522,14 @@ def audit_show(
                  "tool.attempted with its verdict",
         ),
     ] = False,
+    full: Annotated[
+        bool,
+        typer.Option(
+            "--full",
+            help="show full reason text wrapped across multiple lines. "
+                 "Default is one-line-per-row with truncation.",
+        ),
+    ] = False,
     project: Annotated[
         Path | None,
         typer.Option(
@@ -663,12 +671,18 @@ def audit_show(
         return
 
     # Paired view (default): one row per tool call, attempt + verdict joined.
+    # Compact mode by default — single line per row, truncate. Use --full
+    # for the wrapped multi-line view if you actually want all the prose.
     table.add_column("time", style="dim", no_wrap=True, width=8)
     table.add_column("verdict", no_wrap=True, width=8)
     table.add_column("risk", no_wrap=True, width=8)
     table.add_column("tool", no_wrap=True, max_width=18)
-    table.add_column("what was tried", no_wrap=False, ratio=2)
-    table.add_column("why", style="dim italic", no_wrap=False, ratio=2)
+    if full:
+        table.add_column("what was tried", no_wrap=False, ratio=2)
+        table.add_column("why", style="dim italic", no_wrap=False, ratio=2)
+    else:
+        table.add_column("what was tried", no_wrap=True, max_width=44, overflow="ellipsis")
+        table.add_column("why", style="dim italic", no_wrap=True, max_width=60, overflow="ellipsis")
 
     # Build a session_id → short label map so sub-agents have a readable
     # identity in the rendered table. ses-foo-1234 → "sub·1234".
@@ -714,6 +728,11 @@ def audit_show(
         for r in rows
     )
 
+    # Steel-blue accent for the "try instead" hint lane (delta convention,
+    # matches every popular delta theme: Arctic Fox / Mantis Shrimp /
+    # Tangara-chilensis). Distinct from coral block + amber ask.
+    HINT = "#5E81AC"
+
     for r in rows:
         risk = str(r["risk"])
         rcolor = risk_style.get(risk, "white")
@@ -726,20 +745,30 @@ def audit_show(
         if isinstance(ap, dict):
             v = ap.get("command") or ap.get("path") or ap.get("file_path") or ""
             if isinstance(v, str):
-                what = v.replace("\n", " ")[:120]
-        reason = (verdict.get("reason") or verdict.get("risk_reason")
-                  or attempt.get("risk_reason") or "")
-        if isinstance(reason, str):
-            reason = reason[:140]
+                what = v.replace("\n", " ")
+                if not full:
+                    what = what[:80]
+
+        # Split the new "<reason> · try instead: <suggestion>" format so the
+        # suggestion can render on its own row underneath, in steel-blue.
+        raw_reason = str(verdict.get("reason") or verdict.get("risk_reason")
+                          or attempt.get("risk_reason") or "")
+        suggestion = ""
+        if " · try instead: " in raw_reason:
+            short_reason, suggestion = raw_reason.split(" · try instead: ", 1)
+        else:
+            short_reason = raw_reason
+        if not full:
+            short_reason = short_reason[:60]
 
         # sub-agent decoration — visible by default
         parent = (verdict.get("parent_session_id")
                   or attempt.get("parent_session_id") or "")
         sub_label = session_labels.get(str(r["session_id"]), "")
         if parent and sub_label:
-            tool_cell = f"  [magenta]↳ {sub_label}[/magenta]  [dim]{tool}[/dim]"
+            tool_cell = f"[magenta]↳ {sub_label}[/magenta]  [dim]{tool}[/dim]"
         elif parent:
-            tool_cell = f"  [magenta]↳ sub[/magenta]  [dim]{tool}[/dim]"
+            tool_cell = f"[magenta]↳ sub[/magenta]  [dim]{tool}[/dim]"
         else:
             tool_cell = tool
 
@@ -747,8 +776,19 @@ def audit_show(
             str(r["ts"])[11:19],
             f"[{vcolor}]{vlabel}[/{vcolor}]",
             f"[{rcolor}]{risk}[/{rcolor}]",
-            tool_cell, what, str(reason),
+            tool_cell, what, short_reason,
         )
+        # Conditional hint-lane row underneath. Only renders for blocked /
+        # ask events that carry a paste-able suggestion. Steel-blue accent
+        # (delta convention) makes the action visually distinct from the
+        # event row's verdict color.
+        if suggestion:
+            sugg_text = suggestion if full else suggestion[:90]
+            table.add_row(
+                "", "", "", "",
+                f"[#{HINT[1:]}]↪ try[/]",
+                f"[#{HINT[1:]}]{sugg_text}[/]",
+            )
 
     # legend printed ABOVE the table so the symbols are obvious
     legend_bits = [
@@ -756,6 +796,7 @@ def audit_show(
         "[yellow]? ask[/yellow]",
         "[bold red]✗ block[/bold red]",
         "[magenta]✗ scope[/magenta]",
+        f"[#{HINT[1:]}]↪ try[/]",
     ]
     if has_subs:
         legend_bits.append("[magenta]↳[/magenta] sub-agent (Task)")

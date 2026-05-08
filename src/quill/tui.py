@@ -45,6 +45,8 @@ PALETTE = {
     "block": "#c1442f",   # warm coral, brand-aligned
     "sub":   "#7a4a7a",   # plum for sub-agent decoration
     "spawn": "#7a4a7a",
+    "hint":  "#5E81AC",   # steel-blue (delta convention) — the
+                          # "try instead" / informational lane
 }
 
 CSS = f"""
@@ -308,6 +310,7 @@ class QuillWatchTUI(App):
                     f"[#{PALETTE['ask'][1:]}]? ask[/]\n"
                     f"[#{PALETTE['block'][1:]}]✗ block[/]   "
                     f"[#{PALETTE['sub'][1:]}]✗ scope[/]\n"
+                    f"[#{PALETTE['hint'][1:]}]↪ try[/]   "
                     f"[#{PALETTE['sub'][1:]}]↳ sub-agent[/]",
                     classes="item",
                 )
@@ -448,14 +451,31 @@ class QuillWatchTUI(App):
             tool = label
             what = f"spawned by [{e.parent_session_id[:12]}…] {short_cwd}"
 
+        # Split the "<reason> · try instead: <suggestion>" format so the
+        # suggestion can render on its own steel-blue row beneath this one.
+        full_reason = e.reason
+        suggestion = ""
+        if " · try instead: " in full_reason:
+            short_reason, suggestion = full_reason.split(" · try instead: ", 1)
+        else:
+            short_reason = full_reason
+
         self._table.add_row(
             f"[#{PALETTE['muted'][1:]}]{e.time_short}[/]",
             f"[#{tcolor[1:]}]{tlabel}[/]",
             f"[#{risk_color[1:]}]{e.risk}[/]",
             f"{sub_tag}{tool}",
             what,
-            f"[#{PALETTE['muted'][1:]}][i]{e.reason[:80]}[/i][/]",
+            f"[#{PALETTE['muted'][1:]}][i]{short_reason[:80]}[/i][/]",
         )
+        # Hint-lane row, only when there's an actionable suggestion.
+        # Steel-blue, no clutter, scannable.
+        if suggestion:
+            self._table.add_row(
+                "", "", "", "",
+                f"[#{PALETTE['hint'][1:]}]↪ try[/]",
+                f"[#{PALETTE['hint'][1:]}]{suggestion[:90]}[/]",
+            )
 
     def _refresh_sidebar(self) -> None:
         c = Counter()
