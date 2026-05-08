@@ -282,11 +282,11 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel)
   <span class=meta live><span class=pulse></span> live</span>
 </header>
 <div class=legend>
-  <span class="item allow"><span class=glyph>✓</span> allowed</span>
-  <span class="item ask"><span class=glyph>?</span> ask human</span>
-  <span class="item block"><span class=glyph>✗</span> BLOCKED</span>
-  <span class="item scope"><span class=glyph>✗</span> scope violation</span>
-  <span class="item sub"><span class=glyph>↳</span> sub-agent (Task)</span>
+  <span class="item allow"><span class=glyph>✓</span> allow</span>
+  <span class="item ask"><span class=glyph>?</span> ask</span>
+  <span class="item block"><span class=glyph>✗</span> block</span>
+  <span class="item scope"><span class=glyph>✗</span> scope</span>
+  <span class="item sub"><span class=glyph>↳</span> sub-agent</span>
   <span class=meta style="margin-left:auto;">click any row for details</span>
 </div>
 <main id=feed>
@@ -309,16 +309,18 @@ const subLabels = new Map();   // session_id -> "sub·N"
 let subCounter = 0;
 
 function shortType(t) {
-  if (t === "verdict.allowed") return ["allowed", "allowed"];
-  if (t === "verdict.blocked") return ["blocked", "BLOCKED"];
-  if (t === "verdict.scope_violation") return ["scope", "scope violation"];
-  if (t === "verdict.ask") return ["ask", "ask human"];
-  if (t === "tool.attempted") return ["attempt", "attempted"];
-  if (t === "tool.completed") return ["", "completed"];
-  if (t === "session.start") return ["", "session start"];
-  if (t === "session.end") return ["", "session end"];
-  if (t === "agent.spawned") return ["spawned", "agent spawned"];
-  if (t === "agent.closed") return ["", "agent closed"];
+  // Match the canonical vocabulary used by audit show / tail / TUI:
+  // ✓ allow / ? ask / ✗ block / ✗ scope / ▸ spawn / · attempt
+  if (t === "verdict.allowed") return ["allow", "✓ allow"];
+  if (t === "verdict.blocked") return ["block", "✗ block"];
+  if (t === "verdict.scope_violation") return ["scope", "✗ scope"];
+  if (t === "verdict.ask") return ["ask", "? ask"];
+  if (t === "tool.attempted") return ["attempt", "· attempt"];
+  if (t === "tool.completed") return ["", "✓ done"];
+  if (t === "session.start") return ["", "▸ session"];
+  if (t === "session.end") return ["", "◂ session"];
+  if (t === "agent.spawned") return ["spawned", "▸ spawn"];
+  if (t === "agent.closed") return ["", "◂ close"];
   return ["", t];
 }
 
