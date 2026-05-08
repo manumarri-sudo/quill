@@ -163,36 +163,37 @@ def classify_event(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[Risk,
 def decide(tool_name: str, tool_input: Mapping[str, Any]) -> HookDecision:
     """Risk + decision for a single Claude Code PreToolUse event.
 
-    For CRITICAL/HIGH classifications carrying a `suggestion`, we surface
-    that suggestion inline in the reason so the user (and the agent
-    reading the tool result) sees a paste-able safer alternative right
-    next to the block. Constructive gate, not just punitive.
+    Reasons are kept TIGHT. No "Quill blocked: " / "Quill allowed: "
+    prefix — the Claude Code UI already says which decision it is, and
+    the prefix wastes tokens (every blocked call ships ~80 chars of
+    boilerplate back into the agent's context window). Just the
+    machine-readable reason and the paste-able suggestion when one
+    exists.
     """
     risk, reason, suggestion = classify_event(tool_name, tool_input)
-    suffix = f"  ↪ try: {suggestion}" if suggestion else ""
     if risk is Risk.CRITICAL:
+        body = reason
+        if suggestion:
+            body = f"{reason} · try instead: {suggestion}"
         return HookDecision(
             permission="deny",
-            reason=(
-                f"Quill blocked: {reason}.{suffix}  "
-                "(To allow anyway, lower the risk in ~/.quill/config.toml.)"
-            ),
+            reason=body,
             risk=risk,
             audit_event_type="verdict.blocked",
         )
     if risk is Risk.HIGH:
+        body = f"high risk: {reason}"
+        if suggestion:
+            body = f"{body} · try instead: {suggestion}"
         return HookDecision(
             permission="ask",
-            reason=(
-                f"Quill flagged this as high risk: {reason}.{suffix}  "
-                "Claude Code is asking you to confirm."
-            ),
+            reason=body,
             risk=risk,
             audit_event_type="verdict.ask",
         )
     return HookDecision(
         permission="allow",
-        reason=f"Quill allowed: {reason}.",
+        reason=reason,
         risk=risk,
         audit_event_type="verdict.allowed",
     )
