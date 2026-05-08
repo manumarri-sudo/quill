@@ -284,6 +284,43 @@ def check_audit_chain_intact(audit_path: Path | None = None) -> CheckResult:
 # ---------------------------------------------------------------------------
 
 
+def check_permission_decay() -> CheckResult:
+    """Surface decayed Quill permissions if any exist."""
+    try:
+        from quill import decay as _decay  # local import; optional path
+        store = _decay.DecayStore.load()
+    except Exception as e:  # noqa: BLE001
+        return CheckResult(
+            "permission decay", WARN,
+            f"could not read decay store: {e}",
+            fix="Inspect ~/.quill/permissions.json manually.",
+        )
+    decayed = store.decayed()
+    approaching = store.approaching()
+    if decayed:
+        names = ", ".join(p.pattern for p in decayed[:5])
+        more = "" if len(decayed) <= 5 else f", +{len(decayed) - 5} more"
+        return CheckResult(
+            "permission decay", WARN,
+            f"{len(decayed)} decayed: {names}{more}",
+            fix="Run `quill decay show` for the full list, "
+                "`quill decay reaffirm <pattern>` to refresh, or "
+                "`quill decay forget <pattern>` to retire.",
+        )
+    if approaching:
+        return CheckResult(
+            "permission decay", PASS,
+            f"healthy · {len(approaching)} approaching window",
+        )
+    total = len(store.all())
+    if total == 0:
+        return CheckResult(
+            "permission decay", PASS,
+            "no tracked permissions yet (auto-registered on first override)",
+        )
+    return CheckResult("permission decay", PASS, f"{total} healthy")
+
+
 def run_doctor(
     config_path: Path | None = None,
 ) -> DoctorReport:
@@ -299,6 +336,7 @@ def run_doctor(
     report.add(check_hmac_key())
     report.add(check_audit_chain_intact(audit_path=audit_path))
     report.add(check_claude_hook_installed())
+    report.add(check_permission_decay())
     for r in check_upstream_executables(cfg):
         report.add(r)
     return report
