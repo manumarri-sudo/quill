@@ -143,3 +143,7 @@ If you have a published red-team trace, a missed dangerous action class, or a vi
 ## License
 
 MIT.
+
+---
+
+Built with assistance from Claude (Anthropic).
