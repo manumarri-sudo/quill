@@ -46,7 +46,7 @@ Quill governs two different surfaces. Both ship in v0.1; pick whichever fits how
 
 ### Path A: Claude Code's built-in tools (recommended for vibe coders)
 
-Claude Code's `Bash`, `Edit`, `Write`, and `NotebookEdit` are *not* MCP tools — they're internal. Quill plugs into Claude Code's `PreToolUse` hook so every built-in tool call is gated before it executes.
+Claude Code's `Bash`, `Edit`, `Write`, and `NotebookEdit` are *not* MCP tools. they're internal. Quill plugs into Claude Code's `PreToolUse` hook so every built-in tool call is gated before it executes.
 
 ```bash
 pip install quill
@@ -64,7 +64,7 @@ If you also use Claude Code's `mcpServers` config to point at upstream MCP serve
 
 ```bash
 quill init
-# edit ~/.quill/config.toml — declare your session intent, scope, and upstreams
+# edit ~/.quill/config.toml. declare your session intent, scope, and upstreams
 quill serve
 ```
 
@@ -138,7 +138,7 @@ Quill aims for invisible: P50 overhead < 2ms on the policy-allow path, P99 < 10m
 
 ## Contributing
 
-If you have a published red-team trace, a missed dangerous action class, or a vibe-coding disaster I should be defaulting to critical, open an issue. If you have a framework adapter you want to see (LangGraph, AutoGen, CrewAI, OpenAI Agents SDK), open a PR — adapters live under `src/quill/adapters/`.
+If you have a published red-team trace, a missed dangerous action class, or a vibe-coding disaster I should be defaulting to critical, open an issue. If you have a framework adapter you want to see (LangGraph, AutoGen, CrewAI, OpenAI Agents SDK), open a PR. adapters live under `src/quill/adapters/`.
 
 ## License
 
