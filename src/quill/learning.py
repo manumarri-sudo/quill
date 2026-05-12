@@ -408,6 +408,145 @@ def post_decision_update(
 
 
 # ---------------------------------------------------------------------------
+# Drift detection (Page-Hinkley statistic).
+#
+# Detects a sustained shift in the operator's aggregate approval rate
+# at session-end. Per-pattern drift is too sparse to be meaningful at
+# our event volume (research doc S5).
+#
+# Math: maintain a running mean m_t and cumulative deviation. Alert
+# when (current cumulative) - (running min/max cumulative) > lambda,
+# using `delta` as a tolerated-shift slack so noise doesn't fire it.
+#
+# Defaults from Viinikka et al. (IDS background-noise EWMA paper) +
+# the research doc's recommendation.
+
+PH_DELTA: float = 0.005
+PH_LAMBDA: float = 10.0
+
+
+@dataclass
+class PageHinkleyResult:
+    detected: bool
+    direction: Literal["upward", "downward", "none"]
+    statistic: float
+    n_observations: int
+    rate_now: float
+    rate_prior_window: float
+
+
+def page_hinkley(
+    observations: Iterable[float],
+    delta: float = PH_DELTA,
+    lam: float = PH_LAMBDA,
+) -> PageHinkleyResult:
+    """Bidirectional Page-Hinkley over a binary outcome stream.
+
+    Each observation should be 0.0 (deny/ask) or 1.0 (operator
+    approved). Below 20 observations we report no-detect because
+    Page-Hinkley is unreliable in that regime.
+    """
+    xs = list(observations)
+    n = len(xs)
+    if n < 20:
+        return PageHinkleyResult(False, "none", 0.0, n, 0.0, 0.0)
+
+    # Standard Page-Hinkley construction (both directions):
+    #   For UP-shift, accumulate (x - mean - delta); the stream rises
+    #   over its current floor by (sum - min(sum)). Alert if > lambda.
+    #   For DOWN-shift, accumulate (mean - x - delta) - SIGN-FLIPPED
+    #   so a drop in x produces a positive cumulative. Same maths
+    #   from there: stat = (sum - min(sum)). Track MIN for both.
+    mean = 0.0
+    sum_dev_up = 0.0
+    min_dev_up = 0.0
+    sum_dev_down = 0.0
+    min_dev_down = 0.0
+    for i, x in enumerate(xs, start=1):
+        mean = mean + (x - mean) / i
+        sum_dev_up += (x - mean - delta)
+        min_dev_up = min(min_dev_up, sum_dev_up)
+        sum_dev_down += (mean - x - delta)
+        min_dev_down = min(min_dev_down, sum_dev_down)
+
+    stat_up = sum_dev_up - min_dev_up
+    stat_down = sum_dev_down - min_dev_down
+    window = min(20, n)
+    rate_now = sum(xs[-window:]) / window
+    rate_prior = sum(xs[:max(1, n - window)]) / max(1, n - window)
+    if stat_up > lam and rate_now > rate_prior:
+        return PageHinkleyResult(True, "upward", stat_up, n, rate_now, rate_prior)
+    if stat_down > lam and rate_now < rate_prior:
+        return PageHinkleyResult(True, "downward", stat_down, n, rate_now, rate_prior)
+    return PageHinkleyResult(False, "none", max(stat_up, stat_down), n,
+                             rate_now, rate_prior)
+
+
+def aggregate_observations_for_session(
+    audit_events: Iterable[dict[str, Any]],
+    session_id: str,
+) -> list[float]:
+    """Extract a 0/1 stream for one session. 1=operator approved a
+    blocked call via one-shot token; 0=verdict was deny or ask.
+    Plain-LOW allows are excluded (no operator signal)."""
+    out: list[float] = []
+    for e in audit_events:
+        if e.get("session_id") != session_id:
+            continue
+        etype = e.get("type")
+        payload = e.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        if etype == "verdict.blocked":
+            out.append(0.0)
+        elif etype == "verdict.ask":
+            out.append(0.0)
+        elif etype == "verdict.allowed":
+            reason = str(payload.get("reason") or "")
+            if reason.startswith("approved one-shot"):
+                out.append(1.0)
+    return out
+
+
+def check_drift_for_session(
+    audit_events: Iterable[dict[str, Any]],
+    session_id: str,
+) -> dict[str, Any] | None:
+    """Run Page-Hinkley over one session's outcome stream. On detect,
+    emit a `drift_detected` suggestion + return it; else None.
+    """
+    obs = aggregate_observations_for_session(audit_events, session_id)
+    result = page_hinkley(obs)
+    if not result.detected:
+        return None
+    sug = {
+        "type": "drift_detected",
+        "session_id": session_id,
+        "direction": result.direction,
+        "evidence": (
+            f"Page-Hinkley {result.statistic:.2f} > lambda {PH_LAMBDA} "
+            f"(n={result.n_observations}, "
+            f"rate recent={result.rate_now:.2f}, "
+            f"prior={result.rate_prior_window:.2f})"
+        ),
+        "proposal": (
+            f"Approval rate shifted {result.direction}. "
+            "Review recent suggestions and pattern_stats; the operator "
+            "started behaving differently. Common causes: a new "
+            "untrusted repo, a workflow change, or operator fatigue."
+        ),
+        "ts": time.time(),
+    }
+    append_suggestion(sug)
+    log_event(
+        f"drift session={session_id} direction={result.direction} "
+        f"stat={result.statistic:.2f} rate_now={result.rate_now:.2f} "
+        f"rate_prior={result.rate_prior_window:.2f}"
+    )
+    return sug
+
+
+# ---------------------------------------------------------------------------
 # Helpers for the CLI.
 
 def read_recent_log(n: int = 50) -> list[str]:
