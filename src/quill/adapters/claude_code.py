@@ -600,6 +600,39 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     try_instead="",
                 )
 
+    # Promoted-override downshift: the operator explicitly promoted a
+    # loosening_candidate via `quill suggestions promote <key> --ttl-days N`,
+    # which wrote a block into ~/.quill/overrides.toml. If THIS call's
+    # pattern_id has an active (non-expired) override, downshift the
+    # decision. The override is operator-approved and TTL'd; never
+    # silent, never permanent.
+    #
+    # Same safety invariant as trust scope: ONLY downshifts the default
+    # ask path. CRITICAL events (decision.permission == "deny" from
+    # classify_command pattern match) bypass this check entirely and
+    # still fire.
+    if decision.permission == "ask" and "default risk for" in decision.reason:
+        with contextlib.suppress(Exception):
+            from quill.learn import _normalize_block_reason
+            from quill.learning import load_active_overrides
+            head = _normalize_block_reason(original_decision_reason) or original_decision_reason
+            pattern_id = f"{tool_name}:{head}"[:80]
+            overrides = load_active_overrides()
+            if pattern_id in overrides:
+                ov = overrides[pattern_id]
+                decision = HookDecision(
+                    permission="allow",
+                    reason=(
+                        f"operator-promoted override "
+                        f"({ov['remaining_days']:.1f} days remaining)"
+                    ),
+                    risk=Risk.LOW,
+                    audit_event_type="verdict.allowed",
+                    what=decision.what,
+                    why=f"operator promoted pattern via quill suggestions promote",
+                    try_instead="",
+                )
+
     # Bypass-mode downshift: the operator has explicitly opted out of
     # Claude Code's permission prompts (skipDangerousModePermissionPrompt
     # in settings.json, or running with --dangerously-skip-permissions).

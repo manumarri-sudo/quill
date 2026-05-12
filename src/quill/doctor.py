@@ -283,6 +283,26 @@ def check_audit_chain_intact(audit_path: Path | None = None) -> CheckResult:
 # ---------------------------------------------------------------------------
 
 
+def check_stale_pattern_stats() -> CheckResult:
+    """Surface stale per-token pattern rows from a pre-rc5 bug so the
+    operator can run `quill suggestions cleanup` to remove them."""
+    try:
+        from quill.learning import find_stale_patterns
+        stale = find_stale_patterns()
+    except Exception as e:
+        return CheckResult(
+            "stale pattern rows", PASS,
+            f"learning module not loaded ({type(e).__name__})",
+        )
+    if not stale:
+        return CheckResult("stale pattern rows", PASS, "none")
+    return CheckResult(
+        "stale pattern rows", WARN,
+        f"{len(stale)} per-token row(s) from a pre-rc5 bug",
+        fix="quill suggestions cleanup",
+    )
+
+
 def check_self_improvement_signals() -> CheckResult:
     """Surface the highest-severity `quill learn` suggestion as a
     doctor check so silent self-improvement signals don't sit unread.
@@ -393,6 +413,7 @@ def run_doctor(
     report.add(check_claude_hook_installed())
     report.add(check_otel_dual_write())
     report.add(check_permission_decay())
+    report.add(check_stale_pattern_stats())
     report.add(check_self_improvement_signals())
     for r in check_upstream_executables(cfg):
         report.add(r)

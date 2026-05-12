@@ -2949,6 +2949,45 @@ def suggestions_promote(
     )
 
 
+@suggestions_app.command("cleanup")
+def suggestions_cleanup(
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="show what would be removed, don't change anything"),
+    ] = False,
+) -> None:
+    """Remove stale per-token pattern rows from pattern_stats.json.
+
+    A pre-rc5 bug derived the pattern_id from the FLIPPED decision
+    reason after a token consume, producing one dead row per token
+    (e.g. `Bash:approved one-shot via quill approve aBc12`). This
+    command cleans those up. Real patterns are untouched.
+
+    Idempotent: a second invocation after the first removes nothing.
+    """
+    from quill.learning import cleanup_stale_patterns, find_stale_patterns
+    if dry_run:
+        stale = find_stale_patterns()
+        if not stale:
+            console.print("[dim]no stale rows to clean up.[/dim]")
+            return
+        console.print(f"would remove [yellow]{len(stale)}[/yellow] stale row(s):")
+        for pid in stale[:20]:
+            console.print(f"  [dim]{pid}[/dim]")
+        if len(stale) > 20:
+            console.print(f"  [dim]... and {len(stale) - 20} more[/dim]")
+        return
+    n, removed = cleanup_stale_patterns()
+    if n == 0:
+        console.print("[dim]nothing to clean up.[/dim]")
+        return
+    console.print(f"[green]removed[/green] {n} stale pattern row(s).")
+    for pid in removed[:10]:
+        console.print(f"  [dim]{pid}[/dim]")
+    if len(removed) > 10:
+        console.print(f"  [dim]... and {len(removed) - 10} more[/dim]")
+
+
 @suggestions_app.command("dismiss")
 def suggestions_dismiss(
     key: Annotated[
