@@ -120,7 +120,13 @@ def test_run_hook_malformed_input_still_includes_hook_event_name(tmp_path: Path)
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
-def test_run_hook_asks_on_high_risk(tmp_path: Path) -> None:
+def test_run_hook_asks_on_high_risk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Force bypass-mode off; this test pins the DEFAULT-classifier
+    # behaviour, not the bypass-mode downshift (which is exercised in
+    # its own test below).
+    monkeypatch.setenv("QUILL_BYPASS_MODE", "0")
     log = tmp_path / "audit.jsonl"
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         out = run_hook(
@@ -373,7 +379,13 @@ def test_trust_scope_downshifts_default_edit_to_allow(
 def test_trust_scope_does_not_downshift_outside_trusted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Edit outside any trusted path must still gate as ask."""
+    """Edit outside any trusted path must still gate as ask.
+
+    Note: this test pins the TRUST-SCOPE behaviour specifically, so we
+    force bypass-mode off. If bypass mode is on (the operator opted out
+    of Claude Code's permission prompts globally), a different
+    downshift fires that's tested separately.
+    """
     trusted = tmp_path / "trusted_repo"
     trusted.mkdir()
     untrusted = tmp_path / "untrusted_repo"
@@ -387,6 +399,7 @@ def test_trust_scope_does_not_downshift_outside_trusted(
     monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
     monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
     monkeypatch.setenv("QUILL_NO_AUTO_WATCH", "1")
+    monkeypatch.setenv("QUILL_BYPASS_MODE", "0")
     log = tmp_path / "audit.jsonl"
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
