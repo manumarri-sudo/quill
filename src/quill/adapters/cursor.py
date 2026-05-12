@@ -14,39 +14,32 @@ Quill's existing risk classifier + audit log + approvals + Touch ID flow
 all work unchanged. The only adapter-layer work is the field-rename
 between Cursor's input/output JSON and Quill's internal `decide()` core.
 
-FEATURE GAPS RELATIVE TO CLAUDE CODE ADAPTER
---------------------------------------------
-The Cursor adapter is intentionally smaller than the Claude Code adapter
-and skips four pieces of plumbing that are wired in `claude_code.py`.
-Cursor users get the gate, the audit log, and the approve-flow; they do
-NOT get the dashboard / receipts / bridge observability primitives that
-depend on these events. This is a known parity gap, not a bug.
+PARITY WITH CLAUDE CODE ADAPTER
+-------------------------------
+The Cursor adapter is brought up to parity with `claude_code.py` for
+three of the four pieces of trust-layer plumbing:
 
-  1. Session tracking. `claude_code.py` calls `_track_session` and emits
-     `session.open` on first sight of a `session_id` (so receipts and the
-     dashboard can group events by session). Cursor adapter does not -
-     each event carries `session_id` but no open-event anchors the group.
+  1. Session tracking + `session.open` emission. `_track_session` is
+     called with `conversation_id` as both the transcript-equivalent and
+     the session_id (Cursor does not nest sessions, so there's a 1:1
+     mapping). `session.open` fires exactly once per conversation.
 
-  2. Lethal-trifecta enforcement. `claude_code.py` calls
-     `taint.would_close_trifecta` before allowing and escalates to DENY
-     if this call would close the trifecta (untrusted input + private
-     data + exfil vector). Cursor adapter has no such check, so a tool
-     call that would close the trifecta in Cursor is allowed through.
+  2. Lethal-trifecta enforcement. `taint.would_close_trifecta` is called
+     before allowing; an otherwise-allow decision escalates to DENY if
+     this call would close the lethal trifecta. The same approve-token
+     flow releases the deny.
 
-  3. Sub-agent handoff emission. `claude_code.py` emits
-     `agent.handoff.out` on first sight of a sub-session (Task tool
-     spawn). Cursor adapter does not. As a result, `quill bridge` will
-     show no A2A edges for Cursor-driven multi-agent workflows.
+  3. `session.taint.update` emission. Fires only when a trifecta flag
+     flips (matches the Claude Code adapter's emission contract).
 
-  4. Lazy daemon spawn. `claude_code.py` calls `watch.ensure_daemon` so
-     the dashboard self-heals across reboots. Cursor adapter does not.
-     A Cursor user has to run `quill start` or `quill watch` manually.
+  4. Lazy daemon spawn. `main()` calls `watch.ensure_daemon` so the
+     dashboard self-heals across reboots.
 
-Closing this gap is roughly 200 LOC and should factor a
-`run_hook_common(adapter_name, ...)` helper rather than duplicating the
-Claude Code logic. Until then: Cursor users see audit events and gating,
-but `quill receipts`, `quill bridge`, and the dashboard's session view
-will be empty for sessions originating from Cursor.
+NOT IMPLEMENTED (intentionally): sub-agent `agent.handoff.out` /
+`agent.handoff.in` emission. Cursor 1.7 hooks do not expose a sub-agent
+/ Task spawn boundary - each tool call carries one `conversation_id`,
+treated as a single root session. If Cursor adds nested agent support,
+the Claude Code adapter's handoff emission pattern is the template.
 
 Hook contract (verified at https://cursor.com/docs/hooks):
 
@@ -196,6 +189,19 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
         event.get("conversation_id") or event.get("session_id") or "cursor",
     )
 
+    # Session tracking. Cursor uses one conversation_id per session and
+    # does not nest, so transcript_path-equivalent == session_id. We
+    # still get the is_first_seen signal so `session.open` fires once.
+    is_first_seen = False
+    if session_id and session_id != "cursor":
+        with contextlib.suppress(Exception):
+            from quill.adapters.claude_code import _track_session
+            _, _is_new_sub, is_first_seen = _track_session(
+                transcript_path=session_id,  # cursor has 1:1 conv:session
+                session_id=session_id,
+                cwd=cwd,
+            )
+
     decision = decide(tool_name, tool_input)
     agent_id = "cursor"
 
@@ -218,11 +224,56 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     try_instead="",
                 )
 
+    # Trifecta enforcement: an otherwise-allow call that would close the
+    # lethal trifecta (untrusted input + private data + exfil vector)
+    # gets escalated to DENY. Skip if the user already approved this
+    # exact call out-of-band. Mirrors `claude_code.py` lines 511-537.
+    if (
+        decision.permission == "allow"
+        and not approval_token_used
+        and session_id
+    ):
+        with contextlib.suppress(Exception):
+            from quill.adapters.claude_code import _taint_state_for
+            from quill.taint import would_close_trifecta
+            current = _taint_state_for(session_id)
+            if would_close_trifecta(current, tool_name, tool_input):
+                why = (
+                    "would close the lethal trifecta this session "
+                    "(untrusted input + private data + exfil vector)"
+                )
+                decision = HookDecision(
+                    permission="deny",
+                    reason=f"trifecta close - {why} - approve to proceed",
+                    risk=decision.risk,
+                    audit_event_type="verdict.blocked",
+                    what=decision.what,
+                    why=why,
+                    try_instead="",
+                )
+
     # Audit-emit + issue approval token + fire notifications.
     if audit is not None:
         from quill import events as ev
 
         with contextlib.suppress(Exception):
+            # session.open - first time we've ever seen this conversation_id.
+            if is_first_seen:
+                audit.emit(
+                    event_type=ev.SESSION_OPEN,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    risk="low",
+                    payload={
+                        "parent_session_id": "",
+                        "transcript_path": session_id,
+                        "cwd": cwd,
+                        "trust_ladder": "spot_check",
+                        "adapter": "cursor",
+                    },
+                    force_fsync=True,
+                )
+
             issued_token = approval_token_used
             if not issued_token and decision.permission != "allow":
                 with contextlib.suppress(Exception):
@@ -276,6 +327,33 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                         cwd=cwd,
                         approve_token=issued_token,
                         audit=audit,
+                    )
+
+            # session.taint.update - emit only when a flag flips so the
+            # log doesn't carry one taint event per tool call. Mirrors
+            # the Claude Code adapter's emission policy exactly.
+            with contextlib.suppress(Exception):
+                from quill.adapters.claude_code import (
+                    _save_taint_state,
+                    _taint_state_for,
+                )
+                from quill.taint import update_for_call
+                taint_state = _taint_state_for(session_id)
+                _, flipped = update_for_call(taint_state, tool_name, tool_input)
+                if flipped:
+                    _save_taint_state(session_id, taint_state)
+                    audit.emit(
+                        event_type=ev.SESSION_TAINT_UPDATE,
+                        session_id=session_id,
+                        agent_id=agent_id,
+                        risk="low",
+                        payload={
+                            "trifecta": taint_state.to_dict(),
+                            "flipped": flipped,
+                            "tool_name": tool_name,
+                            "adapter": "cursor",
+                        },
+                        force_fsync=taint_state.trifecta_closed,
                     )
 
     # Cursor's response shape (NOT Claude Code's hookSpecificOutput).
@@ -372,6 +450,15 @@ def main() -> int:
             load_config(project_cfg_path)
 
     log_path = log_path or default_audit_path()
+
+    # Lazily ensure the dashboard daemon is alive (parity with Claude Code
+    # adapter). Skippable via QUILL_NO_AUTO_WATCH for power users / CI.
+    import os
+    if not os.environ.get("QUILL_NO_AUTO_WATCH"):
+        with contextlib.suppress(Exception):
+            from quill import watch as _watch
+            _watch.ensure_daemon(log_path, open_browser=False)
+
     try:
         with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:
             response = run_hook(stdin_text, audit=audit)

@@ -278,6 +278,51 @@ def _taint_path() -> Path:
     return default_path("taint.json", env_override="QUILL_TAINT_FILE")
 
 
+def _cascade_receivers_path() -> Path:
+    from quill.paths import default_path
+    return default_path(
+        "cascade_receivers.json",
+        env_override="QUILL_CASCADE_RECEIVERS",
+    )
+
+
+def _record_handoff_receiver(parent_session_id: str, receiver_session_id: str) -> int:
+    """Record a sub-agent receiver for one parent and return the distinct count.
+
+    Keyed by parent_session_id because Claude Code's Task tool gives each
+    spawn a UNIQUE payload_hash (the hash includes to_agent_id). The
+    research spec's "same payload_hash, >=3 receivers" model maps to
+    pub-sub frameworks (LangGraph/CrewAI broadcast). Claude Code's
+    spawn-and-fork model produces fan-out instead: one parent, multiple
+    distinct sub-agents acting on the same world. Counting sub-agents
+    per parent gives the same blast-radius signal under this model.
+
+    Backing file: `{parent_session_id: [sub_session_ids...]}`.
+    Returns the new distinct sub-agent count for this parent. The
+    `agent.cascade.affected` emission fires the moment this hits 3.
+    """
+    if not parent_session_id:
+        return 0
+    p = _cascade_receivers_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(p.read_text()) if p.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    receivers = data.get(parent_session_id) or []
+    if not isinstance(receivers, list):
+        receivers = []
+    if receiver_session_id not in receivers:
+        receivers.append(receiver_session_id)
+    data[parent_session_id] = receivers
+    with contextlib.suppress(OSError):
+        p.write_text(json.dumps(data))
+        p.chmod(0o600)
+    return len(receivers)
+
+
 def _taint_state_for(session_id: str) -> TaintState:
     """Load TaintState for one session_id from the per-session taint store."""
     from quill.taint import TaintState
@@ -592,7 +637,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                 # as orphan (out with no matching in). The fold-by-hash
                 # logic in bridge.py:fold_handoffs depends on this event
                 # being present with the same payload_hash.
-                audit.emit(
+                in_mac = audit.emit(
                     event_type=ev.AGENT_HANDOFF_IN,
                     session_id=session_id,
                     agent_id="claude-code-sub",
@@ -607,6 +652,32 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     },
                     force_fsync=True,
                 )
+
+                # agent.cascade.affected - fan-out detection. One parent
+                # spawning 3+ distinct sub-agents is the blast-radius
+                # signature in Claude Code's spawn-and-fork model. Fires
+                # exactly once per parent at the 3rd sub-agent so the
+                # log gets one cascade event, not one per subsequent sub.
+                with contextlib.suppress(Exception):
+                    subagent_count = _record_handoff_receiver(
+                        parent_session_id, session_id,
+                    )
+                    if subagent_count == 3:
+                        audit.emit(
+                            event_type=ev.AGENT_CASCADE_AFFECTED,
+                            session_id=parent_session_id,
+                            agent_id="claude-code",
+                            risk="high",
+                            payload={
+                                "upstream_event_mac": out_mac,
+                                "parent_session_id": parent_session_id,
+                                "distinct_subagents": subagent_count,
+                                "latest_in_mac": in_mac,
+                                "latest_subagent_session_id": session_id,
+                                "transcript_path": transcript_path,
+                            },
+                            force_fsync=True,
+                        )
 
             audit.emit(
                 event_type=ev.TOOL_ATTEMPTED,
