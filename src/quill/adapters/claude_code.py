@@ -531,6 +531,33 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     decision = decide(tool_name, tool_input)
     agent_id = "claude-code-sub" if parent_session_id else "claude-code"
 
+    # Trust-scope downshift: a default-HIGH-risk Edit/Write inside a
+    # trusted directory (listed in `[trust] paths` in config.toml) is
+    # downgraded to LOW + auto-allow. This is the fix for the
+    # approval-fatigue problem: 991 high-risk Edit/Write asks in a
+    # single week of dogfooding, 92% noise. Only the DEFAULT
+    # classification is downshifted - pattern-matched HIGHs (Bash
+    # commands matching the HIGH regex set, per-tool policy overrides)
+    # and all CRITICAL events are NOT affected.
+    if (
+        decision.permission == "ask"
+        and tool_name in ("Edit", "Write", "MultiEdit", "NotebookEdit")
+        and "default risk for" in decision.reason
+        and cwd
+    ):
+        with contextlib.suppress(Exception):
+            from quill.paths import is_trusted_cwd
+            if is_trusted_cwd(cwd):
+                decision = HookDecision(
+                    permission="allow",
+                    reason=f"trusted scope: {tool_name} in {cwd}",
+                    risk=Risk.LOW,
+                    audit_event_type="verdict.allowed",
+                    what=decision.what,
+                    why="trusted scope (config [trust] paths)",
+                    try_instead="",
+                )
+
     # One-shot approval check: if the user ran `quill approve <token>` for
     # this exact (tool_name, args) within the TTL, consume the approval
     # and let the call through. This is the "go ahead" path the user

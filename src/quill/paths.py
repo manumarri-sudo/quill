@@ -26,3 +26,40 @@ def default_path(filename: str, env_override: str | None = None) -> Path:
         if raw:
             return Path(raw).expanduser()
     return quill_home() / filename
+
+
+def is_trusted_cwd(cwd: str) -> bool:
+    """True if `cwd` sits inside any path listed in `[trust] paths`.
+
+    Reads the user config best-effort: missing config, malformed config,
+    or a non-existent cwd all return False so the gate stays safe-default.
+    Matches both exact (cwd == trusted_path) and inside (cwd is a
+    descendant of trusted_path); `~` is expanded and symlinks resolved
+    before comparison so operator-written paths Just Work.
+    """
+    if not cwd:
+        return False
+    try:
+        cwd_resolved = Path(cwd).expanduser().resolve()
+    except (OSError, ValueError):
+        return False
+    try:
+        from quill.config import load_config
+        cfg = load_config()
+    except Exception:
+        return False
+    paths = list(getattr(cfg.trust, "paths", []) or [])
+    for raw in paths:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        try:
+            trusted = Path(raw).expanduser().resolve()
+        except (OSError, ValueError):
+            continue
+        try:
+            if cwd_resolved == trusted or cwd_resolved.is_relative_to(trusted):
+                return True
+        except ValueError:
+            # is_relative_to raises on different anchors (e.g. cross-drive).
+            continue
+    return False

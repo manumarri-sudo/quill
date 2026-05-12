@@ -334,6 +334,140 @@ def test_subagent_spawn_emits_handoff_out(
     assert sub_attempts[0]["agent_id"] == "claude-code-sub"
 
 
+def test_trust_scope_downshifts_default_edit_to_allow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A default-HIGH-risk Edit inside a [trust] paths directory must
+    downshift to LOW + auto-allow. This is the fix for approval
+    fatigue: 991 noisy Edit/Write asks per week was 92% of the volume.
+    """
+    trusted = tmp_path / "trusted_repo"
+    trusted.mkdir()
+    config = tmp_path / "config.toml"
+    config.write_text(
+        '[session]\n'
+        'intent = "test"\n'
+        'scope = []\n\n'
+        '[trust]\n'
+        f'paths = ["{trusted}"]\n'
+    )
+    monkeypatch.setenv("QUILL_CONFIG", str(config))
+    monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
+    monkeypatch.setenv("QUILL_NO_AUTO_WATCH", "1")
+    log = tmp_path / "audit.jsonl"
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        out = run_hook(
+            _payload(tool_name="Edit", session_id="s-edit",
+                     transcript=str(transcript), cwd=str(trusted),
+                     file_path="/x.py", old_string="a", new_string="b"),
+            audit=audit,
+        )
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert "trusted scope" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_trust_scope_does_not_downshift_outside_trusted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Edit outside any trusted path must still gate as ask."""
+    trusted = tmp_path / "trusted_repo"
+    trusted.mkdir()
+    untrusted = tmp_path / "untrusted_repo"
+    untrusted.mkdir()
+    config = tmp_path / "config.toml"
+    config.write_text(
+        '[session]\nintent = "test"\nscope = []\n\n'
+        f'[trust]\npaths = ["{trusted}"]\n'
+    )
+    monkeypatch.setenv("QUILL_CONFIG", str(config))
+    monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
+    monkeypatch.setenv("QUILL_NO_AUTO_WATCH", "1")
+    log = tmp_path / "audit.jsonl"
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        out = run_hook(
+            _payload(tool_name="Edit", session_id="s-outside",
+                     transcript=str(transcript), cwd=str(untrusted),
+                     file_path="/x.py", old_string="a", new_string="b"),
+            audit=audit,
+        )
+    assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+def test_trust_scope_does_not_downshift_critical_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CRITICAL events MUST still deny even inside a trusted dir.
+    Trust scope only downshifts the DEFAULT high-risk classification
+    for Edit/Write/MultiEdit/NotebookEdit. Pattern-matched commands
+    (vercel --prod, git push --force, etc.) and CRITICAL events fire
+    regardless of trust. This is the safety invariant.
+    """
+    trusted = tmp_path / "trusted_repo"
+    trusted.mkdir()
+    config = tmp_path / "config.toml"
+    config.write_text(
+        '[session]\nintent = "test"\nscope = []\n\n'
+        f'[trust]\npaths = ["{trusted}"]\n'
+    )
+    monkeypatch.setenv("QUILL_CONFIG", str(config))
+    monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
+    monkeypatch.setenv("QUILL_NO_AUTO_WATCH", "1")
+    log = tmp_path / "audit.jsonl"
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        out = run_hook(
+            _payload(tool_name="Bash", session_id="s-vercel",
+                     transcript=str(transcript), cwd=str(trusted),
+                     command="vercel deploy --prod --yes"),
+            audit=audit,
+        )
+    # vercel --prod is classified critical/high by pattern; the trust
+    # scope must NOT auto-allow it.
+    assert out["hookSpecificOutput"]["permissionDecision"] != "allow"
+
+
+def test_trust_scope_matches_subdirectories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`~/repo` should cover `~/repo/src/app/page.tsx` too."""
+    trusted = tmp_path / "trusted_repo"
+    (trusted / "src" / "app").mkdir(parents=True)
+    config = tmp_path / "config.toml"
+    config.write_text(
+        '[session]\nintent = "test"\nscope = []\n\n'
+        f'[trust]\npaths = ["{trusted}"]\n'
+    )
+    monkeypatch.setenv("QUILL_CONFIG", str(config))
+    monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
+    monkeypatch.setenv("QUILL_NO_AUTO_WATCH", "1")
+    log = tmp_path / "audit.jsonl"
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        out = run_hook(
+            _payload(tool_name="Write", session_id="s-sub",
+                     transcript=str(transcript),
+                     cwd=str(trusted / "src" / "app"),
+                     file_path="/y.py", content="hi"),
+            audit=audit,
+        )
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert "trusted scope" in out["hookSpecificOutput"]["permissionDecisionReason"]
+
+
 def test_session_end_emits_session_close(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

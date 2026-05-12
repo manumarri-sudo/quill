@@ -11,6 +11,7 @@ The CLI is deliberately thin. Logic lives in the library; this module is wiring.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import secrets
@@ -119,6 +120,12 @@ notify_app = typer.Typer(
     help="notification channels - test that your wiring actually delivers.",
 )
 app.add_typer(notify_app, name="notify")
+
+trust_app = typer.Typer(
+    no_args_is_help=True,
+    help="trusted directories - downshift default Edit/Write risk to auto-allow inside listed paths. The fix for approval fatigue.",
+)
+app.add_typer(trust_app, name="trust")
 
 console = Console(stderr=True)
 
@@ -2273,6 +2280,197 @@ def approvals_revoke(
         console.print(f"[yellow]revoked[/yellow] {token}")
     else:
         console.print(f"[dim]no token[/dim] {token}")
+        raise typer.Exit(code=1)
+
+
+# --------------------------------------------------------------------------
+# trust - per-directory trust scopes. The fix for approval fatigue.
+# Edit/Write inside a trusted path auto-allows; everything else still gates.
+
+
+def _load_or_init_config_toml() -> tuple[Path, dict[str, object]]:
+    """Read ~/.quill/config.toml as a mutable dict; init a minimal one if missing.
+
+    Returns (path, data). Caller mutates data and writes it back. Keeps the
+    starter `[session] intent = "..."` line so future `load_config()` calls
+    still pass Pydantic validation - QuillConfig requires SessionConfig.
+    """
+    import sys as _sys
+    if _sys.version_info >= (3, 11):
+        import tomllib as _tomllib
+    else:
+        import tomli as _tomllib  # type: ignore[no-redef]
+    from quill.config import default_config_path
+
+    p = default_config_path()
+    data: dict[str, object] = {}
+    if p.exists():
+        with contextlib.suppress(OSError, _tomllib.TOMLDecodeError):
+            with p.open("rb") as f:
+                data = _tomllib.load(f) or {}
+    if "session" not in data:
+        # Minimum viable session block so load_config() validation passes
+        # after our write. Operator can edit the intent later.
+        data["session"] = {"intent": "(autocreated by quill trust)", "scope": []}
+    return p, data
+
+
+def _write_config_toml(path: Path, data: dict[str, object]) -> None:
+    """Write the config dict back as TOML. Stdlib has no toml writer, so we
+    hand-format - simple key/value, [section], [[upstream]] arrays. Good
+    enough for the small surface quill writes (trust / policy / [session])."""
+    out: list[str] = []
+    # Order: session, audit, trust, policy, telemetry, upstream, then anything else
+    section_order = ["session", "audit", "trust", "policy", "telemetry"]
+    written: set[str] = set()
+
+    def fmt_value(v: object) -> str:
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, (int, float)):
+            return str(v)
+        if isinstance(v, str):
+            # TOML basic string with backslash + dquote escaping
+            return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        if isinstance(v, list):
+            return "[" + ", ".join(fmt_value(x) for x in v) + "]"
+        return '"' + str(v).replace('"', '\\"') + '"'
+
+    def emit_section(name: str, body: object) -> None:
+        if not isinstance(body, dict):
+            return
+        out.append(f"[{name}]")
+        for k, v in body.items():
+            out.append(f"{k} = {fmt_value(v)}")
+        out.append("")
+
+    for name in section_order:
+        if name in data:
+            emit_section(name, data[name])
+            written.add(name)
+    # Pass through any other top-level dict sections (e.g. [bash], [notify]).
+    for name, body in data.items():
+        if name in written:
+            continue
+        if name == "upstream" and isinstance(body, list):
+            for item in body:
+                if isinstance(item, dict):
+                    out.append("[[upstream]]")
+                    for k, v in item.items():
+                        out.append(f"{k} = {fmt_value(v)}")
+                    out.append("")
+            written.add(name)
+            continue
+        if isinstance(body, dict):
+            emit_section(name, body)
+        written.add(name)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(out).rstrip() + "\n")
+    with contextlib.suppress(OSError):
+        path.chmod(0o600)
+
+
+def _normalize_trust_path(raw: str) -> str:
+    """Operator-facing: take a path, return its resolved absolute form.
+
+    `~/foo` -> `/Users/.../foo`. Non-existent paths are still returned
+    (operator might be pre-adding a path they're about to create).
+    """
+    return str(Path(raw).expanduser().resolve(strict=False))
+
+
+@trust_app.command("add")
+def trust_add(
+    path: Annotated[
+        str,
+        typer.Argument(help="directory to trust. Edit/Write inside it auto-allows."),
+    ],
+) -> None:
+    """Add a directory to the trust list.
+
+    After this runs, every default-HIGH-risk Edit/Write/MultiEdit/NotebookEdit
+    inside that directory (or any subdirectory) auto-allows instead of
+    asking for approval. Pattern-matched HIGHs (vercel --prod, curl, rm -rf)
+    and CRITICAL events still fire regardless of trust.
+    """
+    resolved = _normalize_trust_path(path)
+    cfg_path, data = _load_or_init_config_toml()
+    trust_block = data.get("trust") or {}
+    if not isinstance(trust_block, dict):
+        trust_block = {}
+    paths = list(trust_block.get("paths") or [])
+    if not isinstance(paths, list):
+        paths = []
+    if resolved in paths:
+        console.print(f"  [dim]already trusted:[/dim] {resolved}")
+        return
+    paths.append(resolved)
+    trust_block["paths"] = paths
+    data["trust"] = trust_block
+    _write_config_toml(cfg_path, data)
+    console.print(f"  [green]trusted[/green] {resolved}")
+    console.print(f"  [dim]config:[/dim] {cfg_path}")
+
+
+@trust_app.command("remove")
+def trust_remove(
+    path: Annotated[
+        str,
+        typer.Argument(help="directory to untrust. Future Edit/Write will gate again."),
+    ],
+) -> None:
+    """Remove a directory from the trust list."""
+    resolved = _normalize_trust_path(path)
+    cfg_path, data = _load_or_init_config_toml()
+    trust_block = data.get("trust") or {}
+    if not isinstance(trust_block, dict):
+        trust_block = {}
+    paths = list(trust_block.get("paths") or [])
+    if resolved not in paths:
+        console.print(f"  [yellow]not in trust list:[/yellow] {resolved}")
+        raise typer.Exit(code=1)
+    paths = [p for p in paths if p != resolved]
+    trust_block["paths"] = paths
+    data["trust"] = trust_block
+    _write_config_toml(cfg_path, data)
+    console.print(f"  [red]untrusted[/red] {resolved}")
+
+
+@trust_app.command("list")
+def trust_list() -> None:
+    """Show every trusted directory."""
+    cfg_path, data = _load_or_init_config_toml()
+    trust_block = data.get("trust") or {}
+    if not isinstance(trust_block, dict):
+        trust_block = {}
+    paths = list(trust_block.get("paths") or [])
+    if not paths:
+        console.print("[dim]no trusted directories yet.[/dim]")
+        console.print(f"[dim]add with: quill trust add <path>  ({cfg_path})[/dim]")
+        return
+    console.print(f"[bold]trusted directories[/bold]  ({cfg_path})")
+    for p in paths:
+        exists_tag = "" if Path(p).exists() else "  [yellow](missing on disk)[/yellow]"
+        console.print(f"  {p}{exists_tag}")
+
+
+@trust_app.command("check")
+def trust_check(
+    cwd: Annotated[
+        str | None,
+        typer.Argument(help="directory to test (defaults to current cwd)"),
+    ] = None,
+) -> None:
+    """Test whether a given directory is currently trusted."""
+    from quill.paths import is_trusted_cwd
+    target = cwd or str(Path.cwd())
+    resolved = str(Path(target).expanduser().resolve(strict=False))
+    if is_trusted_cwd(resolved):
+        console.print(f"  [green]trusted[/green] {resolved}")
+    else:
+        console.print(f"  [dim]not trusted[/dim] {resolved}")
+        console.print(f"  [dim]add with: quill trust add {resolved}[/dim]")
         raise typer.Exit(code=1)
 
 
