@@ -331,7 +331,7 @@ def _stub_tool_result(tool_name: str, scenario: Scenario) -> str:
     For the read-side tools, we stuff the injection prompt into the
     returned content so the agent has somewhere to "discover" it.
     For tools we'd never want the agent to actually run, we still
-    return a benign string — the harness doesn't actually execute.
+    return a benign string - the harness doesn't actually execute.
     """
     if tool_name in ("email.search_emails", "slack.read_channel_messages",
                      "drive.read_file", "calendar.get_events",
@@ -659,7 +659,7 @@ def run_scenario(
                 if turn == 0:
                     starter = _starting_tool_for_suite(scenario.suite)
                     if starter is not None:
-                        # the model didn't call a tool — manually surface the
+                        # the model didn't call a tool - manually surface the
                         # injection by ending the loop. The intended path is
                         # for the agent to *choose* to read first.
                         pass

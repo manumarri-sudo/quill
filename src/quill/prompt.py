@@ -12,15 +12,24 @@ Stripe handle in their own dangerous-action UX.
 
 Output uses rich for color + structure, falling back to plain text in
 non-TTY environments (CI, subprocess capture).
+
+Non-interactive fallback: under `quill serve` (MCP stdio proxy mode), the
+process's stdin is owned by the JSON-RPC reader - `input()` would EOF
+immediately. When `confirm()` detects a non-TTY stdin, it issues a one-shot
+approval token, fires out-of-band notifications, prints a paste-able
+`quill approve <token>` line on stderr, and declines THIS call. The agent's
+retry of the same call within the TTL will be allowed automatically by the
+approval-consumption path in `quill.adapters.claude_code.run_hook`.
 """
 from __future__ import annotations
 
 import os
+import sys
 import time
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Any, Final
 
 from rich.console import Console
 from rich.panel import Panel
@@ -102,6 +111,103 @@ class Prompter:
             ),
         )
 
+    def _stdin_is_interactive(self) -> bool:
+        """Can we actually read from stdin without blocking forever?
+
+        Under `quill serve` the JSON-RPC reader owns stdin → input() would
+        EOF immediately AND we'd swallow a JSON-RPC byte if we tried.
+        """
+        try:
+            return bool(sys.stdin and sys.stdin.isatty())
+        except (OSError, AttributeError):
+            return False
+
+    def _confirm_out_of_band(
+        self,
+        *,
+        action: str,
+        risk: Risk,
+        args: Mapping[str, object],
+        plain_summary: str | None,
+        audit: Any | None,
+    ) -> None:
+        """Non-interactive path: issue approval, fire notification, raise.
+
+        Used when stdin can't be read (proxy mode under stdio). The agent
+        retries the same call after the user runs `quill approve <token>`,
+        and the adapter's approval-consume path lets it through.
+        """
+        from quill.approvals import ApprovalStore
+        from quill.notify import BlockMessage, NotifyConfig, NotifyDispatcher
+
+        token = ""
+        try:
+            store = ApprovalStore.load()
+            ap = store.issue(
+                action, dict(args),
+                reason=plain_summary or f"{risk.value} risk: {action}",
+            )
+            token = ap.token
+        except Exception:
+            pass
+
+        # Best-effort notification dispatch from the proxy gate too.
+        try:
+            import tomllib
+
+            from quill.config import default_config_path
+            cfg_path = default_config_path()
+            raw_notify: Mapping[str, Any] | None = None
+            if cfg_path.exists():
+                with cfg_path.open("rb") as f:
+                    raw = tomllib.load(f)
+                if isinstance(raw, dict):
+                    raw_notify = raw.get("notify")
+            if raw_notify:
+                notify_cfg = NotifyConfig.from_dict(raw_notify)
+                msg = BlockMessage(
+                    risk=risk.value,
+                    decision="ask",
+                    tool_name=action,
+                    args_preview=dict(args),
+                    what=plain_summary or action,
+                    why=f"{risk.value} risk; stdio proxy can't open a y/N prompt",
+                    try_instead="",
+                    approve_token=token,
+                )
+
+                def _emit(et: str, p: Mapping[str, Any]) -> None:
+                    if audit is not None:
+                        try:
+                            audit.emit(
+                                event_type=et,
+                                session_id="quill-proxy",
+                                agent_id="quill.notify",
+                                risk="low",
+                                payload=dict(p),
+                            )
+                        except Exception:
+                            pass
+
+                NotifyDispatcher(config=notify_cfg, audit_emit=_emit).fire(msg)
+        except Exception:
+            pass
+
+        # Surface a paste-able approve line on stderr so the user - even
+        # without notifications wired - sees the path forward in their
+        # terminal output of `quill serve`.
+        self.console.print(
+            f"  [yellow]non-interactive · approve with:[/yellow] "
+            f"[bold]quill approve {token}[/bold]" if token else
+            "  [yellow]non-interactive · could not issue approval token[/yellow]",
+        )
+        msg = (
+            f"non-interactive prompter - agent retry will succeed after "
+            f"`quill approve {token}` (TTL 10m)" if token else
+            f"non-interactive prompter declined {action!r}"
+        )
+        raise HumanDeclined(msg)
+
     def confirm(
         self,
         *,
@@ -111,6 +217,7 @@ class Prompter:
         scope: tuple[str, ...],
         args: Mapping[str, object],
         plain_summary: str | None = None,
+        audit: Any | None = None,
     ) -> float:
         """Block until the operator approves.
 
@@ -118,6 +225,12 @@ class Prompter:
         Raises ConfirmationMismatch if a critical-risk type-confirm fails.
         Returns the latency in seconds (used by the audit log + fatigue
         detector).
+
+        If stdin is not a TTY (proxy stdio mode, CI, captured subprocess),
+        skip the y/N entirely: issue an out-of-band approval token, fire
+        notifications, and decline THIS call with a message telling the
+        user how to approve. Agent retries within the TTL succeed via the
+        same approval flow used by the Claude Code hook.
         """
         if self.is_fatigued():
             self.warn_fatigue()
@@ -149,6 +262,13 @@ class Prompter:
             ),
         )
 
+        # Non-TTY stdin: take the out-of-band path.
+        if not self._stdin_is_interactive():
+            self._confirm_out_of_band(
+                action=action, risk=risk, args=args,
+                plain_summary=plain_summary, audit=audit,
+            )
+
         t0 = time.time()
         try:
             ans = input("  allow? [y/N] ").strip().lower()
@@ -164,7 +284,7 @@ class Prompter:
         # Critical-risk type-confirm: prevents muscle-memory yes-spamming.
         if risk is Risk.CRITICAL:
             self.console.print(
-                f"  [bold red]CRITICAL.[/bold red] type the action name to confirm:",
+                "  [bold red]CRITICAL.[/bold red] type the action name to confirm:",
             )
             self.console.print(f"  [dim]> [/dim][bold]{action}[/bold]")
             try:
@@ -174,7 +294,7 @@ class Prompter:
             if typed != action:
                 latency = time.time() - t0
                 self._ack_latencies.append(latency)
-                self.console.print("  [red]mismatch — declined.[/red]")
+                self.console.print("  [red]mismatch - declined.[/red]")
                 msg = f"type-confirm mismatch for {action!r}: got {typed!r}"
                 raise ConfirmationMismatch(msg)
 

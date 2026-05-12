@@ -17,21 +17,20 @@ the old localhost HTTP dashboard.
 from __future__ import annotations
 
 import json
-import time
 from collections import Counter
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Static
-
 
 # ---- palette (matches the landing page locked tokens) ---------------------
 
@@ -45,7 +44,7 @@ PALETTE = {
     "block": "#c1442f",   # warm coral, brand-aligned
     "sub":   "#7a4a7a",   # plum for sub-agent decoration
     "spawn": "#7a4a7a",
-    "hint":  "#5E81AC",   # steel-blue (delta convention) — the
+    "hint":  "#5E81AC",   # steel-blue (delta convention) - the
                           # "try instead" / informational lane
 }
 
@@ -226,7 +225,7 @@ class FilterState:
 # ---- main app -------------------------------------------------------------
 
 
-class PeekModal(ModalScreen):
+class PeekModal(ModalScreen[None]):
     """Full-event JSON peek on Enter."""
 
     BINDINGS = [Binding("escape", "dismiss", "close"),
@@ -247,10 +246,57 @@ class PeekModal(ModalScreen):
         self.app.pop_screen()
 
 
-class QuillWatchTUI(App):
-    """`quill watch` — TUI dashboard."""
+class QuillCommands(Provider):
+    """Textual CommandPalette provider - fuzzy-searchable actions.
+
+    Reachable via `Ctrl+P` or `:` (Textual's built-in palette opens both).
+    Maps Quill's existing keymap operations to a discoverable surface so
+    new users don't have to memorize 14 shortcuts. Zero new dependencies -
+    Textual ships the palette natively (MIT).
+    """
+
+    async def discover(self) -> Hits:
+        """Show this list when the palette opens with an empty query."""
+        app = self.app
+        for cmd in self._commands(app):
+            yield DiscoveryHit(cmd[0], cmd[1], help=cmd[2])
+
+    async def search(self, query: str) -> Hits:
+        """Standard fuzzy match against command names + help text."""
+        matcher = self.matcher(query)
+        for name, runnable, help_text in self._commands(self.app):
+            score = matcher.match(f"{name} {help_text}")
+            if score > 0:
+                yield Hit(score, matcher.highlight(name), runnable, help=help_text)
+
+    @staticmethod
+    def _commands(app: App[None]) -> list[tuple[str, Callable[[], None], str]]:
+        """The canonical command set. Add new entries here, not in BINDINGS."""
+        return [
+            ("filter: all",         app.action_filter_all,     "show every audit event"),
+            ("filter: allowed",     app.action_filter_allowed, "only verdict.allowed events"),
+            ("filter: blocked",     app.action_filter_blocked, "only verdict.blocked events (critical denies)"),
+            ("filter: asked",       app.action_filter_asked,   "only verdict.ask events (waiting on human)"),
+            ("filter: scope",       app.action_filter_scope,   "only verdict.scope_violation events"),
+            ("pause / resume tail", app.action_toggle_pause,   "freeze the live tail to inspect a row"),
+            ("clear screen",        app.action_clear,          "clear the table (keeps the audit log intact)"),
+            ("scroll: top",         app.action_scroll_top,     "jump to oldest event"),
+            ("scroll: bottom",      app.action_scroll_bottom,  "jump to newest event"),
+            ("peek event",          app.action_peek,           "open the JSON peek panel for the selected row"),
+            ("yank command",        app.action_yank,           "copy the selected event's command to clipboard"),
+            ("help",                app.action_help,           "show keyboard shortcuts"),
+            ("quit",                app.action_quit,           "exit the dashboard"),
+        ]
+
+
+class QuillWatchTUI(App[None]):
+    """`quill watch` - TUI dashboard."""
 
     CSS = CSS
+
+    # Plug the QuillCommands provider into the built-in CommandPalette.
+    # Users press Ctrl+P (or :) to fuzzy-search every action.
+    COMMANDS = App.COMMANDS | {QuillCommands}
 
     BINDINGS = [
         Binding("q", "quit", "quit"),
@@ -315,7 +361,7 @@ class QuillWatchTUI(App):
                     classes="item",
                 )
             with Vertical(id="main"):
-                table = DataTable(
+                table: DataTable[str] = DataTable(
                     id="events", zebra_stripes=False,
                     cursor_type="row", header_height=1,
                 )
@@ -478,7 +524,7 @@ class QuillWatchTUI(App):
             )
 
     def _refresh_sidebar(self) -> None:
-        c = Counter()
+        c: Counter[str] = Counter()
         agents: Counter[str] = Counter()
         projects: Counter[str] = Counter()
         for e in self.events:
@@ -548,9 +594,9 @@ class QuillWatchTUI(App):
     def action_peek(self) -> None:
         try:
             row = self._table.cursor_row
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
-        if row is None or row < 0:
+        if row < 0:
             return
         # Map the table row to the event in self.events that's currently
         # shown; with filter active we walk through filtered events.
@@ -561,9 +607,9 @@ class QuillWatchTUI(App):
     def action_yank(self) -> None:
         try:
             row = self._table.cursor_row
-        except Exception:  # noqa: BLE001
+        except Exception:
             return
-        if row is None or row < 0:
+        if row < 0:
             return
         visible = [e for e in self.events if self._passes_filter(e)]
         if 0 <= row < len(visible):
@@ -587,5 +633,5 @@ class QuillWatchTUI(App):
 
 
 def run_tui(log_path: Path) -> None:
-    """Public entry — `quill watch` calls this."""
+    """Public entry - `quill watch` calls this."""
     QuillWatchTUI(log_path).run()

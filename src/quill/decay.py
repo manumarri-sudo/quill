@@ -38,7 +38,7 @@ Behaviour:
     without using the permission, or `quill decay forget <pattern>`
     to drop it entirely.
 
-This is the framework end-to-end — actively-used permissions stay
+This is the framework end-to-end - actively-used permissions stay
 healthy, dormant ones lose force, and the audit log records every
 decay-driven downgrade.
 """
@@ -46,10 +46,8 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
-from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -69,13 +67,12 @@ DEFAULT_WINDOWS: Final[dict[str, int]] = {
 
 
 def _path() -> Path:
-    return Path(
-        os.environ.get("QUILL_DECAY_FILE", "~/.quill/permissions.json"),
-    ).expanduser()
+    from quill.paths import default_path
+    return default_path("permissions.json", env_override="QUILL_DECAY_FILE")
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass(slots=True)
@@ -97,22 +94,44 @@ class Permission:
 
     @property
     def age_days(self) -> int:
+        """Integer-day age, kept for backwards compatibility with the CLI
+        display (`quill decay show`). Use `age_seconds` for boundary checks
+        so a 23h ack vs 25h ack don't flip on the same `delta.days` value."""
         try:
             ts = datetime.fromisoformat(self.last_reaffirmed)
         except ValueError:
             return 0
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        delta = datetime.now(timezone.utc) - ts
+            ts = ts.replace(tzinfo=UTC)
+        delta = datetime.now(UTC) - ts
         return delta.days
 
     @property
+    def age_seconds(self) -> float:
+        """Fractional-day age in seconds. The decay-boundary check uses this
+        so a permission acked 23h ago is not 'older' than one acked 25h ago
+        merely because delta.days happens to flip across the day boundary."""
+        try:
+            ts = datetime.fromisoformat(self.last_reaffirmed)
+        except ValueError:
+            return 0.0
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - ts).total_seconds()
+
+    @property
     def is_decayed(self) -> bool:
-        return self.age_days > self.decay_after_days
+        # Compare in seconds (not integer days) so the boundary is precise.
+        # decay_after_days is interpreted as exact 86400-second multiples.
+        return self.age_seconds > self.decay_after_days * 86400.0
 
     @property
     def days_left(self) -> int:
-        return max(0, self.decay_after_days - self.age_days)
+        # Ceil the remaining fractional days so a permission with 0.4 days
+        # left still displays as "1 day left" (not "0", which reads as "decayed").
+        from math import ceil
+        remaining = self.decay_after_days - (self.age_seconds / 86400.0)
+        return max(0, ceil(remaining))
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -194,7 +213,7 @@ class DecayStore:
         """Mark a permission as used. Creates if missing.
 
         Returns (permission, was_decayed_at_use_time). Caller decides
-        whether to honour the override or fall back to defaults — by
+        whether to honour the override or fall back to defaults - by
         the framework, decayed permissions don't fire.
         """
         key = f"{kind}:{pattern}"
@@ -273,7 +292,7 @@ def _default_window(kind: str) -> int:
 def policy_kind(from_risk: str, to_risk: str) -> str:
     """Compose a kind string for a policy downgrade override.
 
-    Used when the user sets `[policy] "fs.delete" = "low"` — the kind
+    Used when the user sets `[policy] "fs.delete" = "low"` - the kind
     becomes 'policy.critical_to_low' so the appropriate decay window
     applies.
     """

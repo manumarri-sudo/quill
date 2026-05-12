@@ -56,7 +56,7 @@ TOOL_NAMESPACE_MAP: dict[str, tuple[str, str]] = {
     "get_hotels_prices": ("travel", "read"),
 }
 
-# What the user *legitimately* asked for. Always a read-only intent — that is
+# What the user *legitimately* asked for. Always a read-only intent - that is
 # the whole point of the threat model. A user never asks an agent to wire $200
 # to a Russian IBAN; an injected web page does. So the legitimate scope is
 # narrow.
@@ -269,7 +269,7 @@ def curate_30(scenarios: list[Scenario], seed: int = 42,
     """Return up to ``max_n`` scenarios, balanced across suites.
 
     Seeded with ``random.seed(seed)`` for reproducibility. AgentDojo v1 has
-    27 injection tasks total across 4 suites — we take all of them. If we
+    27 injection tasks total across 4 suites - we take all of them. If we
     fall back to the curated list (8 prompts) we just return all.
     """
     if len(scenarios) <= max_n:

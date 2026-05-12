@@ -62,7 +62,10 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from quill.taint import TaintState
 
 from quill.audit import AuditLog
 from quill.config import default_audit_path, load_config
@@ -91,17 +94,30 @@ DEFAULT_BUILTIN_RISK: Final[Mapping[str, Risk]] = {
 
 @dataclass(slots=True)
 class HookDecision:
-    """The gate's verdict for a single Claude Code PreToolUse event."""
+    """The gate's verdict for a single Claude Code PreToolUse event.
+
+    Carries the structured triple a notification needs:
+      - what:        one-line summary of the call
+      - why:         plain-English risk reason
+      - try_instead: paste-able safer alternative (if any)
+
+    `reason` is the compact form Claude Code's UI shows; the structured
+    fields are passed to the notification dispatcher.
+    """
 
     permission: str        # "allow" | "deny" | "ask"
     reason: str
     risk: Risk
     audit_event_type: str  # written to the audit log
+    what: str = ""         # human-readable: "rm -rf node_modules"
+    why: str = ""          # human-readable: "matches `rm -rf` rule"
+    try_instead: str = ""  # paste-able alternative
 
 
 def _default_load_hmac_key() -> bytes:
     """Mirror cli._hmac_key() but importable from the adapter without a circular import."""
-    p = Path(os.environ.get("QUILL_KEY", "~/.quill/key")).expanduser()
+    from quill.paths import default_path
+    p = default_path("key", env_override="QUILL_KEY")
     if p.exists():
         return p.read_bytes()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -140,12 +156,12 @@ def classify_event(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[Risk,
         kind = _decay.policy_kind(natural.value, user_override.value)
         permission, was_decayed = store.record_use(kind, tool_name)
         if permission.is_decayed:
-            # decayed — fall through to default-classifier path. Reason
+            # decayed - fall through to default-classifier path. Reason
             # explains why the override didn't apply.
             return (
                 natural,
                 f"policy override decayed ({permission.age_days}d > "
-                f"{permission.decay_after_days}d window) — falling back "
+                f"{permission.decay_after_days}d window) - falling back "
                 f"to default {natural.value}; reaffirm with: "
                 f"quill decay reaffirm {tool_name}",
                 "",
@@ -155,22 +171,45 @@ def classify_event(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[Risk,
     if tool_name in DEFAULT_BUILTIN_RISK:
         return DEFAULT_BUILTIN_RISK[tool_name], f"default risk for {tool_name}", ""
 
-    # Unknown tool name (custom MCP tool surfaced through Claude Code) — use
+    # Unknown tool name (custom MCP tool surfaced through Claude Code) - use
     # the namespace-based classifier as a last resort.
     return classify(tool_name), f"namespace classifier for {tool_name}", ""
+
+
+def _summarize_call(tool_name: str, tool_input: Mapping[str, Any]) -> str:
+    """One-line human-readable summary of an attempted tool call.
+
+    Used as the WHAT field on notifications and audit events. Examples:
+      Bash + command="rm -rf node_modules"  →  "rm -rf node_modules"
+      Edit + file_path="/x/y.py"            →  "Edit /x/y.py"
+      Read + file_path=".env"               →  "Read .env"
+    """
+    if tool_name == "Bash":
+        cmd = str(tool_input.get("command", ""))
+        return cmd[:200]
+    for key in ("file_path", "path", "filename", "url", "uri"):
+        v = tool_input.get(key)
+        if isinstance(v, str) and v:
+            return f"{tool_name} {v[:160]}"
+    return tool_name
 
 
 def decide(tool_name: str, tool_input: Mapping[str, Any]) -> HookDecision:
     """Risk + decision for a single Claude Code PreToolUse event.
 
     Reasons are kept TIGHT. No "Quill blocked: " / "Quill allowed: "
-    prefix — the Claude Code UI already says which decision it is, and
+    prefix - the Claude Code UI already says which decision it is, and
     the prefix wastes tokens (every blocked call ships ~80 chars of
     boilerplate back into the agent's context window). Just the
     machine-readable reason and the paste-able suggestion when one
     exists.
+
+    Also populates the structured WHAT / WHY / TRY-INSTEAD triple on the
+    decision so the notification dispatcher can render it consistently
+    across macOS Notification Center, email, Slack, and webhooks.
     """
     risk, reason, suggestion = classify_event(tool_name, tool_input)
+    what = _summarize_call(tool_name, tool_input)
     if risk is Risk.CRITICAL:
         body = reason
         if suggestion:
@@ -180,6 +219,7 @@ def decide(tool_name: str, tool_input: Mapping[str, Any]) -> HookDecision:
             reason=body,
             risk=risk,
             audit_event_type="verdict.blocked",
+            what=what, why=reason, try_instead=suggestion,
         )
     if risk is Risk.HIGH:
         body = f"high risk: {reason}"
@@ -190,12 +230,14 @@ def decide(tool_name: str, tool_input: Mapping[str, Any]) -> HookDecision:
             reason=body,
             risk=risk,
             audit_event_type="verdict.ask",
+            what=what, why=f"high risk: {reason}", try_instead=suggestion,
         )
     return HookDecision(
         permission="allow",
         reason=reason,
         risk=risk,
         audit_event_type="verdict.allowed",
+        what=what, why=reason, try_instead=suggestion,
     )
 
 
@@ -227,19 +269,58 @@ def _redacted_input(tool_input: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _session_index_path() -> Path:
-    return Path(
-        os.environ.get("QUILL_SESSIONS", "~/.quill/sessions.json"),
-    ).expanduser()
+    from quill.paths import default_path
+    return default_path("sessions.json", env_override="QUILL_SESSIONS")
+
+
+def _taint_path() -> Path:
+    from quill.paths import default_path
+    return default_path("taint.json", env_override="QUILL_TAINT_FILE")
+
+
+def _taint_state_for(session_id: str) -> TaintState:
+    """Load TaintState for one session_id from the per-session taint store."""
+    from quill.taint import TaintState
+    p = _taint_path()
+    if not p.exists():
+        return TaintState()
+    try:
+        all_states = json.loads(p.read_text() or "{}")
+    except (OSError, json.JSONDecodeError):
+        return TaintState()
+    raw = all_states.get(session_id) or {}
+    return TaintState(
+        has_seen_untrusted=bool(raw.get("has_seen_untrusted", False)),
+        has_accessed_private=bool(raw.get("has_accessed_private", False)),
+        can_exfiltrate=bool(raw.get("can_exfiltrate", False)),
+    )
+
+
+def _save_taint_state(session_id: str, state: TaintState) -> None:
+    p = _taint_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        all_states = json.loads(p.read_text() or "{}") if p.exists() else {}
+    except (OSError, json.JSONDecodeError):
+        all_states = {}
+    if not isinstance(all_states, dict):
+        all_states = {}
+    all_states[session_id] = state.to_dict()
+    with contextlib.suppress(OSError):
+        p.write_text(json.dumps(all_states))
+        p.chmod(0o600)
 
 
 def _track_session(
     *, transcript_path: str, session_id: str, cwd: str,
-) -> tuple[str, bool]:
-    """Update the session index, return (parent_session_id, is_new_subagent).
+) -> tuple[str, bool, bool]:
+    """Update the session index, return (parent_session_id, is_new_subagent, is_first_seen).
 
     parent_session_id is "" if this IS the root session, otherwise the
     root's session_id. is_new_subagent is True the FIRST time we see a
-    given non-root session_id under a transcript.
+    given non-root session_id under a transcript. is_first_seen is True
+    the FIRST time we see this session_id at all (root or sub) - used to
+    emit session.open exactly once per session.
     """
     p = _session_index_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -256,14 +337,15 @@ def _track_session(
         seen = []
     root = rec.get("root")
     is_new_sub = False
+    is_first_seen = False
     if not root:
-        # First event we've ever seen for this transcript — root session.
         root = session_id
         seen = [session_id]
+        is_first_seen = True
     elif session_id not in seen:
-        # New session_id under an existing transcript = sub-agent spawn.
         seen.append(session_id)
         is_new_sub = (session_id != root)
+        is_first_seen = True
 
     index[transcript_path] = {"root": root, "seen": seen, "cwd": cwd}
     with contextlib.suppress(OSError):
@@ -271,7 +353,72 @@ def _track_session(
         p.chmod(0o600)
 
     parent = "" if session_id == root else root
-    return parent, is_new_sub
+    return parent, is_new_sub, is_first_seen
+
+
+def _maybe_notify(
+    *,
+    decision: HookDecision,
+    tool_name: str,
+    tool_input: Mapping[str, Any],
+    session_id: str,
+    cwd: str,
+    approve_token: str,
+    audit: AuditLog,
+) -> None:
+    """Dispatch out-of-band notifications if [notify] is configured.
+
+    Best-effort: if config can't be loaded, returns silently. The
+    NotifyDispatcher itself runs each channel on a background thread so
+    this function returns immediately even when channels are slow.
+    """
+    from quill.notify import BlockMessage, NotifyConfig, NotifyDispatcher
+
+    raw_notify: Mapping[str, Any] | None = None
+    # QuillConfig is strict (extra="forbid"), so [notify] is read straight
+    # from the raw TOML for v0.2's first wire-up. A pydantic NotifyConfig
+    # in config.py is the next refactor.
+    with contextlib.suppress(Exception):
+        import tomllib  # py3.11+
+
+        from quill.config import default_config_path
+        cfg_path = default_config_path()
+        if cfg_path.exists():
+            with cfg_path.open("rb") as f:
+                raw = tomllib.load(f)
+            raw_notify = raw.get("notify") if isinstance(raw, dict) else None
+    if not raw_notify:
+        return
+
+    notify_cfg = NotifyConfig.from_dict(raw_notify)
+    if not notify_cfg.enabled:
+        return
+
+    msg = BlockMessage(
+        risk=decision.risk.value,
+        decision="blocked" if decision.permission == "deny" else "ask",
+        tool_name=tool_name,
+        args_preview=_redacted_input(tool_input),
+        what=decision.what or tool_name,
+        why=decision.why or decision.reason,
+        try_instead=decision.try_instead,
+        approve_token=approve_token,
+        cwd=cwd,
+        session_id=session_id,
+    )
+
+    def _emit_dispatched(event_type: str, payload: Mapping[str, Any]) -> None:
+        with contextlib.suppress(Exception):
+            audit.emit(
+                event_type=event_type,
+                session_id=session_id,
+                agent_id="quill.notify",
+                risk="low",
+                payload=dict(payload),
+            )
+
+    dispatcher = NotifyDispatcher(config=notify_cfg, audit_emit=_emit_dispatched)
+    dispatcher.fire(msg)
 
 
 def _resolve_project_paths(cwd: str) -> tuple[Path, Path | None]:
@@ -309,6 +456,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     except json.JSONDecodeError as e:
         return {
             "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",  # fail-open on malformed input;
                 # the alternative (deny) would trap users behind a parser bug.
                 "permissionDecisionReason": f"quill: malformed hook input: {e}",
@@ -326,9 +474,10 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     # Track session lineage so we can tag sub-agent calls.
     parent_session_id = ""
     is_new_sub = False
+    is_first_seen = False
     if transcript_path and session_id:
         with contextlib.suppress(Exception):
-            parent_session_id, is_new_sub = _track_session(
+            parent_session_id, is_new_sub, is_first_seen = _track_session(
                 transcript_path=transcript_path,
                 session_id=session_id,
                 cwd=cwd,
@@ -337,28 +486,130 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     decision = decide(tool_name, tool_input)
     agent_id = "claude-code-sub" if parent_session_id else "claude-code"
 
-    if audit is not None:
+    # One-shot approval check: if the user ran `quill approve <token>` for
+    # this exact (tool_name, args) within the TTL, consume the approval
+    # and let the call through. This is the "go ahead" path the user
+    # walks after seeing a notification.
+    approval_token_used = ""
+    if decision.permission != "allow":
         with contextlib.suppress(Exception):
-            # Emit a one-time agent.spawned event the first time we see a
-            # sub-agent's session_id, so the audit log captures the
-            # delegation graph.
-            if is_new_sub:
+            from quill.approvals import ApprovalStore
+            store = ApprovalStore.load()
+            consumed = store.consume(tool_name, dict(tool_input))
+            if consumed is not None:
+                approval_token_used = consumed.token
+                decision = HookDecision(
+                    permission="allow",
+                    reason=f"approved one-shot via quill approve {consumed.token[:8]}",
+                    risk=decision.risk,
+                    audit_event_type="verdict.allowed",
+                    what=decision.what,
+                    why=f"user-approved (token {consumed.token[:8]})",
+                    try_instead="",
+                )
+
+    # Trifecta enforcement: if THIS call would close the lethal trifecta
+    # (untrusted input + private data + exfil) for the first time, escalate
+    # an otherwise-allow decision to a deny so the user can decide. Skip
+    # if the user already approved this exact call out-of-band.
+    if (
+        decision.permission == "allow"
+        and not approval_token_used
+        and session_id
+    ):
+        with contextlib.suppress(Exception):
+            from quill.taint import TaintState as _TaintState
+            from quill.taint import would_close_trifecta
+            current = _taint_state_for(session_id) if session_id else _TaintState()
+            if would_close_trifecta(current, tool_name, tool_input):
+                why = (
+                    "would close the lethal trifecta this session "
+                    "(untrusted input + private data + exfil vector)"
+                )
+                decision = HookDecision(
+                    permission="deny",
+                    reason=f"trifecta close · {why} · approve to proceed",
+                    risk=decision.risk,
+                    audit_event_type="verdict.blocked",
+                    what=decision.what,
+                    why=why,
+                    try_instead="",
+                )
+
+    if audit is not None:
+        from quill import events as ev
+        from quill.bridge import payload_hash as _ph
+        from quill.taint import update_for_call
+
+        with contextlib.suppress(Exception):
+            # session.open - first time we've ever seen this session_id.
+            if is_first_seen:
                 audit.emit(
-                    event_type="agent.spawned",
+                    event_type=ev.SESSION_OPEN,
                     session_id=session_id,
                     agent_id=agent_id,
                     risk="low",
                     payload={
-                        "name": "task-subagent",
                         "parent_session_id": parent_session_id,
                         "transcript_path": transcript_path,
                         "cwd": cwd,
+                        "trust_ladder": "spot_check",
+                    },
+                    force_fsync=True,
+                )
+
+            # agent.handoff.out / agent.handoff.in - sub-agent spawn.
+            # Both sides of the edge are emitted from the receiver's hook
+            # invocation (the sub-agent's first tool call); the parent has
+            # already returned from Task() and is no longer running. The
+            # out is recorded under the parent's session_id, the in under
+            # the sub-agent's. The pair is matched by payload_hash;
+            # `from_event_mac` ties the in to the specific out for
+            # cryptographic edge integrity (see
+            # docs/research/agent-trust-infra-2026-05.md S6.1).
+            if is_new_sub:
+                handoff_payload = {
+                    "to_agent_id": session_id,
+                    "from_session_id": parent_session_id,
+                    "transcript_path": transcript_path,
+                }
+                _ph_value = _ph(handoff_payload)
+                out_mac = audit.emit(
+                    event_type=ev.AGENT_HANDOFF_OUT,
+                    session_id=parent_session_id or session_id,
+                    agent_id="claude-code",
+                    risk="low",
+                    payload={
+                        "to_agent_id": session_id,
+                        "contract": "task-subagent",
+                        "payload_hash": _ph_value,
+                        "trust_ladder_inherited": "spot_check",
+                    },
+                    force_fsync=True,
+                )
+                # Receiver-side: same payload_hash, ties to the out's mac.
+                # Without this, `quill bridge show` reports every handoff
+                # as orphan (out with no matching in). The fold-by-hash
+                # logic in bridge.py:fold_handoffs depends on this event
+                # being present with the same payload_hash.
+                audit.emit(
+                    event_type=ev.AGENT_HANDOFF_IN,
+                    session_id=session_id,
+                    agent_id="claude-code-sub",
+                    risk="low",
+                    payload={
+                        "from_agent_id": "claude-code",
+                        "from_session_id": parent_session_id,
+                        "from_event_mac": out_mac,
+                        "payload_hash": _ph_value,
+                        "accepted": True,
+                        "ack_reason": None,
                     },
                     force_fsync=True,
                 )
 
             audit.emit(
-                event_type="tool.attempted",
+                event_type=ev.TOOL_ATTEMPTED,
                 session_id=session_id,
                 agent_id=agent_id,
                 risk=decision.risk.value,
@@ -372,6 +623,20 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     "cwd": cwd,
                 },
             )
+            # Issue a one-shot approval token for blocked / ask decisions
+            # so the notification can include `quill approve <token>` -
+            # the user's "go ahead" path. Tokens TTL ~10 min.
+            issued_token = approval_token_used  # already set if we consumed
+            if not issued_token and decision.permission in ("deny", "ask"):
+                with contextlib.suppress(Exception):
+                    from quill.approvals import ApprovalStore
+                    store = ApprovalStore.load()
+                    ap = store.issue(
+                        tool_name, dict(tool_input),
+                        reason=decision.why or decision.reason,
+                    )
+                    issued_token = ap.token
+
             audit.emit(
                 event_type=decision.audit_event_type,
                 session_id=session_id,
@@ -384,12 +649,49 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     "permission": decision.permission,
                     "parent_session_id": parent_session_id,
                     "cwd": cwd,
+                    "approve_token": issued_token,
+                    "what": decision.what,
+                    "why": decision.why,
+                    "try_instead": decision.try_instead,
                 },
                 force_fsync=decision.risk in (Risk.HIGH, Risk.CRITICAL),
             )
 
+            # Fire out-of-band notifications (macOS, email, Slack, webhook)
+            # asynchronously - never blocks the hook's hot path.
+            if decision.permission in ("deny", "ask") and issued_token:
+                with contextlib.suppress(Exception):
+                    _maybe_notify(
+                        decision=decision,
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                        session_id=session_id,
+                        cwd=cwd,
+                        approve_token=issued_token,
+                        audit=audit,
+                    )
+
+            # session.taint.update - emit only when a flag flips.
+            taint_state = _taint_state_for(session_id)
+            _, flipped = update_for_call(taint_state, tool_name, tool_input)
+            if flipped:
+                _save_taint_state(session_id, taint_state)
+                audit.emit(
+                    event_type=ev.SESSION_TAINT_UPDATE,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    risk="low",
+                    payload={
+                        "trifecta": taint_state.to_dict(),
+                        "flipped": flipped,
+                        "tool_name": tool_name,
+                    },
+                    force_fsync=taint_state.trifecta_closed,
+                )
+
     return {
         "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
             "permissionDecision": decision.permission,
             "permissionDecisionReason": decision.reason,
         },
@@ -426,10 +728,11 @@ def main() -> int:
     try:
         with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:
             response = run_hook(stdin_text, audit=audit)
-    except Exception as e:  # noqa: BLE001 — fail-open on any internal error
+    except Exception as e:
         sys.stderr.write(f"quill claude-hook: internal error, allowing fail-open: {e}\n")
         response = {
             "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
                 "permissionDecisionReason": f"quill internal error (fail-open): {e}",
             },

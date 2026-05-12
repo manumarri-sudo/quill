@@ -1,4 +1,4 @@
-"""`quill doctor` — first-run-friction killer.
+"""`quill doctor` - first-run-friction killer.
 
 Runs deterministic checks against the user's installation and reports a
 green/yellow/red status for each. Designed to answer the question every
@@ -14,9 +14,7 @@ import json
 import os
 import shutil
 import stat
-import subprocess
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -29,7 +27,6 @@ from quill.config import (
     load_config,
 )
 from quill.errors import ConfigError
-
 
 # Symbols & colours expected to be wrapped by the caller (rich tags).
 PASS: Final[str] = "[green]PASS[/green]"
@@ -133,7 +130,7 @@ def check_audit_log(audit_path: Path | None = None) -> CheckResult:
         return CheckResult(
             "audit log", FAIL,
             f"directory not writable: {parent}",
-            fix=f"chmod the directory or use QUILL_LOG=path/to/your/audit.log.jsonl",
+            fix="chmod the directory or use QUILL_LOG=path/to/your/audit.log.jsonl",
         )
     if p.exists():
         mode = stat.S_IMODE(p.stat().st_mode)
@@ -149,12 +146,13 @@ def check_audit_log(audit_path: Path | None = None) -> CheckResult:
 
 
 def check_hmac_key() -> CheckResult:
-    p = Path(os.environ.get("QUILL_KEY", "~/.quill/key")).expanduser()
+    from quill.paths import default_path
+    p = default_path("key", env_override="QUILL_KEY")
     if not p.exists():
         return CheckResult(
             "hmac key", WARN,
             f"no key yet at {p}",
-            fix="Will be auto-generated on first quill serve / claude-hook invocation.",
+            fix="Will be auto-generated on first quill start / claude-hook invocation.",
         )
     mode = stat.S_IMODE(p.stat().st_mode)
     if mode & 0o077:
@@ -254,7 +252,8 @@ def check_audit_chain_intact(audit_path: Path | None = None) -> CheckResult:
     if not p.exists() or p.stat().st_size == 0:
         return CheckResult("audit chain", PASS, f"{p} is empty")
 
-    key_path = Path(os.environ.get("QUILL_KEY", "~/.quill/key")).expanduser()
+    from quill.paths import default_path
+    key_path = default_path("key", env_override="QUILL_KEY")
     if not key_path.exists():
         return CheckResult(
             "audit chain", WARN,
@@ -284,12 +283,35 @@ def check_audit_chain_intact(audit_path: Path | None = None) -> CheckResult:
 # ---------------------------------------------------------------------------
 
 
+def check_otel_dual_write() -> CheckResult:
+    """Surface OTel dual-write failures, if any, since process start.
+
+    The dual-write path swallows OTel errors so a misconfigured endpoint
+    can't crash the audit log. But silent swallow used to mean "we never
+    notice the OTel ingest is broken." We now count failures and expose
+    them here.
+    """
+    try:
+        from quill import otel as _otel
+        n = getattr(_otel, "_dual_write_failed_count", 0)
+    except Exception:
+        return CheckResult("otel dual-write", PASS, "module not loaded")
+    if n == 0:
+        return CheckResult("otel dual-write", PASS, "no failures recorded")
+    return CheckResult(
+        "otel dual-write", WARN,
+        f"{n} dual-write failure(s) since process start",
+        fix="Check OTEL_EXPORTER_OTLP_ENDPOINT / collector connectivity. "
+            "Audit chain is unaffected; only OTel spans are dropping.",
+    )
+
+
 def check_permission_decay() -> CheckResult:
     """Surface decayed Quill permissions if any exist."""
     try:
         from quill import decay as _decay  # local import; optional path
         store = _decay.DecayStore.load()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return CheckResult(
             "permission decay", WARN,
             f"could not read decay store: {e}",
@@ -336,6 +358,7 @@ def run_doctor(
     report.add(check_hmac_key())
     report.add(check_audit_chain_intact(audit_path=audit_path))
     report.add(check_claude_hook_installed())
+    report.add(check_otel_dual_write())
     report.add(check_permission_decay())
     for r in check_upstream_executables(cfg):
         report.add(r)

@@ -56,6 +56,54 @@ def test_unknown_action_defaults_to_medium() -> None:
     assert classify("custom.unrecognized_action") == Risk.MEDIUM
 
 
+@pytest.mark.parametrize(
+    "tool",
+    [
+        # Stripe mutating verbs (the old stripe.* pattern blocked these as
+        # critical correctly; the new narrowed pattern must keep doing so).
+        "stripe.create_charge",
+        "stripe.refund",
+        "stripe.delete_customer",
+        "stripe.cancel_subscription",
+        "stripe.payout_create",
+        "stripe.update_payment_method",
+        # May-7 demo gaps - previously classified MEDIUM (auto-allow).
+        "banking.send_money",
+        "banking.update_password",
+        "drive.delete_file",
+        "slack.invite_user_to_slack",
+        "travel.reserve_hotel",
+        "discord.ban_member",
+    ],
+)
+def test_mutating_api_calls_are_critical(tool: str) -> None:
+    """The narrowed classifier must still catch every mutating verb,
+    including the ones identified as auto-allow gaps in the May-7 demo."""
+    assert classify(tool) == Risk.CRITICAL
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        # Read-only Stripe operations - the old `stripe\..*` blocked these
+        # too, which was noise. They must NOT be CRITICAL now.
+        "stripe.list_charges",
+        "stripe.get_customer",
+        "stripe.retrieve_charge",
+        # Other read-only namespaced calls.
+        "banking.list_accounts",
+        "drive.list_files",
+        "slack.read_channel",
+        "travel.search_flights",
+    ],
+)
+def test_read_only_api_calls_are_not_critical(tool: str) -> None:
+    """Read-only/list/get/retrieve operations must NEVER be critical.
+    The previous `stripe\\..*` pattern was over-broad and blocked them.
+    """
+    assert classify(tool) != Risk.CRITICAL
+
+
 # ---- Scope ---------------------------------------------------------------
 
 
@@ -96,6 +144,40 @@ def test_scope_no_resource_means_namespace_only() -> None:
     assert s.matches_tool("filesystem.read_file", args={"path": "/anywhere"})
 
 
+def test_scope_action_blocks_other_actions_in_same_namespace() -> None:
+    """A `filesystem:read` grant must NOT cover write/delete in the same
+    namespace. (Regression: prior versions matched on namespace only and
+    silently granted the full namespace.)
+    """
+    s = Scope.parse("filesystem:read")
+    assert s.matches_tool("filesystem.read_file", args={})
+    assert s.matches_tool("filesystem.read_dir", args={})
+    assert not s.matches_tool("filesystem.write_file", args={"path": "/x"})
+    assert not s.matches_tool("filesystem.delete_file", args={"path": "/x"})
+    assert not s.matches_tool("filesystem.move", args={"src": "/x"})
+
+
+def test_scope_action_wildcard_grants_namespace() -> None:
+    """Explicit wildcard for cases where the user really wants the whole
+    namespace (rare; should be deliberate, not accidental)."""
+    s = Scope.parse("filesystem:*")
+    assert s.matches_tool("filesystem.read_file", args={})
+    assert s.matches_tool("filesystem.write_file", args={"path": "/x"})
+    assert s.matches_tool("filesystem.delete_file", args={"path": "/x"})
+    s2 = Scope.parse("github:any")
+    assert s2.matches_tool("github.create_pr", args={})
+    assert s2.matches_tool("github.delete_repo", args={})
+
+
+def test_scope_action_prefix_match_is_underscore_or_dot_bounded() -> None:
+    """Scope `read` should NOT match a tool action like `readme_writer`
+    that just happens to share a prefix. The match terminates on _ or . -
+    `read` matches `read_file` (read.file) but not `readme_writer`."""
+    s = Scope.parse("docs:read")
+    assert s.matches_tool("docs.read_file", args={})
+    assert not s.matches_tool("docs.readme_writer", args={})
+
+
 # ---- SessionIntent --------------------------------------------------------
 
 
@@ -124,7 +206,7 @@ def test_session_intent_explains_why() -> None:
 
 
 def test_empty_scope_blocks_everything() -> None:
-    """A SessionIntent with no scope grants nothing — operator must be explicit."""
+    """A SessionIntent with no scope grants nothing - operator must be explicit."""
     intent = SessionIntent(
         session_id="ses_alpha",
         intent="help c_8e4f",

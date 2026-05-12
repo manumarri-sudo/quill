@@ -4,7 +4,7 @@
 
 ## Reporting a vulnerability
 
-Please use [GitHub Security Advisories](https://github.com/manumarri/quill/security/advisories/new). For the most sensitive reports, open a draft advisory before any public discussion.
+Please use [GitHub Security Advisories](https://github.com/manumarri-sudo/quill/security/advisories/new). For the most sensitive reports, open a draft advisory before any public discussion.
 
 We aim to respond within 48 hours and to ship a fix within 7 days for high-severity issues.
 

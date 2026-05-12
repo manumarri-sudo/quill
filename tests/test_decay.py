@@ -6,7 +6,7 @@ the gate.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -14,7 +14,6 @@ import pytest
 from quill.decay import (
     DEFAULT_WINDOWS,
     DecayStore,
-    Permission,
     _default_window,
     policy_kind,
 )
@@ -59,7 +58,7 @@ def test_decayed_when_age_exceeds_window(tmp_path: Path,
 
     # rewrite last_reaffirmed to 60 days ago (> 30d window)
     p = store.permissions["policy.high_to_low:fs.delete"]
-    p.last_reaffirmed = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+    p.last_reaffirmed = (datetime.now(UTC) - timedelta(days=60)).isoformat()
     store.save()
 
     fresh = DecayStore.load()
@@ -74,7 +73,7 @@ def test_record_use_returns_was_decayed_flag(tmp_path: Path,
     store = DecayStore.load()
     store.record_use("policy.high_to_low", "fs.delete")
     p = store.permissions["policy.high_to_low:fs.delete"]
-    p.last_reaffirmed = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+    p.last_reaffirmed = (datetime.now(UTC) - timedelta(days=60)).isoformat()
     store.save()
 
     # next use should report it WAS decayed at use time, then refresh it
@@ -113,10 +112,10 @@ def test_decayed_and_approaching_helpers(tmp_path: Path,
     # one decayed, one approaching, one healthy
     store.record_use("policy.high_to_low", "decayed.tool")
     store.permissions["policy.high_to_low:decayed.tool"].last_reaffirmed = (
-        datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        datetime.now(UTC) - timedelta(days=60)).isoformat()
     store.record_use("policy.high_to_low", "approaching.tool")
     store.permissions["policy.high_to_low:approaching.tool"].last_reaffirmed = (
-        datetime.now(timezone.utc) - timedelta(days=20)).isoformat()  # 30d window, 10d left
+        datetime.now(UTC) - timedelta(days=20)).isoformat()  # 30d window, 10d left
     store.record_use("policy.high_to_low", "healthy.tool")
     store.save()
 

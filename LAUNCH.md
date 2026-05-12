@@ -32,13 +32,13 @@ Internal-facing notes for shipping `quill` publicly. Edit / discard before posti
 >
 > I shipped a small one: quill. It's an MCP proxy + Claude Code hook that gates the destructive moves before they execute, asks the human to confirm the high-risk ones, and signs every decision into a tamper-evident audit log. The format carries everything EU AI Act Article 14 and AIUC-1 want for human-oversight evidence.
 >
-> Open source, MIT, six dependencies. v0.1 alpha is up. Feedback welcome — especially missed dangerous-action patterns.
+> Open source, MIT, six dependencies. v0.1 alpha is up. Feedback welcome - especially missed dangerous-action patterns.
 >
 > [link]
 
 ## Show HN blurb
 
-> Show HN: quill — a tiny Python proxy that gates risky AI-agent tool calls
+> Show HN: quill - a tiny Python proxy that gates risky AI-agent tool calls
 >
 > The agents in Claude Code, Cursor, and Cline can run shell commands, edit files, and call deploy APIs. None of them pause before doing irreversible things. quill is a 6KB Python package that sits between the agent and the tools.
 >
@@ -65,12 +65,12 @@ Internal-facing notes for shipping `quill` publicly. Edit / discard before posti
 
 ## Ten good-first-issue ideas
 
-1. Adapter for **Cursor** (PreToolCall hook contract — likely similar to Claude Code's).
+1. Adapter for **Cursor** (PreToolCall hook contract - likely similar to Claude Code's).
 2. Adapter for **Aider** (file-edit gating via Aider's pre-commit shim).
-3. Adapter for **Cline** (VS Code extension — needs an IPC bridge).
+3. Adapter for **Cline** (VS Code extension - needs an IPC bridge).
 4. **PostgreSQL MCP** integration test that connects to a real Dockerised Postgres and runs `DROP TABLE`, verifying the gate fires.
 5. **Stripe MCP** integration test stubbing the Stripe API and verifying `stripe.refunds.create` requires type-confirm.
-6. **Risk-classifier coverage report**: run `classify` over a published list of MCP tools (Anthropic's official servers + 20 community ones) and report the risk distribution — output a `docs/coverage.md` so users can see what's covered.
+6. **Risk-classifier coverage report**: run `classify` over a published list of MCP tools (Anthropic's official servers + 20 community ones) and report the risk distribution - output a `docs/coverage.md` so users can see what's covered.
 7. **`quill doctor` command** that verifies the install: config valid, key file 0o600, audit log writable, hook installed, upstream MCPs spawn cleanly.
 8. **JSON-LD `auditExport` command** that produces an EU AI Act Article 14-shaped export from the audit log. Schema first, then implementation.
 9. **Anti-fatigue tunables docs**: a one-page page in `docs/` explaining the fatigue detector with worked examples.

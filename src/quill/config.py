@@ -38,7 +38,6 @@ then frozen. Hot-path policy code never re-parses TOML.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -55,11 +54,13 @@ else:  # pragma: no cover
 
 
 def default_config_path() -> Path:
-    return Path(os.environ.get("QUILL_CONFIG", "~/.quill/config.toml")).expanduser()
+    from quill.paths import default_path
+    return default_path("config.toml", env_override="QUILL_CONFIG")
 
 
 def default_audit_path() -> Path:
-    return Path(os.environ.get("QUILL_LOG", "~/.quill/audit.log.jsonl")).expanduser()
+    from quill.paths import default_path
+    return default_path("audit.log.jsonl", env_override="QUILL_LOG")
 
 
 class UpstreamConfig(BaseModel):
@@ -76,6 +77,13 @@ class UpstreamConfig(BaseModel):
         default_factory=list,
         description="Names of env vars to forward from Quill's environ "
         "(e.g. GITHUB_TOKEN). NEVER includes Quill's own secrets.",
+    )
+    allow_sampling: bool = Field(
+        default=False,
+        description="Opt-in: let this upstream call `sampling/createMessage` "
+        "to drive the downstream client's LLM. DEFAULT-DENY because the "
+        "channel can launder secrets through the client's context. Only "
+        "enable for upstreams you fully trust.",
     )
 
     @field_validator("env_pass")
@@ -102,10 +110,13 @@ class SessionConfig(BaseModel):
 
 class AuditConfig(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    path: str = Field(default="~/.quill/audit.log.jsonl")
+    # If None, fall through to QUILL_HOME-aware default at resolve time.
+    path: str | None = Field(default=None)
 
     def resolved_path(self) -> Path:
-        return Path(self.path).expanduser()
+        if self.path:
+            return Path(self.path).expanduser()
+        return default_audit_path()
 
 
 class TelemetryConfig(BaseModel):
@@ -119,7 +130,10 @@ class TelemetryConfig(BaseModel):
 
 
 class QuillConfig(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
+    # Allow extra top-level sections (e.g. [bash], [tools]) so operators can
+    # add config-driven extensions (Bash allowlist patterns, etc.) without
+    # forking the schema. Validated sections are still strict.
+    model_config = ConfigDict(strict=True, extra="allow")
     session: SessionConfig
     audit: AuditConfig = Field(default_factory=AuditConfig)
     upstream: list[UpstreamConfig] = Field(default_factory=list)
@@ -131,7 +145,7 @@ def load_config(path: Path | None = None) -> QuillConfig:
     """Read TOML, validate, return a frozen-shape QuillConfig.
 
     Raises ConfigError on read or validation failure (never lets a stdlib
-    exception leak — keeps the public surface clean for callers).
+    exception leak - keeps the public surface clean for callers).
     """
     p = path or default_config_path()
     if not p.exists():
@@ -152,7 +166,7 @@ def load_config(path: Path | None = None) -> QuillConfig:
 def render_starter_config() -> str:
     """Return a starter TOML for `quill init`."""
     return """\
-# quill config — see https://github.com/manumarri/quill
+# quill config - see https://github.com/manumarri-sudo/quill
 
 [session]
 # What is the human telling the agent to do? Captured at session start.
@@ -164,7 +178,9 @@ scope = []
 
 [audit]
 # Where the signed JSONL audit log lives. Mode 0o600.
-path = "~/.quill/audit.log.jsonl"
+# Defaults to $QUILL_HOME/audit.log.jsonl (or ~/.quill/audit.log.jsonl).
+# Override per-project by setting `path` here or with QUILL_LOG.
+# path = "~/.quill/audit.log.jsonl"
 
 # One [[upstream]] block per MCP server you want quill to proxy.
 # Tool calls advertised by these upstreams are protected by the gate.
@@ -183,4 +199,24 @@ path = "~/.quill/audit.log.jsonl"
 # Anonymous aggregate counts only. Never tool args, intent contents, or
 # file paths. Off by default; turn on if you want to help shape v0.2.
 enabled = false
+
+# Out-of-band notifications when a call is blocked or asks for confirmation.
+# Off by default. Uncomment + configure the channels you want.
+# Each notification carries: WHAT was attempted, WHY it was blocked,
+# WHAT TO TRY INSTEAD, and a one-shot `quill approve <token>` command.
+# [notify]
+# macos = true                          # macOS Notification Center banner
+# sound = "Glass"                       # optional, macOS only
+# email_to = "you@example.com"          # SMTP via [notify.email]; needs $QUILL_SMTP_PASS
+# slack_webhook_url = "https://hooks.slack.com/..."
+# webhook_url = "https://your.endpoint/quill"  # generic JSON POST
+# on_blocked = true                     # fire on critical-risk denials (default true)
+# on_ask = false                        # fire on high-risk ask-the-human events (default false)
+# on_critical_only = false              # if true, fire only on CRITICAL
+#
+# [notify.email]
+# smtp_host = "smtp.gmail.com"
+# smtp_port = 587
+# smtp_user = "you@example.com"
+# smtp_password_env = "QUILL_SMTP_PASS" # password loaded from this env var
 """

@@ -129,7 +129,7 @@ For the public default (`https://telemetry.quill.dev/v1/events`), wire DNS at qu
 
 ## Why Supabase over the Cloudflare Worker
 
-`infra/cf-worker/` is the alternative — simpler, stateless, D1-backed. Supabase is preferred when you want:
+`infra/cf-worker/` is the alternative - simpler, stateless, D1-backed. Supabase is preferred when you want:
 
 - the **feedback loop** baked in (triggers, derived tables, pg_cron, edge functions calling the LLM)
 - **richer queries** (Postgres window functions, jsonb path queries)

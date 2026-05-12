@@ -19,7 +19,7 @@ Python 3.11+ required.
 ## What we welcome
 
 - **Missed dangerous-action patterns.** Open an issue with a real-world incident and the shell command (or tool name) that should have been classified `critical` or `high`. Bonus points for a published red-team trace.
-- **Adapter PRs** under `src/quill/adapters/`. Cursor, Cline, Continue, Aider, OpenAI Agents SDK, LangGraph, AutoGen, CrewAI — every host has a different tool-call protocol; one adapter per host.
+- **Adapter PRs** under `src/quill/adapters/`. Cursor, Cline, Continue, Aider, OpenAI Agents SDK, LangGraph, AutoGen, CrewAI - every host has a different tool-call protocol; one adapter per host.
 - **Documentation that makes the first-run faster.** If something tripped you up on install, that's a doc bug.
 - **Threat-model holes.** Read [SECURITY.md](SECURITY.md) and tell us what we missed. Critical issues go through GitHub Security Advisories, not public issues.
 

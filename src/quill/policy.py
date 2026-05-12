@@ -9,7 +9,7 @@ from __future__ import annotations
 import enum
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -51,12 +51,29 @@ DEFAULT_CRITICAL_PATTERNS: Final[tuple[str, ...]] = (
     # deployment
     r".*deploy.*production.*",
     r".*deploy.*prod\b.*",
-    # money
+    # money - mutating verbs only. The old `stripe\..*` pattern blocked
+    # read-only calls (list_charges, get_payment_intent) which made the
+    # gate noisy without protecting anything; banking/drive/communication
+    # APIs from the May-7 demo were missing entirely. Narrow + extend.
     r".*\.refund.*",
     r".*\.charge.*",
     r".*\.transfer.*",
     r".*\.payout.*",
-    r"stripe\..*",
+    # stripe mutating verbs; reads (list_/get_/retrieve_) are NOT critical.
+    # Use (?:_|$) instead of \b so the verb can be followed by _<noun>
+    # (e.g. stripe.create_charge) or stand alone (e.g. stripe.refund).
+    # \b doesn't fire between two word chars, so 'create' + '_charge'
+    # would have failed to match without this.
+    r"stripe\.(?:create|update|delete|cancel|capture|attach|detach|confirm|charge|refund|payout|transfer)(?:_|$)",
+    # banking - send/move money or change auth
+    r"banking\.(?:send_money|wire_transfer|update_password|reset_password|close_account|update_beneficiary)(?:_|$)",
+    # cloud drive - destruction or share-out
+    r"(?:drive|gdrive|onedrive|dropbox)\.(?:delete_file|delete_folder|empty_trash|share_with_anyone)(?:_|$)",
+    # workspace destructive admin
+    r"slack\.(?:invite_user_to_slack|kick_from_channel|delete_channel|delete_workspace)(?:_|$)",
+    r"discord\.(?:ban_member|kick_member|delete_channel|delete_server)(?:_|$)",
+    # travel - mutating reservations
+    r"(?:travel|expedia|booking|airbnb)\.(?:reserve|book|cancel|charge)(?:_|$)",
     # outbound communication
     r".*\.send_email.*",
     r".*\.send_message.*",
@@ -86,7 +103,7 @@ DEFAULT_HIGH_PATTERNS: Final[tuple[str, ...]] = (
 # (regex_pattern, reason, suggested_fix)
 # The suggested_fix is shown to the user when this pattern blocks a command,
 # so the gate is constructive rather than just punitive. Keep suggestions
-# concrete — a paste-able command, not advice.
+# concrete - a paste-able command, not advice.
 CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     # Filesystem destruction
     (r"\brm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*\s+)+(?!\s*$)", "rm -rf",
@@ -97,12 +114,12 @@ CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     (r"\bdd\s+if=", "dd low-level disk write",
      "Verify the of= target with `lsblk` first; one wrong character corrupts the wrong disk"),
     (r"\bmkfs\.", "filesystem format",
-     "Confirm the device path with `lsblk -f` first — formatting the wrong drive is unrecoverable"),
+     "Confirm the device path with `lsblk -f` first - formatting the wrong drive is unrecoverable"),
     (r":\(\)\s*\{.*:\|:&.*\}\s*;\s*:", "fork bomb",
      "This is a fork bomb pattern. Refuse."),
     # Version control destructive
     (r"\bgit\s+push\s+(?:--force|--force-with-lease|-f)\b", "git push --force",
-     "Use `git push --force-with-lease` to avoid clobbering a teammate's commits — "
+     "Use `git push --force-with-lease` to avoid clobbering a teammate's commits - "
      "or rebase first: `git fetch && git rebase origin/<branch>`"),
     (r"\bgit\s+reset\s+--hard\b", "git reset --hard",
      "Stash uncommitted work first: `git stash push -u -m 'pre-reset'`, then reset"),
@@ -141,10 +158,10 @@ CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     (r"\byarn\s+publish\b", "yarn publish",
      "Dry-run first: `yarn pack` produces the tarball without publishing. Inspect it"),
     (r"\bvercel\s+(?:--prod\b|deploy\s+(?:\S+\s+)*--prod\b)", "vercel --prod",
-     "Preview-deploy first: `vercel deploy` (without --prod) — verify the preview "
+     "Preview-deploy first: `vercel deploy` (without --prod) - verify the preview "
      "URL, then promote: `vercel promote <preview-url>`"),
     (r"\bflyctl\s+deploy\b(?!.*--config\s+.*staging)", "flyctl deploy",
-     "Deploy to staging first: `flyctl deploy --config fly.staging.toml` — verify, "
+     "Deploy to staging first: `flyctl deploy --config fly.staging.toml` - verify, "
      "then deploy prod"),
     (r"\brailway\s+up\b.*--service\s+prod", "railway up --service prod",
      "Use a staging service first; railway has no built-in rollback once a "
@@ -176,7 +193,7 @@ HIGH_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     (r"\bgh\s+pr\s+merge\b", "gh pr merge",
      "Verify checks: `gh pr checks` before merging"),
     (r"\bgh\s+repo\s+(?:delete|edit)\b", "gh repo delete/edit",
-     "Repo-level changes are visible to collaborators — confirm with the team first"),
+     "Repo-level changes are visible to collaborators - confirm with the team first"),
     (r"\bnpm\s+install\s+(?:-g|--global)\b", "npm install -g",
      "Prefer `npx <pkg>` for one-off use, or project-local install. "
      "Globals can run install scripts at root"),
@@ -234,6 +251,112 @@ _LOW_CMD_RE: Final[tuple[re.Pattern[str], ...]] = tuple(
 )
 
 
+def _user_bash_allowlist() -> tuple[re.Pattern[str], ...]:
+    """User-config-driven allowlist for Bash command patterns.
+
+    Read from `[bash] allowlist = [...]` in ~/.quill/config.toml. Each entry is
+    a regex (case-insensitive). Patterns matching here short-circuit the
+    classifier to LOW - useful for legitimate maintenance commands the
+    operator runs often (rm KILL files, pkill of own daemons, kill -<sig> of
+    own PIDs, force-pushes to a personal branch, etc.).
+
+    Cached on first call; restart the agent / re-run the hook process to
+    pick up edits.
+    """
+    global _USER_BASH_ALLOWLIST  # noqa: PLW0603 - module-level cache by design
+    cached = globals().get("_USER_BASH_ALLOWLIST")
+    if cached is not None:
+        return cached
+    patterns: list[re.Pattern[str]] = []
+    try:
+        import tomllib  # py311+
+
+        from quill.config import default_config_path
+        p = default_config_path()
+        if p.exists():
+            with p.open("rb") as f:
+                raw = tomllib.load(f)
+            bash_section = raw.get("bash") or {}
+            for entry in (bash_section.get("allowlist") or []):
+                if isinstance(entry, str) and entry.strip():
+                    try:
+                        patterns.append(re.compile(entry, re.IGNORECASE))
+                    except re.error:
+                        continue
+    except Exception:
+        pass
+    _USER_BASH_ALLOWLIST = tuple(patterns)
+    return _USER_BASH_ALLOWLIST
+
+
+_USER_BASH_ALLOWLIST: tuple[re.Pattern[str], ...] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Quote stripping - the pre-2026 classifier matched `TRUNCATE TABLE` and
+# `sudo ` inside commit messages and echo literals. The fix: blank out the
+# *contents* of matched quote pairs before running the dangerous-pattern
+# regexes, but keep the surrounding command structure (so `git commit -m '…'`
+# is still recognisable as a git command). Single, double, and `$'…'`
+# ANSI-C quoted strings are stripped; backticks and `$(…)` are NOT (those
+# ARE shell-executed code and must remain matchable).
+# ---------------------------------------------------------------------------
+
+_QUOTE_RE = re.compile(
+    r"""
+    (?P<sq>'(?:\\.|[^'\\])*')          # single-quoted: literal except \'
+    | (?P<dq>"(?:\\.|[^"\\])*")        # double-quoted: backslash escapes
+    | (?P<ansic>\$'(?:\\.|[^'\\])*')   # $'...'
+    """,
+    re.VERBOSE,
+)
+
+
+def _mask_quoted(cmd: str) -> str:
+    """Replace contents of single/double/$'…' quoted regions with spaces.
+
+    Returns a string of identical length so column offsets in regex error
+    reports still line up with the source. Quotes themselves are kept so
+    `git commit -m 'msg'` still parses as a git invocation.
+    """
+    def _blank(m: re.Match[str]) -> str:
+        s = m.group(0)
+        # Keep the quote chars at the ends, blank the middle.
+        if len(s) <= 2:
+            return s
+        return s[0] + (" " * (len(s) - 2)) + s[-1]
+
+    return _QUOTE_RE.sub(_blank, cmd)
+
+
+# ---------------------------------------------------------------------------
+# Claude Code bashPermissions subcommand-bypass gate (CVE-2025-59536,
+# CVE-2026-21852, disclosed Apr 2026). The IDE's PreToolUse permission
+# analyser capped per-subcommand inspection at 50; commands with >50
+# subcommands chained via `&&`, `||`, `;`, `|` skipped *all* deny rules.
+# Mitigation: any command whose chain depth exceeds this threshold is
+# forced to CRITICAL regardless of content. We classify at a lower
+# threshold (>=20) because there is no legitimate agent workflow that
+# needs 20+ chained subcommands - anything beyond that is either a
+# bypass attempt or a script that should live in a file.
+# ---------------------------------------------------------------------------
+
+SUBCOMMAND_CHAIN_LIMIT: Final[int] = 20
+
+_CHAIN_RE = re.compile(r"(?:&&|\|\||;|(?<!\|)\|(?!\|))")
+
+
+def _count_chain_segments(cmd: str) -> int:
+    """Count subcommand segments split by `&&`, `||`, `;`, `|`.
+
+    Operates on the quote-masked form so chaining operators *inside*
+    quoted strings don't inflate the count (e.g. `echo 'a; b; c'`).
+    """
+    masked = _mask_quoted(cmd)
+    parts = _CHAIN_RE.split(masked)
+    return sum(1 for p in parts if p.strip())
+
+
 def classify_command(command: str) -> CommandClassification:
     """Classify a single shell command by content.
 
@@ -241,18 +364,47 @@ def classify_command(command: str) -> CommandClassification:
     a generic `shell.exec`, etc.). Conservative by design: when uncertain,
     return MEDIUM and let the caller decide. CRITICAL/HIGH classifications
     carry a paste-able safer-alternative `suggestion`.
+
+    Security gates (ordered):
+      1. User allowlist (`[bash] allowlist`) short-circuits to LOW.
+      2. Subcommand-chain bypass guard: commands with >SUBCOMMAND_CHAIN_LIMIT
+         segments are CRITICAL regardless of content (CVE-2025-59536 class).
+      3. Pattern matching runs on the *quote-masked* form so SQL/destructive
+         keywords inside commit messages or echo literals don't false-fire.
+      4. The original raw form is used for chain-counting and for the
+         allowlist match (operators may want to allowlist quoted forms).
     """
     cmd = (command or "").strip()
     if not cmd:
         return CommandClassification(Risk.LOW, "empty command")
-    for rex, reason, suggestion in _CRITICAL_CMD_RE:
+    for rex in _user_bash_allowlist():
         if rex.search(cmd):
+            return CommandClassification(Risk.LOW, "operator allowlist match")
+
+    # Gate 1: subcommand-chain bypass (Claude Code CVE-2025-59536 / 21852).
+    n_segments = _count_chain_segments(cmd)
+    if n_segments > SUBCOMMAND_CHAIN_LIMIT:
+        return CommandClassification(
+            Risk.CRITICAL,
+            f"subcommand chain ({n_segments} segments) exceeds gate limit "
+            f"({SUBCOMMAND_CHAIN_LIMIT}) - known bypass for per-subcommand "
+            "permission analysers",
+            "split into separate calls; long chains routinely bypass "
+            "permission gates (CVE-2025-59536). Put the script in a "
+            "file and run it: `bash /tmp/work.sh`",
+        )
+
+    # Gate 2: pattern matching on the quote-masked form. Quoted SQL in a
+    # commit message no longer trips DROP/TRUNCATE/DELETE patterns.
+    masked = _mask_quoted(cmd)
+    for rex, reason, suggestion in _CRITICAL_CMD_RE:
+        if rex.search(masked):
             return CommandClassification(Risk.CRITICAL, reason, suggestion)
     for rex, reason, suggestion in _HIGH_CMD_RE:
-        if rex.search(cmd):
+        if rex.search(masked):
             return CommandClassification(Risk.HIGH, reason, suggestion)
     for rex in _LOW_CMD_RE:
-        if rex.search(cmd):
+        if rex.search(masked):
             return CommandClassification(Risk.LOW, "read-only command")
     return CommandClassification(Risk.MEDIUM, "uncategorised shell command")
 
@@ -326,27 +478,62 @@ class Scope(BaseModel):
     def matches_tool(self, tool_name: str, *, args: dict[str, object]) -> bool:
         """Cheap deterministic check.
 
-        True if the tool's namespace prefix matches this scope's namespace,
-        AND (no resource constraint OR any resource segment appears in args).
+        True iff:
+            1. tool's namespace == this scope's namespace, AND
+            2. tool's action portion is covered by this scope's action
+               (`*` / `any` matches anything; otherwise prefix-match), AND
+            3. resource matches if a resource constraint exists.
 
-        Resource matching is intentionally tolerant: a scope like
-        `payments:refund:customer:c_8e4f` (resource='customer:c_8e4f') will
-        match args containing `customer_id='c_8e4f'` because we split the
-        resource on ':' and accept either-direction substring match per
-        segment. This trades a small amount of strictness for usability.
+        Action match: the tool name's portion AFTER the namespace prefix is
+        the tool's action. `filesystem.read_file` → action=`read_file`. A
+        scope action of `read` matches `read_file` and `read_dir` (prefix);
+        `write` does NOT match `read_file`. Use `*` or `any` to grant the
+        whole namespace.
+
+        Resource matching: a scope like `payments:refund:customer:c_8e4f`
+        (resource='customer:c_8e4f') matches args containing
+        `customer_id='c_8e4f'` because we split resource on ':' and accept
+        either-direction substring match per segment. Tolerant by design.
         """
-        tool_ns = tool_name.split(".", maxsplit=1)[0]
+        parts = tool_name.split(".", maxsplit=1)
+        tool_ns = parts[0]
+        tool_action = parts[1] if len(parts) == 2 else ""
+
         if tool_ns != self.namespace:
             return False
+
+        scope_action = self.action.strip()
+        if scope_action not in ("*", "any"):
+            # Empty tool_action (no namespace dot in the tool name) only
+            # matches a wildcard scope action - never a specific one.
+            if not tool_action:
+                return False
+            # Prefix match: scope `read` covers `read_file`, `read_dir`.
+            # Equality short-circuit for the common case (`refund` == `refund`).
+            if not (
+                tool_action == scope_action
+                or tool_action.startswith(scope_action + "_")
+                or tool_action.startswith(scope_action + ".")
+            ):
+                return False
+
         if self.resource is None:
             return True
-        # split resource into segments and accept any segment match
-        segments = [s for s in self.resource.split(":") if s]
+        # Resource segments must be at least 3 chars to be considered a
+        # meaningful identifier. Below that, any string containing a single
+        # letter from the segment matched (e.g. resource `c_8e4f` matched
+        # any arg containing 'c'). Bi-directional substring matching was
+        # also too permissive: only `seg in v` is sound - `v in seg` lets
+        # an attacker pass an arg that is a prefix of the resource and
+        # be granted authority over the full resource.
+        segments = [s for s in self.resource.split(":") if len(s) >= 3]
+        if not segments:
+            return False
         for v in args.values():
-            if not isinstance(v, str):
+            if not isinstance(v, str) or len(v) < 3:
                 continue
             for seg in segments:
-                if seg in v or v in seg:
+                if seg in v:
                     return True
         return False
 
@@ -364,13 +551,13 @@ class SessionIntent(BaseModel):
     intent: str = Field(min_length=1, max_length=2000)
     scope: tuple[Scope, ...] = Field(default_factory=tuple)
     budget_usd: float | None = Field(default=None, ge=0)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     parent_session_id: str | None = None
 
     def covers(self, tool_name: str, args: dict[str, object]) -> bool:
         """True iff some granted Scope matches this tool call.
 
-        An empty scope grants nothing — the operator must be explicit.
+        An empty scope grants nothing - the operator must be explicit.
         """
         if not self.scope:
             return False
