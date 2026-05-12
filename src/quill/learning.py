@@ -43,6 +43,7 @@ import os
 import time
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -101,6 +102,84 @@ def _log_path() -> Path:
         "QUILL_LEARNING_LOG",
         str(Path.home() / ".quill" / "learning.log"),
     )).expanduser()
+
+
+def _overrides_path() -> Path:
+    return Path(os.environ.get(
+        "QUILL_OVERRIDES",
+        str(Path.home() / ".quill" / "overrides.toml"),
+    )).expanduser()
+
+
+# ---------------------------------------------------------------------------
+# Override reader. `quill suggestions promote` writes blocks into
+# overrides.toml; this is the read side that lets the gate consult
+# them. Blocks expire automatically when (promoted_at + ttl_days) is
+# in the past, so a forgotten override doesn't grant permission
+# forever - Permission Decay applied to the loosening side.
+
+def load_active_overrides() -> dict[str, dict[str, Any]]:
+    """Return {pattern_id: {ttl_days, promoted_at, evidence, ...}} for
+    every override block in overrides.toml that has NOT yet expired.
+    Expired blocks are filtered out silently. A missing or unreadable
+    file returns {} - the gate falls back to default classification.
+
+    Cheap and pure: caller is expected to cache the result for the
+    duration of a single hook invocation.
+    """
+    p = _overrides_path()
+    if not p.exists():
+        return {}
+    import sys as _sys
+    if _sys.version_info >= (3, 11):
+        import tomllib as _tomllib
+    else:
+        import tomli as _tomllib  # type: ignore[no-redef]
+    try:
+        with p.open("rb") as f:
+            data = _tomllib.load(f)
+    except (OSError, _tomllib.TOMLDecodeError):
+        return {}
+
+    raw = data.get("overrides")
+    if not isinstance(raw, dict):
+        return {}
+    now = datetime.now(UTC)
+    out: dict[str, dict[str, Any]] = {}
+    for _section_name, block in raw.items():
+        if not isinstance(block, dict):
+            continue
+        pattern_id = str(block.get("pattern_id") or "").strip()
+        if not pattern_id:
+            continue
+        promoted_at = block.get("promoted_at")
+        ttl_days = block.get("ttl_days", 30)
+        if not isinstance(ttl_days, (int, float)):
+            continue
+        if isinstance(promoted_at, str):
+            try:
+                promoted_dt = datetime.fromisoformat(
+                    promoted_at.replace("Z", "+00:00"),
+                )
+            except (ValueError, AttributeError):
+                continue
+        elif isinstance(promoted_at, datetime):
+            promoted_dt = promoted_at
+            if promoted_dt.tzinfo is None:
+                promoted_dt = promoted_dt.replace(tzinfo=UTC)
+        else:
+            continue
+        # Has the override expired?
+        age = now - promoted_dt
+        if age.total_seconds() > float(ttl_days) * 86400.0:
+            continue
+        out[pattern_id] = {
+            "ttl_days": int(ttl_days),
+            "promoted_at": promoted_at,
+            "evidence": str(block.get("evidence") or ""),
+            "remaining_days": float(ttl_days) - age.total_seconds() / 86400.0,
+        }
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -199,17 +278,52 @@ class PatternStats:
 # leave a corrupted file. Mode 0o600 because the pattern_id might be
 # operator-identifying.
 
+try:
+    import fcntl as _fcntl
+    _HAS_FLOCK = True
+except ImportError:  # pragma: no cover - non-POSIX (Windows) fallback
+    _HAS_FLOCK = False
+
+
+@contextlib.contextmanager
+def _file_lock(path: Path, exclusive: bool):
+    """fcntl.flock around a lock file that lives alongside pattern_stats.
+
+    The canonical file gets atomic tmp-rename; the lock prevents two
+    concurrent writers from BOTH staging a tmp file that loses the
+    interim updates (last writer wins, but read-modify-write semantics
+    require the lock around the read too). Lock file is mode 0o600.
+    Yields immediately on platforms without fcntl (Windows) - tmp-rename
+    still gives atomicity per write, just no read-modify-write safety.
+    """
+    if not _HAS_FLOCK:
+        yield
+        return
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        _fcntl.flock(fd, _fcntl.LOCK_EX if exclusive else _fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            _fcntl.flock(fd, _fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 def load_stats() -> dict[str, PatternStats]:
     p = _stats_path()
     if not p.exists():
         return {}
-    try:
-        raw = json.loads(p.read_text())
-    except (OSError, json.JSONDecodeError):
-        # If the file is corrupted, treat as empty so the learner restarts
-        # rather than crashing the hook. The audit log is the source of
-        # truth and could be re-derived if needed.
-        return {}
+    with _file_lock(p, exclusive=False):
+        try:
+            raw = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError):
+            # If the file is corrupted, treat as empty so the learner restarts
+            # rather than crashing the hook. The audit log is the source of
+            # truth and could be re-derived if needed.
+            return {}
     if not isinstance(raw, dict):
         return {}
     out: dict[str, PatternStats] = {}
@@ -227,16 +341,56 @@ def load_stats() -> dict[str, PatternStats]:
 
 
 def save_stats(stats: dict[str, PatternStats]) -> None:
+    """Write under exclusive flock so two concurrent hook subprocesses
+    cannot clobber each other's read-modify-write cycle. The flock
+    serialises the entire read-modify-write sequence; without it,
+    two writers would both load_stats(), both update their in-memory
+    copies, both save_stats() - losing the first writer's update.
+    """
     p = _stats_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    payload = {k: asdict(v) for k, v in stats.items()}
-    tmp.write_text(json.dumps(payload, indent=2))
-    # tmp-rename is atomic on POSIX. A crash between write and rename
-    # leaves the .tmp file behind but the canonical file is untouched.
-    tmp.replace(p)
-    with contextlib.suppress(OSError):
-        p.chmod(0o600)
+    with _file_lock(p, exclusive=True):
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        payload = {k: asdict(v) for k, v in stats.items()}
+        tmp.write_text(json.dumps(payload, indent=2))
+        # tmp-rename is atomic on POSIX. A crash between write and rename
+        # leaves the .tmp file behind but the canonical file is untouched.
+        tmp.replace(p)
+        with contextlib.suppress(OSError):
+            p.chmod(0o600)
+
+
+@contextlib.contextmanager
+def _read_modify_write_stats():
+    """Wrap a load-update-save cycle in a single exclusive flock so
+    concurrent writers see consistent state. Yields the dict to mutate;
+    on exit, saves it back. This is the safe shape for any caller that
+    wants to merge with whatever else might be writing at the same time.
+    """
+    p = _stats_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with _file_lock(p, exclusive=True):
+        stats: dict[str, PatternStats] = {}
+        if p.exists():
+            try:
+                raw = json.loads(p.read_text())
+                if isinstance(raw, dict):
+                    known = {f for f in PatternStats.__dataclass_fields__}
+                    for k, v in raw.items():
+                        if isinstance(v, dict):
+                            clean = {kk: vv for kk, vv in v.items() if kk in known}
+                            clean["pattern_id"] = str(k)
+                            with contextlib.suppress(TypeError):
+                                stats[str(k)] = PatternStats(**clean)
+            except (OSError, json.JSONDecodeError):
+                stats = {}
+        yield stats
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        payload = {k: asdict(v) for k, v in stats.items()}
+        tmp.write_text(json.dumps(payload, indent=2))
+        tmp.replace(p)
+        with contextlib.suppress(OSError):
+            p.chmod(0o600)
 
 
 # ---------------------------------------------------------------------------
@@ -367,30 +521,33 @@ def post_decision_update(
     """
     try:
         now = now if now is not None else time.time()
-        stats = load_stats()
-        p = stats.get(pattern_id) or PatternStats(pattern_id=pattern_id)
-        p.record(decision, now)
-        stats[pattern_id] = p
-
         emitted: list[dict[str, Any]] = []
-        for detector in (
-            detect_tightening,
-            detect_loosen_candidate,
-            detect_operator_fatigue,
-        ):
-            sug = detector(p)
-            if sug is None:
-                continue
-            sug["ts"] = now
-            sug["pattern_id"] = sug.get("pattern_id", pattern_id)
-            append_suggestion(sug)
-            emitted.append(sug)
-            log_event(
-                f"suggestion[{sug['type']}] pattern={pattern_id} "
-                f"evidence={sug.get('evidence', '')[:140]}"
-            )
+        # Atomic read-modify-write under exclusive flock. Two concurrent
+        # hook subprocesses serialise on the lock; neither loses an
+        # update. Without this, a fast pair of hooks would both load
+        # the same baseline, both increment from it, and the second
+        # save would overwrite the first.
+        with _read_modify_write_stats() as stats:
+            p = stats.get(pattern_id) or PatternStats(pattern_id=pattern_id)
+            p.record(decision, now)
+            stats[pattern_id] = p
 
-        save_stats(stats)
+            for detector in (
+                detect_tightening,
+                detect_loosen_candidate,
+                detect_operator_fatigue,
+            ):
+                sug = detector(p)
+                if sug is None:
+                    continue
+                sug["ts"] = now
+                sug["pattern_id"] = sug.get("pattern_id", pattern_id)
+                append_suggestion(sug)
+                emitted.append(sug)
+                log_event(
+                    f"suggestion[{sug['type']}] pattern={pattern_id} "
+                    f"evidence={sug.get('evidence', '')[:140]}"
+                )
         log_event(
             f"update pattern={pattern_id} decision={decision} "
             f"fires={p.fires} approvals={p.approvals} denies={p.denies} "
@@ -571,6 +728,59 @@ def read_suggestions(limit: int = 100) -> list[dict[str, Any]]:
             if isinstance(obj, dict):
                 out.append(obj)
     return out[-limit:]
+
+
+_STALE_PATTERN_PREFIXES: tuple[str, ...] = (
+    "approved one-shot via quill approve ",
+)
+
+
+def find_stale_patterns(
+    stats: dict[str, PatternStats] | None = None,
+) -> list[str]:
+    """Return pattern_ids that look like a per-token bypass row (one of
+    the leftover shapes from before pattern_id snapshot-fix landed).
+
+    The bug: prior to rc5, when an approve-token was consumed the
+    pattern_id was derived from the FLIPPED reason ("approved one-shot
+    via quill approve <token-prefix>") rather than the original deny
+    reason. That produced per-token pattern_id rows with unique
+    token-prefix suffixes - dead rows that will never accumulate more
+    observations and clutter the dashboard.
+    """
+    s = stats if stats is not None else load_stats()
+    stale: list[str] = []
+    for pid in s:
+        # Strip the leading "Tool:" if present so we test just the
+        # reason head.
+        _, _, head = pid.partition(":")
+        for prefix in _STALE_PATTERN_PREFIXES:
+            if prefix in head:
+                stale.append(pid)
+                break
+    return stale
+
+
+def cleanup_stale_patterns() -> tuple[int, list[str]]:
+    """Remove every stale row from pattern_stats.json. Idempotent;
+    a second call after the first removes nothing. Atomic via the
+    same flock + tmp-rename path the learner uses.
+
+    Returns (n_removed, removed_pattern_ids).
+    """
+    removed: list[str] = []
+    with _read_modify_write_stats() as stats:
+        for pid in list(stats.keys()):
+            _, _, head = pid.partition(":")
+            if any(prefix in head for prefix in _STALE_PATTERN_PREFIXES):
+                del stats[pid]
+                removed.append(pid)
+    if removed:
+        log_event(
+            f"cleanup_stale_patterns removed {len(removed)} row(s): "
+            + ", ".join(removed[:5])
+        )
+    return len(removed), removed
 
 
 def stats_summary(stats: dict[str, PatternStats] | None = None) -> dict[str, Any]:
