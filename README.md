@@ -293,3 +293,7 @@ If you have a published red-team trace, a missed dangerous-action class, or a vi
 ## License
 
 MIT. See [LICENSE](LICENSE). Vendored third-party code is attributed in [NOTICE](NOTICE) (sparfenyuk/mcp-proxy MIT, IBM/mcp-context-forge Apache-2.0). Version history in [CHANGELOG.md](CHANGELOG.md). Repo: [github.com/manumarri-sudo/quill](https://github.com/manumarri-sudo/quill).
+
+---
+
+Built with assistance from Claude (Anthropic).
