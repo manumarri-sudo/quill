@@ -362,6 +362,34 @@ def _emit_session_close(session_id: str, cwd: str, reason: str) -> None:
         return
 
 
+def _check_session_drift(session_id: str, cwd: str) -> None:
+    """At SessionEnd, run Page-Hinkley over this session's audit
+    outcomes. Emits a `drift_detected` suggestion when the approval
+    rate has shifted meaningfully. Best-effort; failures are swallowed.
+    """
+    if not session_id:
+        return
+    try:
+        from quill.adapters.claude_code import _resolve_project_paths
+        log_path, _ = _resolve_project_paths(cwd)
+        if not log_path.exists():
+            return
+        events: list[dict[str, Any]] = []
+        with log_path.open() as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                    if isinstance(obj, dict) and obj.get("session_id") == session_id:
+                        events.append(obj)
+                except json.JSONDecodeError:
+                    continue
+        from quill.learning import check_drift_for_session
+        check_drift_for_session(events, session_id)
+    except Exception:
+        # Drift check is observational only; never block journal write.
+        return
+
+
 def session_end_hook(stdin_text: str) -> dict[str, Any]:
     """Pure-function entry for the SessionEnd hook.
 
@@ -382,6 +410,7 @@ def session_end_hook(stdin_text: str) -> dict[str, Any]:
     cwd = str(payload.get("cwd") or "")
     reason = str(payload.get("reason") or "transcript_end")
     _emit_session_close(session_id, cwd, reason)
+    _check_session_drift(session_id, cwd)
 
     tpath_raw = payload.get("transcript_path")
     if not isinstance(tpath_raw, str) or not tpath_raw:
