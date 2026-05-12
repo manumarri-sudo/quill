@@ -20,7 +20,6 @@ from quill.adapters.claude_code import (
 from quill.audit import AuditLog
 from quill.policy import Risk
 
-
 # ---- decision matrix -----------------------------------------------------
 
 
@@ -100,6 +99,27 @@ def test_run_hook_allows_low_risk(tmp_path: Path) -> None:
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+def test_run_hook_response_includes_hook_event_name(tmp_path: Path) -> None:
+    """Regression: Claude Code rejects PreToolUse responses missing
+    `hookEventName` with `hook json output validation failed`. The field
+    is REQUIRED on every response shape, including the fail-open paths."""
+    log = tmp_path / "audit.jsonl"
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        out = run_hook(_stdin_for("Bash", command="ls"), audit=audit)
+    assert out["hookSpecificOutput"].get("hookEventName") == "PreToolUse"
+
+
+def test_run_hook_malformed_input_still_includes_hook_event_name(tmp_path: Path) -> None:
+    """The malformed-input fail-open path must also include hookEventName.
+    Without it, every malformed-stdin payload (rare but possible) trips
+    Claude Code's validator instead of fail-opening cleanly."""
+    log = tmp_path / "audit.jsonl"
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        out = run_hook("this is not json", audit=audit)
+    assert out["hookSpecificOutput"].get("hookEventName") == "PreToolUse"
+    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
 def test_run_hook_asks_on_high_risk(tmp_path: Path) -> None:
     log = tmp_path / "audit.jsonl"
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
@@ -140,7 +160,7 @@ def test_run_hook_redacts_long_string_args(tmp_path: Path) -> None:
 
 
 def test_run_hook_fails_open_on_malformed_input() -> None:
-    """A garbled hook payload must not trap the user — we must allow.
+    """A garbled hook payload must not trap the user - we must allow.
 
     Rationale: if the parser bug is in our adapter, denying everything
     would lock the user out of their own tools.
@@ -269,17 +289,17 @@ def test_root_session_writes_no_parent_session_id(
     assert attempt["agent_id"] == "claude-code"
 
 
-def test_subagent_spawn_emits_agent_spawned(
+def test_subagent_spawn_emits_handoff_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When a SECOND session_id appears under the same transcript, that's
-    a Task-spawned sub-agent. We must emit agent.spawned and tag every
-    subsequent event with parent_session_id."""
+    a Task-spawned sub-agent. The parent's hook emits agent.handoff.out and
+    every subsequent sub-agent event is tagged with parent_session_id."""
     monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
     log = tmp_path / "audit.jsonl"
     transcript = str(tmp_path / "t.jsonl")
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
-        # root agent runs ls
         run_hook(
             _payload(
                 tool_name="Bash", session_id="ses-root",
@@ -288,7 +308,6 @@ def test_subagent_spawn_emits_agent_spawned(
             ),
             audit=audit,
         )
-        # sub-agent appears with a different session_id under the same transcript
         run_hook(
             _payload(
                 tool_name="Bash", session_id="ses-sub",
@@ -300,13 +319,12 @@ def test_subagent_spawn_emits_agent_spawned(
 
     lines = [json.loads(l) for l in log.read_text().splitlines()]
     types = [e["type"] for e in lines]
-    assert "agent.spawned" in types
+    assert "agent.handoff.out" in types
 
-    spawned = next(e for e in lines if e["type"] == "agent.spawned")
-    assert spawned["payload"]["parent_session_id"] == "ses-root"
-    assert spawned["session_id"] == "ses-sub"
+    handoff = next(e for e in lines if e["type"] == "agent.handoff.out")
+    assert handoff["payload"]["to_agent_id"] == "ses-sub"
+    assert "payload_hash" in handoff["payload"]
 
-    # the sub-agent's tool.attempted carries parent_session_id
     sub_attempts = [
         e for e in lines
         if e["type"] == "tool.attempted" and e["session_id"] == "ses-sub"
@@ -316,12 +334,124 @@ def test_subagent_spawn_emits_agent_spawned(
     assert sub_attempts[0]["agent_id"] == "claude-code-sub"
 
 
-def test_subagent_spawn_only_fires_once_per_session(
+def test_session_end_emits_session_close(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SessionEnd hook must emit a `session.close` audit event so that
+    `quill receipts` can derive `closed_at` and `duration_seconds` for
+    finished sessions. Without it every receipt reports `closed_at: ""`.
+    """
+    monkeypatch.setenv("QUILL_LOG", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("QUILL_KEY", str(tmp_path / "key"))
+    monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
+    monkeypatch.setenv("QUILL_NO_AUTO_WATCH", "1")
+    log = tmp_path / "audit.jsonl"
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+
+    # Run a session: parent + sub-agent + a couple of calls.
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        run_hook(_payload(tool_name="Bash", session_id="ses-A",
+                          transcript=str(transcript), cwd=str(tmp_path),
+                          command="ls"), audit=audit)
+        run_hook(_payload(tool_name="Bash", session_id="ses-A",
+                          transcript=str(transcript), cwd=str(tmp_path),
+                          command="pwd"), audit=audit)
+
+    # Now emit session.close (what the SessionEnd hook does).
+    from quill.journal import _emit_session_close
+    _emit_session_close("ses-A", str(tmp_path), "user_quit")
+
+    lines = [json.loads(line) for line in log.read_text().splitlines()]
+    closes = [
+        e for e in lines
+        if e["type"] == "session.close" and e["session_id"] == "ses-A"
+    ]
+    assert len(closes) == 1, f"expected 1 close, got {len(closes)}"
+    close = closes[0]
+    assert close["payload"]["reason"] == "user_quit"
+    assert close["payload"]["tool_call_count"] == 2
+    # duration_seconds is non-negative; exact value depends on wall clock.
+    assert close["payload"]["duration_seconds"] >= 0
+
+
+def test_session_end_close_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Second SessionEnd for the same session must NOT emit a duplicate
+    close event (e.g. Claude Code firing SessionEnd twice on exit).
+    """
+    monkeypatch.setenv("QUILL_LOG", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("QUILL_KEY", str(tmp_path / "key"))
+    monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
+    monkeypatch.setenv("QUILL_NO_AUTO_WATCH", "1")
+    log = tmp_path / "audit.jsonl"
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("")
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        run_hook(_payload(tool_name="Bash", session_id="ses-B",
+                          transcript=str(transcript), cwd=str(tmp_path),
+                          command="ls"), audit=audit)
+    from quill.journal import _emit_session_close
+    _emit_session_close("ses-B", str(tmp_path), "user_quit")
+    _emit_session_close("ses-B", str(tmp_path), "user_quit")
+    lines = [json.loads(line) for line in log.read_text().splitlines()]
+    closes = [
+        e for e in lines
+        if e["type"] == "session.close" and e["session_id"] == "ses-B"
+    ]
+    assert len(closes) == 1, "duplicate session.close emitted; not idempotent"
+
+
+def test_subagent_spawn_emits_paired_handoff_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: every agent.handoff.out must be paired with an
+    agent.handoff.in carrying the same payload_hash and referencing
+    the out's mac via from_event_mac. Without the in, `quill bridge show`
+    reports every handoff as orphan."""
+    monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
+    log = tmp_path / "audit.jsonl"
+    transcript = str(tmp_path / "t.jsonl")
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        run_hook(
+            _payload(tool_name="Bash", session_id="ses-root",
+                     transcript=transcript, cwd="/x", command="ls"),
+            audit=audit,
+        )
+        run_hook(
+            _payload(tool_name="Bash", session_id="ses-sub",
+                     transcript=transcript, cwd="/x", command="ls"),
+            audit=audit,
+        )
+    lines = [json.loads(line) for line in log.read_text().splitlines()]
+    outs = [e for e in lines if e["type"] == "agent.handoff.out"]
+    ins = [e for e in lines if e["type"] == "agent.handoff.in"]
+    assert len(outs) == 1
+    assert len(ins) == 1
+    # Same payload_hash on both sides (the bridge.fold pairing key).
+    assert outs[0]["payload"]["payload_hash"] == ins[0]["payload"]["payload_hash"]
+    # The in references the out's mac (cryptographic edge tie).
+    assert ins[0]["payload"]["from_event_mac"] == outs[0]["mac"]
+    # The in is recorded under the sub-agent's session_id (receiver side).
+    assert ins[0]["session_id"] == "ses-sub"
+    # Bridge fold reports the pair as non-orphan.
+    from quill.bridge import fold_handoffs
+    handoffs = fold_handoffs(lines)
+    ph = outs[0]["payload"]["payload_hash"]
+    assert not handoffs[ph].is_orphan
+
+
+def test_subagent_handoff_only_fires_once_per_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Multiple calls from the same sub-agent should NOT emit repeated
-    agent.spawned events. Spawn fires once per session_id."""
+    agent.handoff.out events. Handoff fires once per session_id."""
     monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
+    monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
     log = tmp_path / "audit.jsonl"
     transcript = str(tmp_path / "t.jsonl")
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
@@ -337,8 +467,8 @@ def test_subagent_spawn_only_fires_once_per_session(
                 audit=audit,
             )
     lines = [json.loads(l) for l in log.read_text().splitlines()]
-    spawned = [e for e in lines if e["type"] == "agent.spawned"]
-    assert len(spawned) == 1
+    handoffs = [e for e in lines if e["type"] == "agent.handoff.out"]
+    assert len(handoffs) == 1
 
 
 def test_per_project_log_routing(

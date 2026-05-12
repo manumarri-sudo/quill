@@ -5,7 +5,6 @@ Covers: append-only writes, chain integrity, tamper detection, file mode.
 from __future__ import annotations
 
 import json
-import os
 import stat
 from pathlib import Path
 
@@ -100,6 +99,46 @@ def test_chain_continues_across_reopens(tmp_path: Path) -> None:
     assert failures == []
 
 
+def test_chain_resumes_after_event_larger_than_4kb(tmp_path: Path) -> None:
+    """Regression: `_tail_mac` previously read the last 4 KB only and
+    called `splitlines()`. Any event whose serialised line exceeded 4 KB
+    returned a fragment, `json.loads` raised, and the chain anchor
+    crashed on every reopen. Long bash commands routinely cross 4 KB
+    once chain bookkeeping (prev_mac, mac, ts, ids) is added.
+    """
+    p = tmp_path / "audit.jsonl"
+    key = b"k" * 32
+    # Make the first event huge enough that its serialised line is well
+    # over 4 KB on its own.
+    huge_payload = {"command": "x" * 6000, "description": "big"}
+    with AuditLog(path=p, hmac_key=key) as log:
+        log.emit(event_type="bash.huge", session_id="s", payload=huge_payload)
+    # Reopen - this triggers _tail_mac on a file whose last line is >4 KB.
+    with AuditLog(path=p, hmac_key=key) as log:
+        log.emit(event_type="bash.next", session_id="s", payload={})
+
+    total, failures = verify_chain(p, key)
+    assert total == 2
+    assert failures == []
+
+
+def test_chain_resumes_when_log_has_only_one_huge_event(tmp_path: Path) -> None:
+    """Edge case: an audit log containing a single >4 KB event with no
+    preceding entries. Walk-backwards must not loop forever and must
+    correctly return that event's mac as the chain anchor.
+    """
+    p = tmp_path / "audit.jsonl"
+    key = b"k" * 32
+    with AuditLog(path=p, hmac_key=key) as log:
+        log.emit(event_type="bash.only", session_id="s",
+                 payload={"command": "y" * 8000})
+    with AuditLog(path=p, hmac_key=key) as log:
+        log.emit(event_type="bash.after", session_id="s", payload={})
+    total, failures = verify_chain(p, key)
+    assert total == 2
+    assert failures == []
+
+
 def test_audit_log_file_mode_is_0o600(tmp_path: Path) -> None:
     p = tmp_path / "audit.jsonl"
     key = b"k" * 32
@@ -124,3 +163,51 @@ def test_force_fsync_on_high_risk(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     total, failures = verify_chain(p, key)
     assert total == 1
     assert failures == []
+
+
+def test_chain_intact_under_concurrent_multiprocess_writers(tmp_path: Path) -> None:
+    """The Claude Code hook spawns one subprocess per tool call. Parallel
+    tool calls => concurrent emits to the same log from separate processes.
+
+    Without fcntl.flock around the read-tail+write sequence, two processes
+    each read the same prev_mac and append with that same prev_mac, breaking
+    the chain at every collision. This regression test forks N workers that
+    all emit M entries each and verifies the chain at the end.
+    """
+    import multiprocessing as mp
+
+    p = tmp_path / "audit.jsonl"
+    key = b"k" * 32
+
+    def worker(path_str: str, key_bytes: bytes, worker_id: int, n: int) -> None:
+        log = AuditLog(path=Path(path_str), hmac_key=key_bytes)
+        try:
+            for i in range(n):
+                log.emit(
+                    event_type="tool.attempted",
+                    session_id=f"ses_{worker_id}",
+                    risk="low",
+                    payload={"i": i, "worker": worker_id},
+                )
+        finally:
+            log.close()
+
+    workers = 4
+    per_worker = 25
+    ctx = mp.get_context("fork")
+    procs = [
+        ctx.Process(target=worker, args=(str(p), key, w, per_worker))
+        for w in range(workers)
+    ]
+    for proc in procs:
+        proc.start()
+    for proc in procs:
+        proc.join(timeout=10)
+        assert proc.exitcode == 0, f"worker exited {proc.exitcode}"
+
+    total, failures = verify_chain(p, key)
+    assert total == workers * per_worker
+    assert failures == [], (
+        f"chain broke under concurrent writers: {len(failures)} of {total} "
+        f"failures at lines {failures[:10]}"
+    )

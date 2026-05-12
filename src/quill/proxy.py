@@ -25,8 +25,10 @@ Performance budget:
 """
 from __future__ import annotations
 
+import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from types import TracebackType
 from typing import Any
 
 import structlog
@@ -47,8 +49,23 @@ from quill.errors import (
     ScopeViolation,
     TransportError,
 )
+from quill.notifications import (
+    DownstreamForwarder,
+    make_message_handler,
+    make_sampling_callback,
+)
+from quill.pinning import PinStore, fingerprint
 from quill.policy import Risk, SessionIntent, classify
 from quill.prompt import Prompter
+
+# Force structlog to STDERR. Quill speaks JSON-RPC over stdio when running
+# as an MCP server (`quill serve`); any byte that lands on stdout corrupts
+# the framing. structlog defaults to a stdout PrintLogger - override here
+# at module load so every quill.* log line lands on stderr regardless of
+# how the process was launched.
+structlog.configure(
+    logger_factory=structlog.WriteLoggerFactory(file=sys.stderr),
+)
 
 log = structlog.get_logger("quill.proxy")
 
@@ -60,7 +77,7 @@ class _UpstreamConn:
     name: str
     session: ClientSession
     tool_names: set[str] = field(default_factory=set)
-    # Full Tool objects from the upstream — preserved so we can re-emit each
+    # Full Tool objects from the upstream - preserved so we can re-emit each
     # tool's JSON schema upward. The MCP client (Claude Code etc.) gets full
     # autocomplete and validation, not a single generic "call" tool.
     tools: list[Tool] = field(default_factory=list)
@@ -78,16 +95,39 @@ class QuillProxy:
     # Reverse map: tool name -> upstream name (built at startup).
     _tool_routing: dict[str, str] = field(default_factory=dict)
     _exit_stack: AsyncExitStack = field(default_factory=AsyncExitStack)
+    # Tool-pinning store: detects rug-pulls + tool-poisoning attacks.
+    # Loaded lazily on first all_tools() call.
+    _pin_store: PinStore | None = None
+    # Downstream forwarder for upstream-pushed notifications. The session
+    # is set when run_stdio enters its run loop; until then forwarder
+    # methods early-return.
+    _forwarder: DownstreamForwarder = field(default_factory=DownstreamForwarder)
 
-    async def __aenter__(self) -> "QuillProxy":
+    async def __aenter__(self) -> QuillProxy:
         await self._exit_stack.__aenter__()
         await self._connect_all_upstreams()
         await self._discover_tools()
         return self
 
-    async def __aexit__(self, *exc: object) -> None:
-        await self._exit_stack.__aexit__(*exc)
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        await self._exit_stack.__aexit__(exc_type, exc_val, exc_tb)
         self.audit.close()
+
+    def invalidate(self, upstream: str) -> None:
+        """Drop the tool-pin cache for one upstream. Called by the upstream
+        notification handler when the upstream emits tools/list_changed."""
+        # The PinStore is append-only; invalidating just means we re-fetch
+        # the upstream tool list and re-verify on next all_tools(). Triggered
+        # by clearing the cached upstream tools list.
+        up = self._upstreams.get(upstream)
+        if up is not None:
+            up.tools.clear()
+            up.tool_names.clear()
 
     async def _connect_all_upstreams(self) -> None:
         """Spawn each upstream MCP server subprocess and open a session.
@@ -95,6 +135,11 @@ class QuillProxy:
         Process scrubbing: only env vars listed in env_pass are forwarded
         from Quill's environ. The dict in env is added on top. Quill's
         signing key is NEVER forwarded.
+
+        Each upstream session gets a `message_handler` that audit-logs
+        every notification, invalidates the pin cache on tools/list_changed,
+        and (once the downstream client connects) forwards notifications
+        through to the client.
         """
         import os
 
@@ -114,11 +159,31 @@ class QuillProxy:
                 read, write = await self._exit_stack.enter_async_context(
                     stdio_client(params),
                 )
+                handler = make_message_handler(
+                    upstream_name=up_cfg.name,
+                    audit=self.audit,
+                    session_id=self.intent.session_id,
+                    forwarder=self._forwarder,
+                    invalidator=self,
+                )
+                # Default-refuse upstream sampling/createMessage. Trusted
+                # upstreams can opt in via [[upstream]].allow_sampling=true.
+                allow_sampling = bool(getattr(up_cfg, "allow_sampling", False))
+                sampler = make_sampling_callback(
+                    upstream_name=up_cfg.name,
+                    audit=self.audit,
+                    session_id=self.intent.session_id,
+                    allow=allow_sampling,
+                )
                 session = await self._exit_stack.enter_async_context(
-                    ClientSession(read, write),
+                    ClientSession(
+                        read, write,
+                        message_handler=handler,
+                        sampling_callback=sampler,
+                    ),
                 )
                 await session.initialize()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 msg = f"could not connect upstream {up_cfg.name!r}: {e}"
                 raise TransportError(msg) from e
 
@@ -136,7 +201,7 @@ class QuillProxy:
         for up in self._upstreams.values():
             try:
                 result = await up.session.list_tools()
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 msg = f"could not list tools from upstream {up.name!r}: {e}"
                 raise TransportError(msg) from e
             for tool in result.tools:
@@ -148,16 +213,65 @@ class QuillProxy:
                 # two upstreams expose the same tool name. Always require
                 # the upstream prefix so the routing decision is deterministic.
 
-    def all_tools(self) -> list[Tool]:
+    async def all_tools(self) -> list[Tool]:
         """Re-advertise every upstream tool upward, namespaced + schema-intact.
 
         The MCP client (Claude Code, Cursor, ...) sees one tool per upstream
         tool, with the original JSON-Schema input contract preserved. The
         gate is invisible to the client until a call is rejected.
+
+        Tools whose pin fails (rug-pull / poisoning detected) are HIDDEN
+        from the client and emit a `tool.pin_refused` audit event so the
+        human can investigate and explicitly approve the new digest.
+
+        Async because `tools/list_changed` can trigger a cache invalidate at
+        any time; if the upstream's cache is empty, we re-fetch live.
         """
+        if self._pin_store is None:
+            self._pin_store = PinStore.load()
+        # Refresh any upstream whose cache was invalidated by a list_changed.
+        for up in self._upstreams.values():
+            if not up.tools:
+                try:
+                    result = await up.session.list_tools()
+                except Exception as e:
+                    msg = f"could not refresh tools from upstream {up.name!r}: {e}"
+                    raise TransportError(msg) from e
+                for tool in result.tools:
+                    qualified = f"{up.name}.{tool.name}"
+                    up.tool_names.add(qualified)
+                    up.tools.append(tool)
+                    self._tool_routing[qualified] = up.name
         out: list[Tool] = []
         for up in self._upstreams.values():
             for tool in up.tools:
+                # PinStore.verify takes a Mapping; serialize the Tool's
+                # identity-bearing fields. inputSchema/annotations may be
+                # pydantic models - model_dump() coerces to plain dict.
+                identity = {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": tool.inputSchema if isinstance(tool.inputSchema, dict)
+                        else (tool.inputSchema.model_dump() if hasattr(tool.inputSchema, "model_dump") else {}),
+                    "annotations": tool.annotations if isinstance(tool.annotations, dict)
+                        else (tool.annotations.model_dump() if tool.annotations and hasattr(tool.annotations, "model_dump") else {}),
+                }
+                ok, reason = self._pin_store.verify(up.name, identity)
+                if not ok:
+                    self.audit.emit(
+                        event_type="tool.pin_refused",
+                        session_id=self.intent.session_id,
+                        agent_id="root",
+                        risk="high",
+                        payload={
+                            "upstream": up.name,
+                            "tool_name": tool.name,
+                            "reason": reason,
+                            "digest": fingerprint(identity),
+                        },
+                        force_fsync=True,
+                    )
+                    continue  # hide the tool from the client
                 out.append(Tool(
                     name=f"{up.name}.{tool.name}",
                     description=tool.description,
@@ -220,6 +334,7 @@ class QuillProxy:
                     intent=self.intent.intent,
                     scope=tuple(str(s) for s in self.intent.scope),
                     args=arguments,
+                    audit=self.audit,  # so the non-TTY path can audit-emit
                 )
             except (HumanDeclined, ConfirmationMismatch) as e:
                 self.audit.emit(
@@ -280,7 +395,7 @@ class QuillProxy:
         )
         try:
             result = await up.session.call_tool(upstream_tool_name, arguments=arguments)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.audit.emit(
                 event_type="tool.errored",
                 session_id=self.intent.session_id,
@@ -311,7 +426,7 @@ class QuillProxy:
         return text_blobs
 
 
-def build_proxy_server(proxy: QuillProxy) -> Server:
+def build_proxy_server(proxy: QuillProxy) -> Server[dict[str, Any], Any]:
     """Wrap a QuillProxy as a low-level MCP Server.
 
     Every upstream tool is re-emitted with its original JSON schema so the
@@ -323,11 +438,20 @@ def build_proxy_server(proxy: QuillProxy) -> Server:
     tool result. On block, the client sees an error tool-result with the
     plain-English reason from Quill.
     """
-    server: Server[None] = Server("quill", version=__version__)
+    server: Server[dict[str, Any], Any] = Server("quill", version=__version__)
 
     @server.list_tools()
     async def _handle_list_tools() -> list[Tool]:
-        return proxy.all_tools()
+        # Stash the live downstream ServerSession so the upstream
+        # notification handler can forward server-pushed events to the
+        # client. request_context is a ContextVar valid only during a
+        # request; we grab the session and keep it for unsolicited push.
+        if not proxy._forwarder.has_session:
+            try:
+                proxy._forwarder.set_session(server.request_context.session)
+            except (LookupError, AttributeError):  # pragma: no cover
+                pass
+        return await proxy.all_tools()
 
     @server.call_tool()
     async def _handle_call_tool(

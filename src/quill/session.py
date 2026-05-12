@@ -31,10 +31,10 @@ import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from quill.audit import AuditLog
-from quill.errors import QuillError, ScopeViolation
+from quill.errors import QuillError
 from quill.policy import Scope, SessionIntent
 
 
@@ -106,7 +106,7 @@ class SessionNode:
     intent: SessionIntent
     parent_id: str | None
     started_at: datetime
-    children: list["SessionNode"] = field(default_factory=list)
+    children: list[SessionNode] = field(default_factory=list)
     closed_at: datetime | None = None
     # rolling counters for the watchable tree view
     actions_attempted: int = 0
@@ -137,7 +137,7 @@ class SessionTree:
         budget_usd: float | None,
         audit: AuditLog,
         session_id: str | None = None,
-    ) -> "SessionTree":
+    ) -> SessionTree:
         sid = session_id or "ses_" + secrets.token_hex(4)
         root_intent = SessionIntent(
             session_id=sid,
@@ -150,7 +150,7 @@ class SessionTree:
             name="root",
             intent=root_intent,
             parent_id=None,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         tree = cls(root=root, audit=audit)
         tree._all_nodes[sid] = root
@@ -169,7 +169,7 @@ class SessionTree:
         )
         return tree
 
-    def __enter__(self) -> "SessionTree":
+    def __enter__(self) -> SessionTree:
         return self
 
     def __exit__(self, *_: object) -> None:
@@ -184,7 +184,7 @@ class SessionTree:
             },
             force_fsync=True,
         )
-        self.root.closed_at = datetime.now(timezone.utc)
+        self.root.closed_at = datetime.now(UTC)
 
     @contextlib.contextmanager
     def sub_agent(
@@ -221,7 +221,7 @@ class SessionTree:
                 name=name,
                 intent=sub_intent,
                 parent_id=parent.id,
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
             )
             parent.children.append(node)
             self._all_nodes[sub_id] = node
@@ -243,7 +243,7 @@ class SessionTree:
         try:
             yield node
         finally:
-            node.closed_at = datetime.now(timezone.utc)
+            node.closed_at = datetime.now(UTC)
             self.audit.emit(
                 event_type="agent.closed",
                 session_id=self.root.id,

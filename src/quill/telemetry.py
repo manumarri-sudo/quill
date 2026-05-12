@@ -1,7 +1,7 @@
 """Opt-in anonymous usage telemetry.
 
 Disabled by default. Asks once on first run; never re-asks. Ships only
-aggregate signals — counts, risk distribution, namespace top-N — never
+aggregate signals - counts, risk distribution, namespace top-N - never
 tool args, never paths, never intent text, never the audit log.
 
 State is at ~/.quill/telemetry.json (or $QUILL_TELEMETRY_PATH):
@@ -16,7 +16,7 @@ Privacy contract:
     SHIPPED: install_id, quill_version, py_version, os, session counts
         (n_attempts, n_blocked, n_scope_violations, n_human_paused),
         risk distribution histogram, top-N tool *namespaces* (e.g.
-        "fs", "git", "github" — never full tool names), session
+        "fs", "git", "github" - never full tool names), session
         duration, upstream count, whether a budget cap was set.
     NEVER SHIPPED: scope strings, tool arguments, file paths, intent
         text, audit log contents, the HMAC key, anything user-identifiable.
@@ -30,8 +30,8 @@ import platform
 import uuid
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -40,9 +40,8 @@ SCHEMA_VERSION: Final[int] = 1
 
 
 def _state_path() -> Path:
-    return Path(
-        os.environ.get("QUILL_TELEMETRY_PATH", "~/.quill/telemetry.json"),
-    ).expanduser()
+    from quill.paths import default_path
+    return default_path("telemetry.json", env_override="QUILL_TELEMETRY_PATH")
 
 
 @dataclass(slots=True)
@@ -92,7 +91,7 @@ def opt_in(state: TelemetryState | None = None) -> TelemetryState:
     s = state or TelemetryState.load()
     s.opted_in = True
     s.asked = True
-    s.asked_at = datetime.now(timezone.utc).isoformat()
+    s.asked_at = datetime.now(UTC).isoformat()
     s.save()
     return s
 
@@ -101,13 +100,13 @@ def opt_out(state: TelemetryState | None = None) -> TelemetryState:
     s = state or TelemetryState.load()
     s.opted_in = False
     s.asked = True
-    s.asked_at = datetime.now(timezone.utc).isoformat()
+    s.asked_at = datetime.now(UTC).isoformat()
     s.save()
     return s
 
 
 # ---------------------------------------------------------------------------
-# Aggregate computation — derived from a list of audit-log events.
+# Aggregate computation - derived from a list of audit-log events.
 # ---------------------------------------------------------------------------
 
 
@@ -214,7 +213,7 @@ def build_event(
     py = platform.python_version()
     return {
         "schema_version": SCHEMA_VERSION,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "install_id": state.install_id,
         "quill_version": __version__,
         "py_version": py,
@@ -247,7 +246,7 @@ def emit_session_summary(
 
     Returns True if the request was attempted and got a 2xx response, False
     in every other case (opted out, no network, timeout, error). Never
-    raises — telemetry must not affect the proxy's correctness.
+    raises - telemetry must not affect the proxy's correctness.
     """
     s = state or TelemetryState.load()
     if not s.opted_in:
@@ -258,7 +257,7 @@ def emit_session_summary(
     raw = json.dumps(body).encode("utf-8")
 
     try:
-        # Use stdlib only — never add an httpx hard-dep just for this.
+        # Use stdlib only - never add an httpx hard-dep just for this.
         import urllib.request
         req = urllib.request.Request(
             endpoint,
@@ -269,7 +268,8 @@ def emit_session_summary(
                 "user-agent": f"quill/{body['quill_version']}",
             },
         )
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310
-            return 200 <= resp.status < 300
-    except Exception:  # noqa: BLE001 — fire-and-forget, never raise
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            status: int = resp.status
+            return 200 <= status < 300
+    except Exception:
         return False

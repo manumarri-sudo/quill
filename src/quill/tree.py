@@ -13,9 +13,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console, Group
@@ -63,21 +61,23 @@ class _State:
 
     def apply(self, evt: dict[str, object]) -> None:
         etype = evt.get("type", "")
-        sid = evt.get("session_id", "")
         agent_id = evt.get("agent_id", "")
-        payload: dict[str, object] = evt.get("payload", {}) if isinstance(evt.get("payload"), dict) else {}
-        if not isinstance(payload, dict):
-            payload = {}
+        raw_payload = evt.get("payload", {})
+        payload: dict[str, object] = raw_payload if isinstance(raw_payload, dict) else {}
         ts = evt.get("ts", "")
         if isinstance(ts, str):
             self.last_ts = ts
+
+        def _scope() -> tuple[str, ...]:
+            raw_scope = payload.get("scope")
+            return tuple(str(s) for s in raw_scope) if isinstance(raw_scope, list) else ()
 
         if etype == "session.start":
             node = _Node(
                 id=str(agent_id),
                 name=str(payload.get("name", "root")),
                 intent=str(payload.get("intent", "")),
-                scope=tuple(str(s) for s in payload.get("scope", [])),
+                scope=_scope(),
                 parent_id=None,
                 started_at=str(ts),
             )
@@ -90,7 +90,7 @@ class _State:
                 id=str(agent_id),
                 name=str(payload.get("name", "agent")),
                 intent=str(payload.get("intent", "")),
-                scope=tuple(str(s) for s in payload.get("scope", [])),
+                scope=_scope(),
                 parent_id=str(payload.get("parent_id")) if payload.get("parent_id") else None,
                 started_at=str(ts),
             )
@@ -99,12 +99,15 @@ class _State:
             n = self.nodes.get(str(agent_id))
             if n is not None:
                 n.closed = True
-                if isinstance(payload.get("spend_usd"), (int, float)):
-                    n.spend_usd = float(payload["spend_usd"])
-                if isinstance(payload.get("actions_attempted"), int):
-                    n.actions_attempted = int(payload["actions_attempted"])
-                if isinstance(payload.get("actions_blocked"), int):
-                    n.actions_blocked = int(payload["actions_blocked"])
+                spend = payload.get("spend_usd")
+                if isinstance(spend, (int, float)):
+                    n.spend_usd = float(spend)
+                attempted = payload.get("actions_attempted")
+                if isinstance(attempted, int):
+                    n.actions_attempted = attempted
+                blocked = payload.get("actions_blocked")
+                if isinstance(blocked, int):
+                    n.actions_blocked = blocked
         elif etype == "session.end":
             n = self.nodes.get(str(agent_id))
             if n is not None:

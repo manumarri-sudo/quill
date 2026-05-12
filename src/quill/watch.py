@@ -9,9 +9,9 @@ survives Ctrl-C, terminal close, and Claude Code exit. The PID is
 written to ~/.quill/watch.pid; subsequent invocations reuse the
 running daemon instead of spawning a duplicate. The hook adapter
 calls this lazily on every tool call so the dashboard self-heals
-after a laptop reboot — no user action required.
+after a laptop reboot - no user action required.
 
-No external dependencies — stdlib http.server + threading + a self-
+No external dependencies - stdlib http.server + threading + a self-
 contained HTML page. Cross-platform.
 
 Privacy: the dashboard never leaves localhost. The HTML page is served
@@ -40,9 +40,8 @@ DEFAULT_PORT = 9099
 
 
 def _pid_file() -> Path:
-    return Path(
-        os.environ.get("QUILL_WATCH_PID", "~/.quill/watch.pid"),
-    ).expanduser()
+    from quill.paths import default_path
+    return default_path("watch.pid", env_override="QUILL_WATCH_PID")
 
 
 def _is_alive(pid: int) -> bool:
@@ -71,7 +70,7 @@ def daemon_status() -> tuple[int | None, int | None]:
     except (OSError, ValueError, IndexError):
         return None, None
     if not _is_alive(pid):
-        # Stale PID file — clean it up
+        # Stale PID file - clean it up
         with _quiet_oserror():
             p.unlink()
         return None, None
@@ -88,8 +87,16 @@ def daemon_status() -> tuple[int | None, int | None]:
 
 
 class _quiet_oserror:
-    def __enter__(self): return self
-    def __exit__(self, *exc): return exc[0] is OSError or exc[0] is None
+    def __enter__(self) -> _quiet_oserror:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> bool:
+        return exc_type is OSError or exc_type is None
 
 
 def write_pid(pid: int, port: int) -> None:
@@ -109,14 +116,119 @@ def stop_daemon() -> tuple[bool, str]:
         os.kill(pid, signal.SIGTERM)
     except OSError as e:
         return False, f"could not signal pid {pid}: {e}"
-    # wait briefly for it to die
+    # wait briefly for it to die; SIGKILL if it doesn't honor SIGTERM
     for _ in range(20):
         if not _is_alive(pid):
             break
         time.sleep(0.1)
+    if _is_alive(pid):
+        with _quiet_oserror():
+            os.kill(pid, signal.SIGKILL)
     with _quiet_oserror():
         _pid_file().unlink()
     return True, f"stopped pid {pid} (port {port})"
+
+
+def _terminate_then_kill(pid: int, *, grace_seconds: float = 0.8) -> bool:
+    """Send SIGTERM, wait `grace_seconds`, then SIGKILL if still alive.
+    Returns True iff the process is gone after this call."""
+    if not _is_alive(pid):
+        return True
+    with _quiet_oserror():
+        os.kill(pid, signal.SIGTERM)
+    deadline = time.time() + grace_seconds
+    while time.time() < deadline:
+        if not _is_alive(pid):
+            return True
+        time.sleep(0.05)
+    with _quiet_oserror():
+        os.kill(pid, signal.SIGKILL)
+    time.sleep(0.05)
+    return not _is_alive(pid)
+
+
+def reap_orphans() -> list[tuple[int, str]]:
+    """Kill stale quill background processes left over from prior sessions.
+
+    Targets three classes of orphan:
+      1. Extra `quill watch --daemon-child` procs - only one should run;
+         the one in watch.pid is preserved, others are killed.
+      2. `quill watch --daemon-child` procs whose `--log` path no longer
+         exists (smoke-test paths under /tmp etc.).
+      3. `quill tree --live` procs whose `--log` path no longer exists.
+
+    Returns a list of (pid, reason) for processes killed. Idempotent and
+    safe to call repeatedly - never kills the calling process or anything
+    not matching the quill-managed patterns.
+    """
+    killed: list[tuple[int, str]] = []
+    keep_pid, _ = daemon_status()
+    self_pid = os.getpid()
+
+    try:
+        out = subprocess.check_output(
+            ["pgrep", "-fl", r"quill (watch|tree)"],
+            text=True, stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return killed
+
+    seen_daemon_pids: list[int] = []
+    for line in out.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) < 2:
+            continue
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            continue
+        cmd = parts[1]
+        if pid == self_pid:
+            continue
+
+        log_arg: str | None = None
+        if "--log" in cmd:
+            try:
+                log_arg = cmd.split("--log", 1)[1].strip().split()[0]
+            except IndexError:
+                log_arg = None
+        log_missing = log_arg is not None and not Path(log_arg).exists()
+
+        if "watch --daemon-child" in cmd:
+            seen_daemon_pids.append(pid)
+            # Kill if log path is gone, or if it's a duplicate daemon.
+            if log_missing:
+                if _terminate_then_kill(pid):
+                    killed.append((pid, f"stale daemon (log gone: {log_arg})"))
+                continue
+            if keep_pid is not None and pid == keep_pid:
+                continue  # the live tracked daemon
+            if keep_pid is None:
+                # No tracked daemon at all - every running daemon is orphan
+                if _terminate_then_kill(pid):
+                    killed.append((pid, "untracked daemon (no watch.pid)"))
+                continue
+            # Tracked daemon exists but this isn't it
+            if _terminate_then_kill(pid):
+                killed.append((pid, f"duplicate daemon (tracked is {keep_pid})"))
+        elif "tree --live" in cmd:
+            if log_missing:
+                if _terminate_then_kill(pid):
+                    killed.append((pid, f"stale tree (log gone: {log_arg})"))
+
+    # Sweep stale pid file if its target died via this reap.
+    pid_in_file, _ = (lambda: (None, None))()
+    p = _pid_file()
+    if p.exists():
+        try:
+            first = p.read_text().splitlines()[0]
+            pid_in_file = int(first)
+        except (OSError, ValueError, IndexError):
+            pid_in_file = None
+        if pid_in_file is not None and not _is_alive(pid_in_file):
+            with _quiet_oserror():
+                p.unlink()
+    return killed
 
 
 def ensure_daemon(
@@ -127,7 +239,7 @@ def ensure_daemon(
 ) -> tuple[int, int]:
     """Start the watch daemon if it isn't already running.
 
-    Returns (pid, port). Idempotent — calling repeatedly is cheap if a
+    Returns (pid, port). Idempotent - calling repeatedly is cheap if a
     daemon is already alive (just probes the PID file + connects to the
     port). Designed to be called from the Claude Code hook adapter so
     the dashboard self-heals across reboots without user intervention.
@@ -146,7 +258,7 @@ def ensure_daemon(
     if not open_browser:
         cmd.append("--no-browser")
     devnull = open(os.devnull, "wb")  # noqa: SIM115
-    proc = subprocess.Popen(  # noqa: S603 — controlled args
+    proc = subprocess.Popen(
         cmd,
         stdin=devnull,
         stdout=devnull,
@@ -166,7 +278,7 @@ def ensure_daemon(
             return proc.pid, port
         except OSError:
             time.sleep(0.15)
-    # Could not bring up on the requested port — leave the child to its
+    # Could not bring up on the requested port - leave the child to its
     # own port-finder logic; record what we know.
     write_pid(proc.pid, port)
     return proc.pid, port
@@ -203,7 +315,7 @@ header .meta { color: var(--dim); font-size: 12px; }
 header .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--low); display: inline-block; margin-right: 6px; box-shadow: 0 0 6px var(--low); }
 .live { display: inline-flex; align-items: center; }
 
-/* legend bar — explains the symbols, sticks under header */
+/* legend bar - explains the symbols, sticks under header */
 .legend {
   position: sticky;
   top: 38px;
@@ -357,7 +469,7 @@ function render(evt) {
     toolHtml = `<span class="sub-tag">${escapeHtml(subLabels.get(evt.session_id) || "sub")}</span><span class=reason>spawned by ${escapeHtml(parent.slice(0, 16))}…</span>  ${cwd}`;
   } else {
     const subPrefix = isSub ? `<span class="sub-tag">${escapeHtml(subTag)}</span>` : "";
-    toolHtml = `${subPrefix}${escapeHtml(tool)} ${reason ? `<span class=reason>— ${escapeHtml(reason)}</span>` : ""}`;
+    toolHtml = `${subPrefix}${escapeHtml(tool)} ${reason ? `<span class=reason>- ${escapeHtml(reason)}</span>` : ""}`;
   }
 
   div.innerHTML = `
@@ -400,18 +512,45 @@ def _free_port(prefer: int) -> int:
         s.close()
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
+    port: int = s.getsockname()[1]
     s.close()
     return port
+
+
+_BACKLOG_REPLAY = 50
 
 
 def _tail_events(log: Path, q: list[dict[str, Any]],
                  lock: threading.Lock,
                  stop: threading.Event) -> None:
-    """Append-only tail: yield each new line of the log as a parsed event."""
+    """Append-only tail: yield each new line of the log as a parsed event.
+
+    On startup, seeds `q` with the last `_BACKLOG_REPLAY` events so the SSE
+    `/stream` handler's `q[-50:]` replay has content to send. The earlier
+    version set `pos = log.stat().st_size` immediately, so brand-new
+    dashboard connects saw "waiting for events..." even when thousands of
+    historical events existed on disk.
+    """
     pos = 0
     if log.exists():
-        pos = log.stat().st_size
+        # Seed q with the trailing N events so new SSE clients get backlog
+        # instead of an empty replay. We re-walk the tail at most once at
+        # startup; the steady-state loop below picks up only NEW lines.
+        try:
+            with log.open() as f:
+                lines = f.readlines()
+            for raw in lines[-_BACKLOG_REPLAY:]:
+                if not raw.strip():
+                    continue
+                try:
+                    evt = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                with lock:
+                    q.append(evt)
+            pos = log.stat().st_size
+        except OSError:
+            pos = 0
     while not stop.is_set():
         if not log.exists():
             time.sleep(0.25)
@@ -422,7 +561,7 @@ def _tail_events(log: Path, q: list[dict[str, Any]],
             time.sleep(0.25)
             continue
         if sz < pos:
-            # log truncated/rotated — start over
+            # log truncated/rotated - start over
             pos = 0
         if sz == pos:
             time.sleep(0.2)
@@ -453,7 +592,7 @@ def serve(
     """Run the watch server until Ctrl-C.
 
     `write_pid_file=True` records the PID + bound port at ~/.quill/watch.pid
-    on startup, and unlinks the file on shutdown — used by `--daemon-child`.
+    on startup, and unlinks the file on shutdown - used by `--daemon-child`.
     """
     port = _free_port(port)
     q: list[dict[str, Any]] = []
@@ -465,10 +604,10 @@ def serve(
     log_str = str(log_path)
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def log_message(self, fmt: str, *args: Any) -> None:  # quiet
+        def log_message(self, format: str, *args: Any) -> None:  # quiet
             return
 
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             if self.path == "/" or self.path.startswith("/?"):
                 body = _DASHBOARD_HTML.encode("utf-8")
                 self.send_response(200)
@@ -529,14 +668,14 @@ def serve(
     if write_pid_file:
         write_pid(os.getpid(), port)
     else:
-        # Foreground mode — print so the user sees the URL
+        # Foreground mode - print so the user sees the URL
         print(f"  quill watch: {url}    (log: {log_path})")
         print("  Ctrl-C to stop.")
 
     if open_browser and not os.environ.get("QUILL_WATCH_NOBROWSER"):
         try:
             webbrowser.open(url)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     # Be a good daemon: clean up the PID file on graceful shutdown.
@@ -544,7 +683,7 @@ def serve(
         stop.set()
         try:
             httpd.shutdown()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         if write_pid_file:
             with _quiet_oserror():

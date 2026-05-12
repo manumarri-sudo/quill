@@ -1,4 +1,4 @@
-"""Telemetry tests — privacy contract is the load-bearing assertion.
+"""Telemetry tests - privacy contract is the load-bearing assertion.
 
 These tests pin: (1) the only fields that *can* leave the machine, (2)
 that no scope strings, tool args, paths, or intent text ever enter the
@@ -22,7 +22,6 @@ from quill.telemetry import (
     opt_out,
     preview_event_for_user,
 )
-
 
 # ---- state load/save -----------------------------------------------------
 

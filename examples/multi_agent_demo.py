@@ -64,7 +64,7 @@ def main() -> None:
                 time.sleep(0.6)
                 _attempt(audit, tree, planner.id, "repo.read_file", risk="low", allowed=True)
                 time.sleep(0.5)
-                # planner tries to write — should fail attenuation if declared,
+                # planner tries to write - should fail attenuation if declared,
                 # but here we just simulate a scope violation event.
                 _attempt(audit, tree, planner.id, "repo.write_file",
                          risk="medium", allowed=False, reason="scope_violation")

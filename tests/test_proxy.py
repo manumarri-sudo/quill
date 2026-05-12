@@ -7,7 +7,6 @@ on each layer (scope, risk, audit) without the subprocess machinery.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,7 +29,6 @@ from quill.errors import HumanDeclined, ScopeViolation
 from quill.policy import Risk, SessionIntent
 from quill.prompt import Prompter
 from quill.proxy import QuillProxy, _UpstreamConn
-
 
 # ---- mock upstream -------------------------------------------------------
 
@@ -169,7 +167,7 @@ async def test_out_of_scope_call_is_blocked_before_upstream(tmp_path: Path) -> N
     )
     # Note: "filesystem.delete_file" is in scope-namespace "filesystem" but
     # "filesystem:read" doesn't grant "delete". Scope matching is based on
-    # namespace AND resource — currently namespace-only is allowed if resource
+    # namespace AND resource - currently namespace-only is allowed if resource
     # is None. For a stricter test, we use a different namespace.
     intent2 = SessionIntent(
         session_id="ses_test2",
@@ -245,7 +243,7 @@ async def test_critical_risk_declined_blocks_upstream(tmp_path: Path) -> None:
 # ---- list_tools / re-advertise ------------------------------------------
 
 
-def test_all_tools_preserves_upstream_schemas(tmp_path: Path) -> None:
+async def test_all_tools_preserves_upstream_schemas(tmp_path: Path) -> None:
     from quill.policy import Scope
     intent = SessionIntent(
         session_id="ses_test",
@@ -269,7 +267,7 @@ def test_all_tools_preserves_upstream_schemas(tmp_path: Path) -> None:
         ],
         prompter=_AutoApprovePrompter(),
     )
-    advertised = proxy.all_tools()
+    advertised = await proxy.all_tools()
     assert len(advertised) == 1
     t = advertised[0]
     assert t.name == "filesystem.read_file"  # namespaced
