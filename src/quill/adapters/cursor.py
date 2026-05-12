@@ -205,6 +205,12 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     decision = decide(tool_name, tool_input)
     agent_id = "cursor"
 
+    # Snapshot for learning: original classifier reason before any
+    # downstream transformation (trust scope, approval consume).
+    # Mirrors the claude_code adapter so post-decision learning groups
+    # token-flipped approves with their preceding denies.
+    original_decision_reason = decision.reason
+
     # Trust-scope downshift (parity with claude_code adapter): a
     # default-HIGH-risk file-mutation tool inside a trusted directory
     # (listed in `[trust] paths` in config.toml) is downgraded to LOW
@@ -382,6 +388,19 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                         },
                         force_fsync=taint_state.trifecta_closed,
                     )
+
+    # Autonomous learning (parity with claude_code adapter). Same
+    # contract: skip pure-LOW allows, record decision otherwise, never
+    # let a learning failure break the hook. Use the ORIGINAL classifier
+    # reason so token-flipped approves group with their preceding denies.
+    if decision.permission != "allow" or approval_token_used:
+        with contextlib.suppress(Exception):
+            from quill import learning
+            from quill.learn import _normalize_block_reason
+            head = _normalize_block_reason(original_decision_reason) or original_decision_reason
+            pattern_id = f"{tool_name}:{head}"[:80]
+            verdict_label = "approve" if approval_token_used else "deny"
+            learning.post_decision_update(pattern_id, verdict_label)
 
     # Cursor's response shape (NOT Claude Code's hookSpecificOutput).
     response: dict[str, Any] = {"permission": decision.permission}

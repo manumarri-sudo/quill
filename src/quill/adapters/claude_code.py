@@ -489,6 +489,40 @@ def _resolve_project_paths(cwd: str) -> tuple[Path, Path | None]:
     return default_audit_path(), None
 
 
+def _is_bypass_mode() -> bool:
+    """True if the operator has explicitly opted out of permission
+    prompts at the Claude Code level (running with
+    `--dangerously-skip-permissions` or with
+    `skipDangerousModePermissionPrompt: true` in settings.json).
+
+    When this is true, Quill's default-HIGH-risk Edit/Write asks are
+    redundant - the operator told Claude Code "stop asking me". The
+    downshift only applies to the DEFAULT classification; pattern-
+    matched HIGHs (vercel --prod, rm -rf, etc.) and CRITICAL events
+    still fire regardless of bypass mode.
+
+    Cached per-process via the QUILL_BYPASS_CACHE module global. Set
+    QUILL_RESPECT_BYPASS=0 to force-disable the downshift even when
+    settings.json says bypass is on.
+    """
+    if os.environ.get("QUILL_RESPECT_BYPASS", "1") == "0":
+        return False
+    # Honor an explicit env override for tests / deterministic CI runs.
+    forced = os.environ.get("QUILL_BYPASS_MODE", "").strip()
+    if forced:
+        return forced.lower() in ("1", "true", "yes", "on")
+    try:
+        settings = Path("~/.claude/settings.json").expanduser()
+        if not settings.exists():
+            return False
+        data = json.loads(settings.read_text() or "{}")
+        if not isinstance(data, dict):
+            return False
+        return bool(data.get("skipDangerousModePermissionPrompt"))
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
 def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     """Pure-function entry point for tests.
 
@@ -531,6 +565,14 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     decision = decide(tool_name, tool_input)
     agent_id = "claude-code-sub" if parent_session_id else "claude-code"
 
+    # Snapshot the classifier's original reason BEFORE any downstream
+    # transformation (trust scope, bypass mode, approval-token consume)
+    # rewrites the HookDecision. Learning uses this so a token consume
+    # records the approve under the SAME pattern_id that previously
+    # recorded the deny - not under a per-token "approved one-shot"
+    # pattern that would split the same underlying rule into N rows.
+    original_decision_reason = decision.reason
+
     # Trust-scope downshift: a default-HIGH-risk Edit/Write inside a
     # trusted directory (listed in `[trust] paths` in config.toml) is
     # downgraded to LOW + auto-allow. This is the fix for the
@@ -555,6 +597,30 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     audit_event_type="verdict.allowed",
                     what=decision.what,
                     why="trusted scope (config [trust] paths)",
+                    try_instead="",
+                )
+
+    # Bypass-mode downshift: the operator has explicitly opted out of
+    # Claude Code's permission prompts (skipDangerousModePermissionPrompt
+    # in settings.json, or running with --dangerously-skip-permissions).
+    # In that mode, default-HIGH Edit/Write asks are redundant prompts
+    # the operator already told the host harness to skip. We respect
+    # the operator's setting. Pattern-matched HIGHs and CRITICAL events
+    # still fire. Operator can force-disable via QUILL_RESPECT_BYPASS=0.
+    if (
+        decision.permission == "ask"
+        and tool_name in ("Edit", "Write", "MultiEdit", "NotebookEdit")
+        and "default risk for" in decision.reason
+    ):
+        with contextlib.suppress(Exception):
+            if _is_bypass_mode():
+                decision = HookDecision(
+                    permission="allow",
+                    reason=f"bypass mode: {tool_name} (skipDangerousModePermissionPrompt=true)",
+                    risk=Risk.LOW,
+                    audit_event_type="verdict.allowed",
+                    what=decision.what,
+                    why="operator opted into bypass mode at the Claude Code level",
                     try_instead="",
                 )
 
@@ -786,6 +852,30 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     },
                     force_fsync=taint_state.trifecta_closed,
                 )
+
+    # Autonomous learning: record this decision so the learner can
+    # update its per-pattern stats and surface auto-tightening or
+    # loosen-candidates. Skipped on plain-LOW allows where the
+    # operator wasn't involved (those carry no signal). Failures here
+    # must NEVER break the hook - the gate verdict is already final.
+    # Use the ORIGINAL classifier reason so token-flipped approves
+    # group with their preceding denies under the same pattern_id.
+    if decision.permission != "allow" or approval_token_used:
+        if os.environ.get("QUILL_LEARNING_STRICT"):
+            from quill import learning
+            from quill.learn import _normalize_block_reason
+            head = _normalize_block_reason(original_decision_reason) or original_decision_reason
+            pattern_id = f"{tool_name}:{head}"[:80]
+            verdict_label = "approve" if approval_token_used else "deny"
+            learning.post_decision_update(pattern_id, verdict_label)
+        else:
+            with contextlib.suppress(Exception):
+                from quill import learning
+                from quill.learn import _normalize_block_reason
+                head = _normalize_block_reason(original_decision_reason) or original_decision_reason
+                pattern_id = f"{tool_name}:{head}"[:80]
+                verdict_label = "approve" if approval_token_used else "deny"
+                learning.post_decision_update(pattern_id, verdict_label)
 
     return {
         "hookSpecificOutput": {
