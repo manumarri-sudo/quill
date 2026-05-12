@@ -127,6 +127,162 @@ trust_app = typer.Typer(
 )
 app.add_typer(trust_app, name="trust")
 
+
+@app.command("learn")
+def learn_cmd(
+    since_days: Annotated[
+        int,
+        typer.Option(
+            "--since-days", "-d",
+            help="window to analyse (0 = full history)",
+        ),
+    ] = 7,
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="emit suggestions as JSON for tooling"),
+    ] = False,
+) -> None:
+    """Read the audit log and surface self-improvement suggestions.
+
+    The audit log is the source of truth; this command turns it into
+    prioritised, paste-able actions. Operator decides whether to apply
+    each one. Quill never auto-applies learning to its own gate.
+
+    Categories surfaced:
+      - trust_scope candidates (the 991-asks-per-week problem)
+      - decayed permissions (reaffirm or forget)
+      - false_positive_override (repeat operator bypasses)
+      - heavy_bash_pattern (frequent classifier hits)
+      - silent_failure (e.g. stub journals from a broken parser)
+    """
+    from quill.learn import analyze
+    suggestions, _ = analyze(since_days=since_days)
+
+    if json_out:
+        import json as _json
+        out = [
+            {
+                "severity": s.severity, "category": s.category,
+                "title": s.title, "rationale": s.rationale,
+                "paste_command": s.paste_command,
+                "evidence": list(s.evidence),
+            }
+            for s in suggestions
+        ]
+        print(_json.dumps(out, indent=2))
+        return
+
+    if not suggestions:
+        console.print(
+            f"[dim]no suggestions for the last {since_days}d.[/dim] "
+            "Run with [bold]--since-days 0[/bold] for full history.",
+        )
+        return
+
+    sev_color = {"high": "red", "medium": "yellow", "low": "dim"}
+    console.print(
+        f"[bold]quill learn[/bold] [dim]· "
+        f"{len(suggestions)} suggestion(s) from the last "
+        f"{since_days}d of audit data[/dim]\n",
+    )
+    for s in suggestions:
+        color = sev_color.get(s.severity, "white")
+        console.print(
+            f"  [{color}]{s.severity:>6}[/{color}]  [bold]{s.title}[/bold]",
+        )
+        console.print(f"          [dim]{s.rationale}[/dim]")
+        console.print(f"          [bold]apply:[/bold] {s.paste_command}")
+        if s.evidence:
+            console.print(
+                f"          [dim]evidence: {', '.join(s.evidence)}[/dim]",
+            )
+        console.print()
+
+
+@app.command("kpis")
+def kpis_cmd(
+    since_days: Annotated[
+        int,
+        typer.Option("--since-days", "-d", help="window (0 = full history)"),
+    ] = 7,
+) -> None:
+    """Three KPIs that genuinely measure whether the gate is healthy.
+
+    These are NOT framework name-drops. Each one was picked because
+    your actual audit log can answer it concretely and because the
+    optimisation direction is right (a quieter gate does NOT score
+    higher; a gate that catches real things does).
+
+      noise_ratio    = asks / max(real_blocks, 1)
+                       How many friction prompts per real catch.
+                       Healthy < 5. Loud 5-20. Broken > 20.
+
+      taint_closures = absolute count of sessions that closed the
+                       lethal trifecta (untrusted + private + exfil).
+                       Normally 0. Non-zero = real exposure event.
+
+      cascade_events = absolute count of one-parent-spawned-3+-subs
+                       fan-out incidents. Each one is a blast-radius
+                       review candidate.
+
+    Plus context: the top blocked patterns (which classifier rules
+    fired most), and the operator-bypass count (sparse data; reported
+    as count, not ratio, until volume grows).
+    """
+    from quill.learn import analyze
+    _, kpis = analyze(since_days=since_days)
+
+    if kpis.n_events == 0:
+        console.print(
+            f"[dim]no audit data for the last {since_days}d.[/dim]",
+        )
+        return
+
+    health_color = {
+        "healthy": "green", "loud": "yellow", "broken": "red",
+    }[kpis.health]
+
+    window_label = "full history" if since_days == 0 else f"last {since_days}d"
+    console.print(
+        f"\n[bold]quill kpis[/bold] [dim]({window_label}, {kpis.n_events} events)[/dim]\n",
+    )
+
+    # Headline KPI
+    console.print(
+        f"  [bold]noise_ratio[/bold]    "
+        f"[{health_color}]{kpis.noise_ratio:.1f}[/{health_color}]  "
+        f"[dim]({kpis.n_asks} asks / max({kpis.n_blocks},1) real blocks  "
+        f"->  {kpis.health})[/dim]",
+    )
+
+    closure_style = "red" if kpis.n_taint_closures > 0 else "dim"
+    console.print(
+        f"  [bold]taint_closures[/bold] "
+        f"[{closure_style}]{kpis.n_taint_closures}[/{closure_style}]  "
+        f"[dim]sessions that closed the lethal trifecta[/dim]",
+    )
+
+    cascade_style = "yellow" if kpis.n_cascade_events > 0 else "dim"
+    console.print(
+        f"  [bold]cascade_events[/bold] "
+        f"[{cascade_style}]{kpis.n_cascade_events}[/{cascade_style}]  "
+        f"[dim]one-parent -> 3+ sub-agents fan-outs[/dim]",
+    )
+
+    console.print(
+        f"  [dim]operator_bypasses[/dim]  "
+        f"{kpis.n_overrides}  [dim](approved one-shot via quill approve)[/dim]",
+    )
+    console.print()
+
+    if kpis.top_blocked_patterns:
+        table = Table(title="top blocked patterns", show_header=True)
+        table.add_column("pattern", overflow="fold")
+        table.add_column("hits", justify="right", style="red")
+        for pat, n in kpis.top_blocked_patterns:
+            table.add_row(pat[:60], str(n))
+        console.print(table)
+
 console = Console(stderr=True)
 
 
