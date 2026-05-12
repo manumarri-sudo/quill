@@ -886,6 +886,59 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     }
 
 
+def self_test() -> tuple[bool, str]:
+    """Verify the gate's classifier still does its job before processing
+    any operator tool call. Two invariants:
+
+      1. A known-CRITICAL payload (DROP TABLE) must DENY.
+      2. A known-LOW payload (ls -la) must ALLOW.
+
+    If either invariant fails, something has corrupted the classifier
+    (config override, policy table drift, a runtime regression) and
+    the hook MUST refuse to start. Failing closed is the safe move -
+    a broken gate that fail-opens is worse than no gate.
+
+    Returns (ok, reason). Cheap: two `decide()` calls, sub-millisecond.
+    Cached in-process via the QUILL_SELF_TEST_DONE module global so
+    subsequent calls are free. Skippable via QUILL_NO_SELF_TEST=1.
+
+    Why this exists: the journal parser was silently broken for ~3
+    weeks because nothing checked that the post-condition (real turn
+    counts in the journal) was holding. Self-test on startup is the
+    fix-loud-not-fix-silent pattern applied to the classifier.
+    """
+    if os.environ.get("QUILL_NO_SELF_TEST"):
+        return True, "skipped via QUILL_NO_SELF_TEST"
+    global _SELF_TEST_DONE  # noqa: PLW0603 - module-level cache by design
+    if _SELF_TEST_DONE:
+        return True, "cached"
+    try:
+        # Known-CRITICAL: DROP TABLE in raw form (no quoting, not a
+        # commit-message). The quote-masked classifier still matches.
+        critical_decision = decide("Bash", {"command": "DROP TABLE users"})
+        if critical_decision.permission != "deny":
+            return False, (
+                f"self-test FAILED: known-critical 'DROP TABLE' returned "
+                f"permission={critical_decision.permission} "
+                f"(expected 'deny'). Classifier may be misconfigured."
+            )
+        # Known-LOW: bare ls. classify_command labels as read-only.
+        low_decision = decide("Bash", {"command": "ls -la"})
+        if low_decision.permission != "allow":
+            return False, (
+                f"self-test FAILED: known-LOW 'ls -la' returned "
+                f"permission={low_decision.permission} (expected 'allow'). "
+                f"Classifier may be over-broad."
+            )
+    except Exception as e:
+        return False, f"self-test crashed: {type(e).__name__}: {e}"
+    _SELF_TEST_DONE = True
+    return True, "ok"
+
+
+_SELF_TEST_DONE: bool = False
+
+
 def main() -> int:
     """CLI entry: read stdin, write stdout, exit 0.
 
@@ -893,7 +946,33 @@ def main() -> int:
     log to <cwd>/.quill/audit.log.jsonl when the user has opted in to
     per-project mode. ALSO lazily ensures the watch dashboard daemon is
     alive so users never need to re-type `quill watch` after a reboot.
+
+    Runs `self_test()` once per process. If the self-test fails, the
+    hook refuses to render a verdict (fails closed). The operator sees
+    the error on stderr and Claude Code surfaces it.
     """
+    ok, reason = self_test()
+    if not ok:
+        sys.stderr.write(
+            f"quill claude-hook: self-test failed: {reason}\n"
+            f"  Refusing to start. The classifier may be misconfigured.\n"
+            f"  Run `quill doctor` to investigate.\n"
+            f"  Override (NOT RECOMMENDED): QUILL_NO_SELF_TEST=1\n"
+        )
+        # Fail closed: deny the call. Operator-friendly reason.
+        response = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    f"quill self-test failed: {reason}. "
+                    "Run `quill doctor`."
+                ),
+            },
+        }
+        sys.stdout.write(json.dumps(response))
+        sys.stdout.flush()
+        return 1
     stdin_text = sys.stdin.read()
     # Peek at cwd from the payload so we can route the log per-project.
     cwd_for_routing = ""
