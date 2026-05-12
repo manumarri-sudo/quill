@@ -205,6 +205,33 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     decision = decide(tool_name, tool_input)
     agent_id = "cursor"
 
+    # Trust-scope downshift (parity with claude_code adapter): a
+    # default-HIGH-risk file-mutation tool inside a trusted directory
+    # (listed in `[trust] paths` in config.toml) is downgraded to LOW
+    # + auto-allow. Cursor's adapter forces HIGH -> deny (instead of
+    # claude_code's `ask`) because of the auto-run allow-list bypass,
+    # so the test here matches the `deny` permission - but we still
+    # only downshift the DEFAULT classification, never pattern-matched
+    # HIGHs or CRITICAL events.
+    if (
+        decision.permission in ("deny", "ask")
+        and tool_name in ("Edit", "Write", "MultiEdit", "NotebookEdit")
+        and "default risk for" in decision.reason
+        and cwd
+    ):
+        with contextlib.suppress(Exception):
+            from quill.paths import is_trusted_cwd
+            if is_trusted_cwd(cwd):
+                decision = HookDecision(
+                    permission="allow",
+                    reason=f"trusted scope: {tool_name} in {cwd}",
+                    risk=Risk.LOW,
+                    audit_event_type="verdict.allowed",
+                    what=decision.what,
+                    why="trusted scope (config [trust] paths)",
+                    try_instead="",
+                )
+
     # One-shot approval check (same flow as Claude Code).
     approval_token_used = ""
     if decision.permission != "allow":

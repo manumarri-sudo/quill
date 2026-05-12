@@ -129,6 +129,30 @@ class TelemetryConfig(BaseModel):
     endpoint: str | None = None
 
 
+class TrustConfig(BaseModel):
+    """Per-directory trust scopes - the fix for approval-prompt fatigue.
+
+    Edit/Write/MultiEdit/NotebookEdit fire as default-HIGH-risk inside
+    Claude Code. In a repo the operator has already chosen to work in,
+    every such call would otherwise produce an `ask` prompt and train
+    the operator to mash "approve" - which then defeats the gate on
+    the calls that actually matter. The fix: list trusted paths here;
+    while cwd is inside one, the DEFAULT high-risk classification for
+    Edit/Write is downshifted to LOW (auto-allow). Pattern-matched
+    HIGHs (curl, pip install in non-venv etc.) and all CRITICAL events
+    are NOT affected - they fire regardless of trust scope.
+
+    Format: list of paths. `~` is expanded. A cwd matches a trusted
+    path if it equals it or is inside it (.resolve() + is_relative_to).
+
+      [trust]
+      paths = ["~/projects/my-app", "~/quill"]
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+    paths: list[str] = Field(default_factory=list)
+
+
 class QuillConfig(BaseModel):
     # Allow extra top-level sections (e.g. [bash], [tools]) so operators can
     # add config-driven extensions (Bash allowlist patterns, etc.) without
@@ -139,6 +163,7 @@ class QuillConfig(BaseModel):
     upstream: list[UpstreamConfig] = Field(default_factory=list)
     policy: dict[str, Risk] = Field(default_factory=dict)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    trust: TrustConfig = Field(default_factory=TrustConfig)
 
 
 def load_config(path: Path | None = None) -> QuillConfig:
@@ -194,6 +219,18 @@ scope = []
 [policy]
 # "fs.delete" = "critical"
 # "github.list_issues" = "low"
+
+# Trust scopes - the fix for approval-prompt fatigue. List the absolute
+# paths of repositories you actively work in. Default-HIGH-risk Edit /
+# Write / MultiEdit / NotebookEdit calls inside one of these paths
+# auto-allow instead of asking for approval. Pattern-matched HIGHs
+# (curl, pip install, etc.) and all CRITICAL events still fire
+# regardless of trust. Manage with `quill trust add/remove/list/check`.
+[trust]
+paths = [
+  # "~/projects/my-app",
+  # "~/quill",
+]
 
 [telemetry]
 # Anonymous aggregate counts only. Never tool args, intent contents, or
