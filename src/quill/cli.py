@@ -1514,6 +1514,133 @@ def audit_show(
     out.print(f"[dim]{len(rows)} tool call(s) · {summary} · log: {p}[/dim]")
 
 
+@audit_app.command("summary")
+def audit_summary(
+    since: Annotated[
+        str,
+        typer.Option(
+            "--since", "-s",
+            help="window to recap. Examples: 12h, 1d, 7d, 30m, 2h30m. "
+                 "Units: s/m/h/d/w.",
+        ),
+    ] = "12h",
+    fmt: Annotated[
+        str,
+        typer.Option(
+            "--format", "-f",
+            help="output format: markdown (default, Substack-ready), "
+                 "json (raw data), or table (rich terminal).",
+        ),
+    ] = "markdown",
+    log_path: Annotated[
+        Path | None,
+        typer.Option("--log", "-l", help="audit log path (default: $QUILL_HOME/audit.log.jsonl)"),
+    ] = None,
+    cwd_filter: Annotated[
+        Path | None,
+        typer.Option(
+            "--cwd",
+            help="scope the recap to events whose cwd is inside this directory.",
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--out", "-o",
+            help="write the rendered report to this file instead of stdout.",
+        ),
+    ] = None,
+) -> None:
+    """Morning recap: aggregate overnight auto-approvals into a report.
+
+    Reads the audit log, filters to events in the requested window, and
+    prints a paste-ready markdown summary (or JSON / a rich table) of what
+    happened. The default window is the last 12 hours, which is the same
+    duration `quill night` defaults to. The markdown format is Substack-
+    ready: paste it into a daily note or post and it lays out cleanly.
+
+    Example:
+
+        quill audit summary --since 12h
+        quill audit summary --since 7d --format json --out recap.json
+        quill audit summary --since 1d --cwd ~/quill --format table
+    """
+    from quill.audit_summary import (
+        compute_summary,
+        load_events,
+        parse_duration,
+        render_json,
+        render_markdown,
+        render_table,
+    )
+
+    fmt_norm = (fmt or "markdown").strip().lower()
+    if fmt_norm not in ("markdown", "md", "json", "table"):
+        console.print(
+            f"[red]unknown --format[/red] {fmt!r}; "
+            "expected one of: markdown, json, table",
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        window = parse_duration(since)
+    except ValueError as e:
+        console.print(f"[red]bad --since value:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    p = log_path or default_audit_path()
+    events = load_events(p)
+    cwd_str = str(cwd_filter) if cwd_filter is not None else None
+
+    stats = compute_summary(
+        events,
+        since_label=since,
+        window=window,
+        cwd_filter=cwd_str,
+        log_path=p,
+    )
+
+    # rendering surface picks the output device. table goes to stdout via a
+    # fresh Console; markdown/json go to stdout as plain text so it pipes
+    # cleanly into pbcopy, jq, or a Substack draft. The module-level
+    # `console` (stderr) is reserved for error / status reporting.
+    if fmt_norm == "json":
+        text = render_json(stats)
+        if output is not None:
+            output.write_text(text + "\n")
+            console.print(f"[green]wrote[/green] {output}")
+        else:
+            print(text)
+        return
+
+    if fmt_norm == "table":
+        out = Console()
+        table = render_table(stats)
+        if output is not None:
+            # rich Table -> plain text via a temporary console; useful for
+            # piping into a file even though markdown is the better choice
+            # for files.
+            from io import StringIO
+            buf = StringIO()
+            tmp = Console(file=buf, force_terminal=False, width=120)
+            tmp.print(table)
+            output.write_text(buf.getvalue())
+            console.print(f"[green]wrote[/green] {output}")
+        else:
+            out.print(table)
+        if stats.total_events == 0:
+            console.print(f"[dim]no events in window. log: {p}[/dim]")
+        return
+
+    # markdown (default)
+    text = render_markdown(stats)
+    if output is not None:
+        output.write_text(text)
+        console.print(f"[green]wrote[/green] {output}")
+    else:
+        print(text)
+
+
 # --------------------------------------------------------------------------
 # tree
 # --------------------------------------------------------------------------
