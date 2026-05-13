@@ -214,6 +214,14 @@ def decide(tool_name: str, tool_input: Mapping[str, Any]) -> HookDecision:
         body = reason
         if suggestion:
             body = f"{reason} · try instead: {suggestion}"
+        # Overnight mode counter only - decision is unchanged. CRITICAL
+        # NEVER auto-approves; safety contract for the rm-rf / drop-table
+        # / vercel-prod / sudo / force-push class is load-bearing.
+        with contextlib.suppress(Exception):
+            from quill import overnight as _ovn
+            ovn_active, _ = _ovn.is_active_from_config()
+            if ovn_active:
+                _ovn.record_event("critical")
         return HookDecision(
             permission="deny",
             reason=body,
@@ -225,6 +233,30 @@ def decide(tool_name: str, tool_input: Mapping[str, Any]) -> HookDecision:
         body = f"high risk: {reason}"
         if suggestion:
             body = f"{body} · try instead: {suggestion}"
+        # Overnight mode: a HIGH-risk action auto-approves WITH a distinct
+        # audit_event_type so the morning recap can identify what got
+        # through and operators can post-review. The decision string still
+        # carries the original reason and the suggestion - none of that
+        # context is lost, only the prompt is skipped.
+        try:
+            from quill import overnight as _ovn
+            ovn_active, ovn_reason = _ovn.is_active_from_config()
+        except Exception:
+            ovn_active, ovn_reason = False, ""
+        if ovn_active:
+            with contextlib.suppress(Exception):
+                from quill import overnight as _ovn2
+                _ovn2.record_event("high")
+            audit_body = f"{reason} [overnight: {ovn_reason}]"
+            return HookDecision(
+                permission="allow",
+                reason=audit_body,
+                risk=risk,
+                audit_event_type="verdict.allowed.overnight",
+                what=what,
+                why=f"auto-approved by overnight mode ({ovn_reason}): {reason}",
+                try_instead=suggestion,
+            )
         return HookDecision(
             permission="ask",
             reason=body,

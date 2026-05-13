@@ -593,6 +593,133 @@ def start(
 
 
 # --------------------------------------------------------------------------
+# night / day - overnight auto-approval for unattended agents
+# --------------------------------------------------------------------------
+
+@app.command("night")
+def night_cmd(
+    state_arg: Annotated[
+        str,
+        typer.Argument(
+            help="on | off | status (default: on)",
+            metavar="[on|off|status]",
+        ),
+    ] = "on",
+    hours: Annotated[
+        float,
+        typer.Option(
+            "--hours",
+            "-H",
+            help="auto-expiry in hours (default 12). only applies to `on`.",
+        ),
+    ] = 12.0,
+) -> None:
+    """toggle overnight mode - auto-approve HIGH-risk actions so unattended agents do not stall.
+
+    CRITICAL actions (rm -rf, DROP TABLE, vercel --prod, git push --force,
+    sudo, etc.) STILL gate. overnight mode trades attended HIGH-risk
+    friction for sleep, never safety.
+
+    flip on before bed:    quill night
+    flip on for 4 hours:   quill night on --hours 4
+    flip off in morning:   quill day
+    check current state:   quill night status
+    """
+    from quill import overnight as ovn
+
+    console = Console()
+    cmd = (state_arg or "on").strip().lower()
+
+    if cmd in ("on", ""):
+        if hours <= 0 or hours > 24:
+            console.print(
+                "[red]--hours must be in (0, 24]. refusing to set a multi-day toggle - "
+                "safety contract requires a bounded window.[/red]"
+            )
+            raise typer.Exit(2)
+        state = ovn.turn_on(duration_hours=hours)
+        console.print("[bold green]overnight mode ON[/bold green]")
+        console.print(
+            f"HIGH-risk Edit / Write / Bash etc. will auto-approve until [bold]{state.expires_at}[/bold]."
+        )
+        console.print(
+            "CRITICAL actions (rm -rf, DROP TABLE, vercel --prod, sudo, force-push) "
+            "still gate. sleep well."
+        )
+        console.print("[dim]run `quill day` to flip off sooner, or `quill night status` to check.[/dim]")
+        return
+
+    if cmd == "off":
+        state = ovn.turn_off()
+        still_active, still_reason = ovn.is_active_from_config()
+        if still_active:
+            console.print(
+                f"[bold yellow]manual toggle off, but overnight is STILL active "
+                f"({still_reason}).[/bold yellow]"
+            )
+            console.print(
+                "[dim]edit ~/.quill/config.toml `[overnight] enabled = false` to fully disable, "
+                "or wait for the window to close.[/dim]"
+            )
+        else:
+            console.print("[bold yellow]overnight mode OFF[/bold yellow]. all gates restored.")
+        if state.high_approved or state.critical_blocked:
+            console.print(
+                f"overnight recap: [bold]{state.high_approved}[/bold] HIGH auto-approved, "
+                f"[bold]{state.critical_blocked}[/bold] CRITICAL still blocked."
+            )
+            console.print("[dim]run `quill audit show --since 12h` to review what was auto-approved.[/dim]")
+        return
+
+    if cmd == "status":
+        state = ovn.load_state()
+        active, reason = ovn.is_active_from_config()
+        if active:
+            console.print(f"[bold green]overnight mode ACTIVE[/bold green] ({reason})")
+        else:
+            console.print("[dim]overnight mode inactive[/dim]")
+        console.print(
+            f"counters this session: [bold]{state.high_approved}[/bold] HIGH auto-approved, "
+            f"[bold]{state.critical_blocked}[/bold] CRITICAL blocked"
+        )
+        if state.expires_at:
+            console.print(f"toggle auto-expires: {state.expires_at}")
+        return
+
+    console.print(
+        f"[red]unknown: {state_arg!r}.[/red] use: [bold]on[/bold] | [bold]off[/bold] | [bold]status[/bold]"
+    )
+    raise typer.Exit(2)
+
+
+@app.command("day")
+def day_cmd() -> None:
+    """flip overnight mode off. alias for `quill night off`."""
+    from quill import overnight as ovn
+
+    console = Console()
+    state = ovn.turn_off()
+    still_active, still_reason = ovn.is_active_from_config()
+    if still_active:
+        console.print(
+            f"[bold yellow]manual toggle off, but overnight is STILL active "
+            f"({still_reason}).[/bold yellow]"
+        )
+        console.print(
+            "[dim]edit ~/.quill/config.toml `[overnight] enabled = false` to fully disable, "
+            "or wait for the window to close.[/dim]"
+        )
+    else:
+        console.print("[bold yellow]overnight mode OFF[/bold yellow]. all gates restored.")
+    if state.high_approved or state.critical_blocked:
+        console.print(
+            f"overnight recap: [bold]{state.high_approved}[/bold] HIGH auto-approved, "
+            f"[bold]{state.critical_blocked}[/bold] CRITICAL still blocked."
+        )
+        console.print("[dim]run `quill audit show --since 12h` to review what was auto-approved.[/dim]")
+
+
+# --------------------------------------------------------------------------
 # init
 # --------------------------------------------------------------------------
 

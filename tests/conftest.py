@@ -32,6 +32,7 @@ def _isolate_quill_home(
         "QUILL_CONFIG", "QUILL_LOG", "QUILL_KEY", "QUILL_DECAY_FILE",
         "QUILL_TELEMETRY_PATH", "QUILL_WATCH_PID", "QUILL_SESSIONS",
         "QUILL_TAINT_FILE", "QUILL_PINS_FILE", "QUILL_APPROVALS_FILE",
+        "QUILL_OVERNIGHT_FILE",
     ):
         monkeypatch.delenv(var, raising=False)
     yield home

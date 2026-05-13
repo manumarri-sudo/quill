@@ -129,6 +129,34 @@ class TelemetryConfig(BaseModel):
     endpoint: str | None = None
 
 
+class OvernightConfig(BaseModel):
+    """Overnight mode - auto-approve HIGH-risk actions so unattended agents
+    do not stall on Edit/Write prompts overnight.
+
+    Safety contract: CRITICAL risk is NEVER auto-approved by overnight mode.
+    rm -rf, DROP TABLE, vercel --prod, git push --force, sudo, etc. all
+    continue to gate regardless of overnight state.
+
+    Active when either:
+      - `quill night` is manually toggled on (time-bounded, default 12h expiry)
+      - `enabled = true` here AND current local time is within the window
+
+      [overnight]
+      enabled = true
+      window_start = "22:00"
+      window_end = "08:00"
+
+    Window crosses midnight when start > end (the default 22:00-08:00 does).
+    Times are local. The whole point of overnight mode is operator sleep
+    schedule, which is wall-clock-local by nature.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+    enabled: bool = False
+    window_start: str = "22:00"
+    window_end: str = "08:00"
+
+
 class TrustConfig(BaseModel):
     """Per-directory trust scopes - the fix for approval-prompt fatigue.
 
@@ -164,6 +192,7 @@ class QuillConfig(BaseModel):
     policy: dict[str, Risk] = Field(default_factory=dict)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     trust: TrustConfig = Field(default_factory=TrustConfig)
+    overnight: OvernightConfig = Field(default_factory=OvernightConfig)
 
 
 def load_config(path: Path | None = None) -> QuillConfig:
