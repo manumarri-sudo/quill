@@ -4,6 +4,8 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.2.0a1] - 2026-05-15
+
 ### Added - v0.2-rc1 universal-adapter leg (Cursor 1.7+)
 
 - **Cursor 1.7+ pre-tool-call hook adapter** (`src/quill/adapters/cursor.py`). Cursor (~1.5M MAU) shipped a hooks system in Sept 2025 that's near-identical to Claude Code's `PreToolUse`. Quill now installs into `~/.cursor/hooks.json` (`quill cursor-hook-install`) and gates `beforeShellExecution`, `beforeMCPExecution`, `beforeReadFile` events. Reuses Quill's existing risk classifier + audit log + approval-token + Touch ID flow unchanged; only the input/output JSON shapes are adapter-specific (Cursor uses top-level `permission` / `agent_message` / `user_message`, not Claude Code's `hookSpecificOutput`).

@@ -84,7 +84,7 @@ quill = "quill.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/manumarri-sudo/quill"
-Documentation = "https://quill.dev"
+Documentation = "https://github.com/manumarri-sudo/quill#readme"
 Source = "https://github.com/manumarri-sudo/quill"
 Changelog = "https://github.com/manumarri-sudo/quill/blob/main/CHANGELOG.md"
 Issues = "https://github.com/manumarri-sudo/quill/issues"
