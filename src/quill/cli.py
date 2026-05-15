@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -1907,23 +1908,38 @@ def journal_save(
     """Render an auto-summary of a Claude Code transcript to the vault.
 
     Designed to be called from a SessionEnd hook. When called by the
-    hook, Claude Code passes the transcript path on stdin as JSON.
+    hook, Claude Code passes session_id / transcript_path / cwd / reason
+    on stdin as JSON. The session.close audit emission and drift check
+    fire unconditionally so receipts derive from clean session boundaries
+    even when no transcript is available; the journal markdown write is
+    skipped (with a friendly message) when transcript is missing.
     """
+    payload: dict[str, Any] = {}
     if transcript is None:
         try:
-            payload = json.loads(sys.stdin.read() or "{}")
+            raw = json.loads(sys.stdin.read() or "{}")
+            if isinstance(raw, dict):
+                payload = raw
         except json.JSONDecodeError:
             payload = {}
-        if isinstance(payload, dict):
-            tp = payload.get("transcript_path")
-            if isinstance(tp, str) and tp:
-                transcript = Path(tp).expanduser()
+        tp = payload.get("transcript_path")
+        if isinstance(tp, str) and tp:
+            transcript = Path(tp).expanduser()
+
+    session_id = str(payload.get("session_id") or "")
+    cwd = str(payload.get("cwd") or "")
+    reason = str(payload.get("reason") or "transcript_end")
+    if session_id:
+        from quill.journal import _check_session_drift, _emit_session_close
+        _emit_session_close(session_id, cwd, reason)
+        _check_session_drift(session_id, cwd)
+
     if transcript is None:
         Console(stderr=True).print(
-            "[red]quill journal save[/red]: no --transcript and no "
-            "transcript_path on stdin.",
+            "[dim]quill journal save: no transcript provided; "
+            "session.close emitted, journal markdown skipped.[/dim]",
         )
-        raise typer.Exit(code=1)
+        return
 
     written = journal_mod.save_from_transcript(transcript, sessions_dir=sessions_dir)
     Console().print(f"[green]wrote[/green] {written}")
@@ -2278,6 +2294,21 @@ def version() -> None:
 # receipts - derive Agent Receipts from the audit log
 
 
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _is_test_session_id(sid: str) -> bool:
+    """Heuristic: real Claude Code / Cursor session_ids are UUIDs. Anything
+    else is a unit-test fixture or a manual smoke test that leaked into
+    the audit log. Used by `bridge show`, `trifecta show`, and `receipts
+    list` to keep test pollution out of default views; pass
+    `--include-test-sessions` to see everything."""
+    return not bool(_UUID_RE.match(sid or ""))
+
+
 @receipts_app.command("list")
 def receipts_list(
     log_path: Annotated[
@@ -2285,6 +2316,13 @@ def receipts_list(
         typer.Option("--log", "-l", help="audit log to derive from"),
     ] = None,
     last: Annotated[int, typer.Option("--last", help="show only last N sessions")] = 10,
+    include_test_sessions: Annotated[
+        bool,
+        typer.Option(
+            "--include-test-sessions",
+            help="include sessions whose IDs aren't UUID-shaped (test fixtures)",
+        ),
+    ] = False,
 ) -> None:
     """List one Receipt per session in reverse chronological order."""
     from quill.receipt import derive_from_events, load_audit_events
@@ -2295,7 +2333,10 @@ def receipts_list(
         raise typer.Exit(code=1)
     receipts = derive_from_events(events)
     ordered = sorted(
-        receipts.values(),
+        (
+            r for r in receipts.values()
+            if include_test_sessions or not _is_test_session_id(r.session_id)
+        ),
         key=lambda r: r.opened_at or r.closed_at or "",
         reverse=True,
     )[:last]
@@ -2369,6 +2410,13 @@ def receipts_show(
 def bridge_show(
     log_path: Annotated[Path | None, typer.Option("--log", "-l")] = None,
     orphans_only: Annotated[bool, typer.Option("--orphans", help="show only unmatched handoffs")] = False,
+    include_test_sessions: Annotated[
+        bool,
+        typer.Option(
+            "--include-test-sessions",
+            help="include handoffs whose session_ids aren't UUID-shaped (test fixtures)",
+        ),
+    ] = False,
 ) -> None:
     """List A2A handoff edges (out, in, orphan, cascade)."""
     from quill.bridge import fold_handoffs
@@ -2384,9 +2432,18 @@ def bridge_show(
     table.add_column("out → in", width=10)
     table.add_column("status", width=10)
     table.add_column("contract", overflow="fold")
+    rendered = 0
     for h in handoffs.values():
         if orphans_only and not h.is_orphan:
             continue
+        if not include_test_sessions:
+            sid = ""
+            if h.out_event:
+                sid = str(h.out_event.get("session_id") or "")
+            elif h.in_events:
+                sid = str(h.in_events[0].get("session_id") or "")
+            if _is_test_session_id(sid):
+                continue
         out_seen = "✓" if h.out_event else "·"
         in_count = len(h.in_events)
         status = "orphan" if h.is_orphan else ("cascade" if h.is_cascade else "ok")
@@ -2399,6 +2456,13 @@ def bridge_show(
             status,
             contract,
         )
+        rendered += 1
+    if rendered == 0:
+        console.print(
+            "[dim]no real handoff events yet "
+            "(use --include-test-sessions to see fixtures)[/dim]",
+        )
+        return
     Console().print(table)
 
 
@@ -2412,6 +2476,13 @@ def bridge_show(
 def trifecta_show(
     log_path: Annotated[Path | None, typer.Option("--log", "-l")] = None,
     closed_only: Annotated[bool, typer.Option("--closed", help="only sessions that crossed all three lines")] = False,
+    include_test_sessions: Annotated[
+        bool,
+        typer.Option(
+            "--include-test-sessions",
+            help="include sessions whose IDs aren't UUID-shaped (test fixtures)",
+        ),
+    ] = False,
 ) -> None:
     """Per-session exposure: did the agent see untrusted input + private data
     + an exfiltration vector all in the same session? That's the worst-case
@@ -2431,8 +2502,11 @@ def trifecta_show(
     table.add_column("private data", justify="center", width=14)
     table.add_column("exfil vector", justify="center", width=14)
     table.add_column("verdict")
+    rendered = 0
     for sid, state in states.items():
         if closed_only and not state.trifecta_closed:
+            continue
+        if not include_test_sessions and _is_test_session_id(sid):
             continue
         flag_count = sum([
             state.has_seen_untrusted, state.has_accessed_private, state.can_exfiltrate,
@@ -2449,6 +2523,13 @@ def trifecta_show(
             "yes" if state.can_exfiltrate else "-",
             verdict,
         )
+        rendered += 1
+    if rendered == 0:
+        console.print(
+            "[dim]no real session exposure yet "
+            "(use --include-test-sessions to see fixtures)[/dim]",
+        )
+        return
     Console().print(table)
 
 
