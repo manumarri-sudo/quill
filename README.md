@@ -3,7 +3,7 @@
 > The pause button between your AI agent and the things you can't undo.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0a1-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0a2-orange.svg)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://peps.python.org/pep-0561/)
 [![Typed](https://img.shields.io/badge/typed-strict-brightgreen.svg)](https://peps.python.org/pep-0561/)
 
@@ -36,9 +36,29 @@ Last July, [Replit's coding agent deleted Jason Lemkin's production database dur
 
 `quill` is the smallest version of one I could write.
 
+## What's mature in 0.2.0a2 vs framework-prepared
+
+`quill` is built around three pillars and the maturity of each is honestly different. This section exists because dogfooding evidence matters more than design intent.
+
+**Mature, with on-disk evidence in real-world dogfooding** (the gate + audit pillar):
+- Destructive-action gate: hundreds of critical blocks observed across `rm -rf`, `vercel --prod`, `git push --force`, `DROP TABLE`, `TRUNCATE`, `npm publish`, `sudo`, `.env` reads, and the CVE-2025-59536 subcommand-chain bypass. Zero false positives in the critical class.
+- HMAC-chained audit log: 10k+ entries verified end-to-end. Tamper-evident, mode `0o600`, EU AI Act Article 14 fields on every block.
+- Out-of-band notification dispatch on real blocks: macOS banner, email, Slack, generic webhook. Synchronous-with-100ms-timeout on the hot path so the dispatch can't be killed mid-flight by the hook subprocess exiting.
+- One-shot approve tokens, Touch ID hardware-attested approval, anti-yes-fatigue, type-to-confirm: full block-to-approve cycle observed end-to-end with audit chain evidence.
+- Trust scope with trifecta enforcement priority: trusted directories suppress default-risk Edit/Write asks, but yield to trifecta enforcement when the session is at 2-of-3 flags and the call would close the third.
+- Self-improving classifier: drift detection, suggestions CLI, learner persistence.
+
+**Framework-prepared, with thinner dogfooded evidence** (the Trust Infrastructure pillar):
+- Lethal-trifecta detection AND enforcement: detection observed across dozens of sessions; enforcement (escalate allow → deny when a call would close the trifecta) verified end-to-end on a synthetic test. Real-world enforcement triggers depend on operator workflow.
+- A2A Bridge: handoff edge tracking works for the **Cursor adapter** and for tests; **Claude Code subagent capture is pending hook-API support from Anthropic** (the PreToolUse payload doesn't currently expose subagent session_ids, so subagent spawns audit-log under the parent session). If you're using Quill with Cursor, you get full A2A; with Claude Code today you get parent-level audit only.
+- Permission Decay: tracking infrastructure is wired and tested; no overrides observed in single-developer dogfooding yet because the operator hasn't yet promoted a `loosening_candidate` via `quill suggestions promote`. The decay timer fires when overrides accumulate.
+- Tool description pinning: pin recording, digest verification, and approval/revoke CLI all work; only one tool has been observed in dogfooding because the external MCP proxy path (Path B below) is less exercised than the Claude Code built-in tools path (Path A).
+
+**On the v0.2.0a3 / v0.3 roadmap**: A2A bridge workaround for Claude Code via transcript-path heuristics, more external MCP server dogfooding to populate the pinning subsystem, real-world Permission Decay triggers as the suggestions CLI gets used.
+
 ## Install
 
-PyPI publish is in progress. For v0.2.0a1, clone and install:
+PyPI publish is in progress. For v0.2.0a2, clone and install:
 
 ```bash
 git clone https://github.com/manumarri-sudo/quill
@@ -150,11 +170,13 @@ quill trifecta show            # per-session three-flag matrix + verdict
 quill trifecta show --closed   # only sessions where all three closed
 ```
 
-Trifecta in v0.2 is **observation-only** (see Known gaps below). It surfaces the exposure; it does not yet escalate to type-to-confirm when the third flag would close.
+Trifecta in v0.2.0a2 is **observation AND enforcement**. The classifier surfaces the exposure on every tool call, and when a call would close the lethal trifecta (untrusted + private + exfil all in one session) for the first time, the gate escalates an otherwise-allow decision to a deny with a paste-able approve token. Trust scope yields to this enforcement so trusted directories can't silently bypass the trifecta gate. Verified end-to-end with on-disk evidence on 2026-05-17 (audit log entries at `verdict.blocked` with reason `trifecta close · ...`).
 
 ### A2A Bridge handoff edges
 
-When agent A spawns agent B as a sub-task (via Claude Code's `Task` tool, OpenAI Agents SDK handoffs, etc.), the handoff itself is an event with a contract. The A2A Bridge tracks those edges, flags orphans (handoff-out with no matching handoff-in), and detects cascade failures (one bad handoff propagating downstream).
+When agent A spawns agent B as a sub-task, the handoff itself is an event with a contract. The A2A Bridge tracks those edges, flags orphans (handoff-out with no matching handoff-in), and detects cascade failures (one bad handoff propagating downstream).
+
+**Adapter maturity as of v0.2.0a2**: full handoff capture works for the **Cursor adapter** (Cursor 1.7+ surfaces subagent session_ids in its hook payload). For **Claude Code**, subagent spawns currently audit-log under the parent session because Claude Code's `PreToolUse` hook doesn't expose subagent session_ids; bridge capture there is **pending hook-API support from Anthropic**. See the "What's mature vs framework-prepared" section near the top of this README for the full breakdown.
 
 ```bash
 quill bridge show              # all handoff edges, status (ok / orphan / cascade)
@@ -271,13 +293,13 @@ Quill aims for invisible: P50 overhead < 2ms on the policy-allow path, P99 < 10m
 - Not a replacement for OAuth or RBAC. Identity says you are *allowed* to refund. Quill says *this specific* refund, in *this specific* session, deserves a confirmation.
 - Not a hosted service. It is a single Python package. The audit log lives on your disk. You own the key, the log, the verdict.
 
-## Known gaps for v0.2.0a1
+## Known gaps for v0.2.0a2
 
-Honest list of what is shipped vs. observed-only vs. not yet wired.
+Honest list of what is shipped vs. observation-only vs. not yet wired. See also the "What's mature vs framework-prepared" section near the top of this README for the dogfooding-evidence breakdown.
 
+- **Claude Code subagent capture in A2A Bridge** depends on Anthropic shipping subagent session_ids in the `PreToolUse` hook payload. Until then, subagent spawns audit-log under the parent session; the bridge sees no edge. The Cursor adapter is unaffected and gets full A2A capture today.
 - **Per-tool sampling adjudication.** Upstream-initiated `sampling/createMessage` calls are observed in the audit log as `upstream.request` but not yet adjudicated. Default behavior: forward to client unmodified. Will land before 0.2 final.
-- **Trifecta is observation-only.** The three-flag exposure is tracked and surfaced; enforcement (escalate to type-to-confirm when the third flag would close) is the 1-month scope.
-- **WebAuthn-attested confirmation is not wired.** Type-to-confirm is anti-fatigue, not anti-hijack. WebAuthn lands when the threat model demands it.
+- **WebAuthn-attested confirmation is not wired.** Touch ID (macOS) is the hardware-attested option today; WebAuthn for cross-platform hardware attestation is on the v0.3 roadmap.
 - **Telemetry pipeline.** Supabase ingest + analyze functions exist in `infra/supabase/` but are not deployed. Opt-in only; default off.
 - **Schema-passthrough proxy is end-to-end** for tool calls and the gate sees real arguments. Resources, prompts, and notifications all forward; full lifecycle test coverage is in progress.
 - **PyPI / Homebrew / npm wrapper / MCP registries**: not yet submitted. Distribution plan in [docs/distribution.md](docs/distribution.md).

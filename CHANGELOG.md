@@ -4,6 +4,24 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.2.0a2] - 2026-05-17
+
+### Fixed - launch-gating P0s found via efficacy analysis
+
+- **Notify dispatch race on real blocks.** `NotifyDispatcher.fire()` spawned a `daemon=True` thread, but Claude Code's `PreToolUse` hook is a short-lived subprocess. The thread was killed mid-flight before it could complete the channel call or emit the `notify.dispatched` audit event, so no out-of-band notification ever fired on real blocks (only on explicit `quill notify test`). Added `fire(msg, wait_timeout=0.1)` that joins the thread for up to 100ms; `_maybe_notify` in the Claude Code adapter passes that timeout. First real-block `notify.dispatched` event observed at 2026-05-17T18:48:48 (rm -rf block, macOS banner delivered, ~80ms total dispatch time).
+- **Trust-scope auto-allow silently bypassed trifecta enforcement.** A session at 2-of-3 lethal-trifecta flags could close the third (Write to a `.env`-pattern file) without triggering enforcement when the cwd was a trusted scope. Trust-scope check now peeks at `would_close_trifecta` before downshifting; if the call would close, trust scope yields and the trifecta enforcement block fires. Trust scope still suppresses every other default-risk Edit/Write ask in trusted dirs, so the ergonomics are unchanged for non-trifecta workflows. Verified end-to-end at 2026-05-17T18:49:58.
+- **Trifecta-close blocks inherited risk from the underlying decision.** `HookDecision` for trifecta closure used `risk=decision.risk` (often LOW for Edit/Write), which meant the notify dispatcher (`on_critical_only=True` default) never fired on trifecta closures even after the dispatch race was fixed. Hardcoded `risk=Risk.CRITICAL` on trifecta-close — by definition the worst-case prompt-injection scenario.
+
+### Added - launch hygiene
+
+- `_is_test_session_id` heuristic + `--include-test-sessions` flag on `bridge show`, `trifecta show`, and `receipts list`. Default views now hide unit-test fixtures (session_ids that aren't UUID-shaped) so any "look at my own audit log" demo screenshot is clean. Source log is untouched so the HMAC chain stays intact.
+- `quill journal save` now emits `session.close` and runs the drift check unconditionally (was gated behind transcript-required check). Real Claude Code SessionEnds pass a session_id but not always a transcript_path; result was that 30 of 32 sessions were stuck in "(open)" state in receipts derivation. Fixed; receipts now derive from clean session boundaries.
+
+### Documentation
+
+- README adds a "What's mature in 0.2.0a2 vs framework-prepared" section near the top so readers can distinguish dogfood-proven pillars (gate + audit + notification + approve + trifecta) from framework-prepared surfaces (A2A bridge on Claude Code, permission decay triggers, external-MCP pinning) without reading the whole document.
+- A2A Bridge section honestly scopes the adapter maturity: Cursor 1.7+ gets full subagent capture today; Claude Code subagent capture is pending hook-API support from Anthropic.
+
 ## [0.2.0a1] - 2026-05-15
 
 ### Added - v0.2-rc1 universal-adapter leg (Cursor 1.7+)
