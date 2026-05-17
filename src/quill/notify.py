@@ -297,12 +297,25 @@ class NotifyDispatcher:
             return False
         return True
 
-    def fire(self, msg: BlockMessage) -> None:
-        """Spawn a background thread to dispatch. Returns immediately."""
+    def fire(self, msg: BlockMessage, *, wait_timeout: float | None = None) -> None:
+        """Dispatch the block message to every configured channel.
+
+        With `wait_timeout=None` (default): spawn a daemon background thread
+        and return immediately. Suitable for long-lived processes.
+
+        With `wait_timeout=<seconds>` (e.g. 0.1): spawn the thread but
+        `join()` it for up to that many seconds before returning. Required
+        for short-lived hook subprocesses (Claude Code's PreToolUse), where
+        daemon threads get killed when the parent exits before they can
+        complete the channel call or emit the audit event. Channels are
+        designed to be fast (<50ms each); 100ms is a comfortable budget.
+        """
         if not self.should_fire(msg):
             return
         t = threading.Thread(target=self._dispatch, args=(msg,), daemon=True)
         t.start()
+        if wait_timeout is not None:
+            t.join(timeout=wait_timeout)
 
     def _dispatch(self, msg: BlockMessage) -> None:
         results: dict[str, bool] = {}

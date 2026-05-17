@@ -495,7 +495,11 @@ def _maybe_notify(
             )
 
     dispatcher = NotifyDispatcher(config=notify_cfg, audit_emit=_emit_dispatched)
-    dispatcher.fire(msg)
+    # The PreToolUse hook is a short-lived subprocess; daemon threads die
+    # when it exits, so we block for up to 100ms to let the dispatch
+    # complete. Channels are designed to return in <50ms each (osascript,
+    # SMTP connect, urlopen); 100ms is comfortable headroom.
+    dispatcher.fire(msg, wait_timeout=0.1)
 
 
 def _resolve_project_paths(cwd: str) -> tuple[Path, Path | None]:
@@ -622,15 +626,28 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
         with contextlib.suppress(Exception):
             from quill.paths import is_trusted_cwd
             if is_trusted_cwd(cwd):
-                decision = HookDecision(
-                    permission="allow",
-                    reason=f"trusted scope: {tool_name} in {cwd}",
-                    risk=Risk.LOW,
-                    audit_event_type="verdict.allowed",
-                    what=decision.what,
-                    why="trusted scope (config [trust] paths)",
-                    try_instead="",
-                )
+                # Trust scope yields to trifecta enforcement: if the session
+                # is already at 2-of-3 flags and THIS call would close the
+                # third, we must not silently auto-allow. The trifecta
+                # enforcement block below will turn the ask back into a
+                # deny + approve-token. Trust scope still suppresses every
+                # other default-risk Edit/Write ask in trusted dirs.
+                would_close = False
+                if session_id:
+                    with contextlib.suppress(Exception):
+                        from quill.taint import would_close_trifecta
+                        current = _taint_state_for(session_id)
+                        would_close = would_close_trifecta(current, tool_name, tool_input)
+                if not would_close:
+                    decision = HookDecision(
+                        permission="allow",
+                        reason=f"trusted scope: {tool_name} in {cwd}",
+                        risk=Risk.LOW,
+                        audit_event_type="verdict.allowed",
+                        what=decision.what,
+                        why="trusted scope (config [trust] paths)",
+                        try_instead="",
+                    )
 
     # Promoted-override downshift: the operator explicitly promoted a
     # loosening_candidate via `quill suggestions promote <key> --ttl-days N`,
@@ -729,10 +746,15 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     "would close the lethal trifecta this session "
                     "(untrusted input + private data + exfil vector)"
                 )
+                # Hardcode CRITICAL: a trifecta-close attempt is the worst-
+                # case prompt-injection scenario by definition; the
+                # underlying call's classification (often LOW for Edit/Write)
+                # is irrelevant. Notify dispatcher fans on critical, so this
+                # ensures OOB notification fires on trifecta closures.
                 decision = HookDecision(
                     permission="deny",
                     reason=f"trifecta close · {why} · approve to proceed",
-                    risk=decision.risk,
+                    risk=Risk.CRITICAL,
                     audit_event_type="verdict.blocked",
                     what=decision.what,
                     why=why,
