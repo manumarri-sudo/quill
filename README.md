@@ -3,7 +3,7 @@
 > The pause button between your AI agent and the things you can't undo.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0a2-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0a3-orange.svg)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://peps.python.org/pep-0561/)
 [![Typed](https://img.shields.io/badge/typed-strict-brightgreen.svg)](https://peps.python.org/pep-0561/)
 

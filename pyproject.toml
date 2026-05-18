@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "quill"
-version = "0.2.0a2"
+version = "0.2.0a3"
 description = "An MCP proxy that gates risky AI actions, pauses high-risk ones for a human, and keeps a tamper-evident audit log."
 readme = "README.md"
 license = "MIT"
