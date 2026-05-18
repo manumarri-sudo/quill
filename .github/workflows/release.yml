@@ -1,0 +1,67 @@
+name: release
+
+# Auto-publishes to PyPI when a GitHub release is published. Uses PyPI
+# Trusted Publishing (OIDC) so no API token lives in repo secrets. One-time
+# setup required on the PyPI side: register manumarri-sudo/quill as a
+# trusted publisher for the `quill` project with workflow `release.yml`
+# and environment `pypi`. See:
+#   https://docs.pypi.org/trusted-publishers/
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/quill
+    permissions:
+      # Required for Trusted Publishing OIDC token exchange.
+      id-token: write
+      # Required to attach SBOM / attestations to the release.
+      contents: write
+      attestations: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip build twine
+
+      - name: Verify tag matches pyproject version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag $tag != pyproject version $pkg"
+            exit 1
+          fi
+          echo "tag and pyproject agree on version: $pkg"
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Twine check
+        run: twine check dist/*
+
+      - name: Publish to PyPI via Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # No password / API token needed — OIDC handshake auths via the
+          # repo+environment pair registered on PyPI's side.
+          packages-dir: dist/
+
+      - name: Generate attestations
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "dist/*"
