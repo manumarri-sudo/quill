@@ -4,6 +4,12 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.2.0a3] - 2026-05-18
+
+### Fixed
+
+- `src/quill/_version.py` was missed in the 0.2.0a2 version bump, so the runtime `quill version` command reported `0.2.0a1` even though pyproject and wheel filename were correctly 0.2.0a2. Now consistent. No code changes other than the version string itself; all 0.2.0a2 P0 fixes are unchanged and still verified end-to-end against the audit chain.
+
 ## [0.2.0a2] - 2026-05-17
 
 ### Fixed - launch-gating P0s found via efficacy analysis
