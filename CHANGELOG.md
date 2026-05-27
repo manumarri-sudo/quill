@@ -4,6 +4,13 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.2.0a4] - 2026-05-27
+
+### Changed - PyPI dist rename and first PyPI publish
+
+- The PyPI dist name is now `quillx` (was `quill`). The `quill` name on PyPI is held by an unrelated, 17-month-silent package in a different domain (LLM-based README generation), so `pip install quill` would never have resolved to this project. Install becomes `pip install quillx` / `pipx install quillx` / `uvx quillx`. The import path, CLI binary (`quill`), config directory (`~/.quill/`), env vars (`QUILL_KEY`), HMAC key path, audit log path, and brand are all unchanged; this is a distribution-name change only and existing dogfood state (audit log, approvals, sessions) is fully forward-compatible. Homebrew is a tap we own so the formula stays `brew install quill`. A PEP 541 reclaim request for the `quill` name is in flight (see `LAUNCH.md`); if granted, `quillx` will become a transitional alias for one release cycle, then sunset.
+- First publish to PyPI under the `quillx` dist name. v0.2.0a4 is functionally identical to 0.2.0a3; the only changes are the dist rename in `pyproject.toml`, the version-string bump in `pyproject.toml` + `src/quill/_version.py` + the README badge, the `[all]` extra updated to reference `quillx[...]`, and documentation updates in `README.md` and `docs/distribution.md` to reflect the new install command. No code or behavior changes — all P0 fixes shipped in 0.2.0a2/0.2.0a3 are unchanged and the audit chain remains forward-compatible.
+
 ## [0.2.0a3] - 2026-05-18
 
 ### Fixed

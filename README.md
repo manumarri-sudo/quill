@@ -3,7 +3,7 @@
 > The pause button between your AI agent and the things you can't undo.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0a3-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0a4-orange.svg)](CHANGELOG.md)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://peps.python.org/pep-0561/)
 [![Typed](https://img.shields.io/badge/typed-strict-brightgreen.svg)](https://peps.python.org/pep-0561/)
 
@@ -67,7 +67,7 @@ pip install -e .
 quill start
 ```
 
-`pip install quill`, `uvx quill`, `pipx install quill`, and `brew install quill` are all coming once the registries are submitted to (see [docs/distribution.md](docs/distribution.md)).
+`pip install quillx`, `uvx quillx`, `pipx install quillx`, and `brew install quill` are all coming once the registries are submitted to (see [docs/distribution.md](docs/distribution.md)). The PyPI dist is `quillx` because the `quill` name on PyPI was taken by an unrelated package; the import path, CLI binary (`quill`), config directory (`~/.quill/`), env vars (`QUILL_KEY`), and brand all remain `quill`. Homebrew is a tap we own so the formula stays `quill`.
 
 `quill start` is idempotent: it merges Quill's hook into `~/.claude/settings.json`, runs `quill doctor`, and opens the live dashboard. From the next Claude Code session on, every Bash, Edit, Write, and NotebookEdit goes through Quill's classifier; every external MCP call (if you wire Quill into `mcpServers`) goes through the proxy.
 

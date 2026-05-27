@@ -14,8 +14,10 @@ the cadence of how each one gets pushed.
 
 ### 1. Python package index (PyPI) - the primary surface
 
-The hero install command is `pip install quill && quill start`. PyPI is therefore
-the canonical distribution. Build + upload steps:
+The hero install command is `pip install quillx && quill start`. PyPI is therefore
+the canonical distribution. The dist name on PyPI is `quillx` because the `quill`
+name was taken by an unrelated package; the import path, CLI binary, and config
+directory all remain `quill` (rename is dist-only). Build + upload steps:
 
 ```bash
 python -m build                              # produces dist/*.whl + dist/*.tar.gz
@@ -31,13 +33,13 @@ deliberate `git tag vX.Y.Z` + `gh release create`.
 ### 2. uv / uvx - the fast paste-able install
 
 `uv` is what the landing page shows by default because the install is two
-seconds, no virtualenv ceremony. The command is `uvx quill` (run directly) or
-`uv tool install quill` (persistent). uv resolves through PyPI, so PyPI publish
+seconds, no virtualenv ceremony. The command is `uvx quillx` (run directly) or
+`uv tool install quillx` (persistent). uv resolves through PyPI, so PyPI publish
 is enough - there's no separate uv index.
 
 ### 3. pipx - the "I want it global" install
 
-`pipx install quill && quill`. Same: PyPI-backed, no extra publish step.
+`pipx install quillx && quill`. Same: PyPI-backed, no extra publish step.
 
 ### 4. Homebrew - `brew install quill`
 
