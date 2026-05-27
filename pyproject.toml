@@ -3,8 +3,8 @@ requires = ["hatchling>=1.21"]
 build-backend = "hatchling.build"
 
 [project]
-name = "quill"
-version = "0.2.0a3"
+name = "quillx"
+version = "0.2.0a4"
 description = "An MCP proxy that gates risky AI actions, pauses high-risk ones for a human, and keeps a tamper-evident audit log."
 readme = "README.md"
 license = "MIT"
@@ -65,7 +65,7 @@ otel = [
     "opentelemetry-sdk>=1.27,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
 ]
-all = ["quill[keyring,postgres,touchid,otel]"]
+all = ["quillx[keyring,postgres,touchid,otel]"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
