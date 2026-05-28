@@ -1,18 +1,21 @@
 # AEGIS vs Quill — pattern-library and architectural comparison
 
 **Date:** 2026-05-27
-**Status:** STUB. Fill in after reading the AEGIS paper end-to-end.
+**Status:** Headline architecture verified against the arxiv HTML on 2026-05-27. Per-category pattern map (Quill's regexes vs AEGIS's 22 patterns) still TODO and is the next pass.
 **Author:** Manu Marri (Loomiq)
 **Why this doc exists:** AEGIS is the closest direct competitor to Quill found after the May 7 field survey was written. Architecturally near-identical (signed/chained audit log, three-stage policy pipeline, human approval primitive), with a published pattern library and FP rate Quill does not yet match in published form. This doc maps Quill's `policy.py` regex set against AEGIS's published pattern categories so we can answer "how does Quill compare to AEGIS" with real numbers in launch comments and follow-on conversations.
 
 ## Primary sources
 
-- **Paper:** https://arxiv.org/html/2603.12621v1 (USC / UC Davis, March 2026)
-- **Repo:** https://github.com/Justin0504/Aegis (MIT)
+- **Paper:** *AEGIS: No Tool Call Left Unchecked — A Pre-Execution Firewall and Audit Layer for AI Agents*, https://arxiv.org/html/2603.12621v1
+- **Authors:** Aojie Yuan (USC, aojieyua@usc.edu), Zhiyuan Su (UC Davis, azysu@ucdavis.edu), Yue Zhao (USC, yue.z@usc.edu) — verified against arxiv HTML 2026-05-27
+- **Repo:** https://github.com/Justin0504/Aegis (MIT, owner GitHub username `Justin0504`)
 - **License:** MIT
-- **Researcher's read of the paper (2026-05-27 session):** 22 detection patterns across 7 categories, validated against 48 attack instances, 1.2% FP rate, 8.3 ms median latency, SDK wrappers for 14 frameworks, Ed25519-signed + SHA-256 hash-chained audit log, web "Compliance Cockpit" dashboard for human approval.
-
-Verify both URLs yourself before staking any external claim on the numbers above.
+- **Verbatim quotes from the paper (verified 2026-05-27):**
+  - Pattern library: *"Extracted strings are matched against 22 detection patterns in 7 categories"*. Table 1 of the paper breaks down: SQL Injection (7), Path Traversal (4), Shell Injection (4), Prompt Injection (3), Sensitive Files (2), Data Exfiltration (1), PII Leakage (1).
+  - Framework support: *"The current implementation supports 9 Python frameworks (Anthropic, OpenAI, LangChain, CrewAI, Gemini, Bedrock, Mistral, LlamaIndex, and smolagents), 4 JS/TS frameworks, and Go."*
+  - Approval tooling: *"The Compliance Cockpit (Figure 6) is a web-based operational dashboard for real-time activity monitoring, approval queues for high-risk actions, anomaly summaries, session-level trace inspection, and compliance-oriented export and reporting tools."*
+  - Headline numbers: 48 attack instances blocked, 1.2% FP rate on benign calls, 8.3 ms median latency, three-stage pipeline (deep string extraction → content-first risk scanning → composable policy validation).
 
 ## Architectural deltas (no paper reading required)
 

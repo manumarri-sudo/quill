@@ -186,7 +186,7 @@ Architectural overlap with AEGIS (USC/UC Davis, MIT, March 2026) is real and wor
 
 > **Subject:** Quill — an MCP-proxy / Touch-ID-native take on the AEGIS pattern
 >
-> Hi [author],
+> Hi Aojie, Zhiyuan, and Yue,
 >
 > I'm building Quill (https://github.com/manumarri-sudo/quill), an open-source Python package that gates AI-agent tool calls via Claude Code's PreToolUse hook plus an MCP proxy, with per-call Touch ID approval on macOS and an HMAC-chained audit log. I read the AEGIS paper (arXiv 2603.12621) and the architectural overlap is real — I wanted to flag the project to you ahead of a public launch so the relationship can be collegial rather than competitive when the two tools eventually get compared.
 >
