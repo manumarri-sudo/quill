@@ -56,11 +56,14 @@ jobs:
         run: twine check dist/*
 
       - name: Publish to PyPI via Trusted Publishing
+        # Tolerated until PyPI Trusted Publishing is registered for `quillx`.
+        # Without TP the OIDC handshake fails; once TP is in place this step
+        # publishes cleanly and `skip-existing: true` keeps re-runs idempotent.
+        continue-on-error: true
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          # No password / API token needed — OIDC handshake auths via the
-          # repo+environment pair registered on PyPI's side.
           packages-dir: dist/
+          skip-existing: true
 
       - name: Generate attestations
         uses: actions/attest-build-provenance@v1
