@@ -12,48 +12,31 @@ the cadence of how each one gets pushed.
 
 ## Channels by surface
 
-### 1. Python package index (PyPI) - the primary surface
+### 1. uv / uvx - the hero install
 
-The hero install command is `pip install quillx && quill start`. PyPI is therefore
-the canonical distribution. The dist name on PyPI is `quillx` because the `quill`
-name was taken by an unrelated package; the import path, CLI binary, and config
-directory all remain `quill` (rename is dist-only). Build + upload steps:
+`uvx quillx start` is the install command on the landing page and the README, because it's two seconds end to end with no virtualenv ceremony. `uv tool install quillx` is the persistent variant. uv resolves through PyPI directly, so a PyPI publish is enough and there's no separate uv index to maintain. Per the 2026 launch playbook research, uvx has displaced pipx as the recommended invocation pattern because it's roughly 10-100x faster and bundles Python version management.
+
+### 2. pipx - for users who want it global without uv
+
+`pipx install quillx && quill start`. Same backing as uvx (PyPI), no extra publish step. Pipx is still in wide use, so the README mentions it as the second-listed install.
+
+### 3. PyPI - the canonical distribution underneath both
+
+The dist name on PyPI is `quillx` because the `quill` name on PyPI is held by an unrelated package; the import path, CLI binary, config directory, and brand all stay `quill`. Build + upload mechanics:
 
 ```bash
-python -m build                              # produces dist/*.whl + dist/*.tar.gz
-python -m twine check dist/*
-python -m twine upload dist/*                # uses ~/.pypirc or PYPI_API_TOKEN
+uv build                                     # produces dist/*.whl + dist/*.tar.gz
+UV_PUBLISH_TOKEN=... uv publish dist/*       # first upload via bootstrap token
 ```
 
-The CI workflow (`.github/workflows/ci.yml`) builds artifacts on every push. To
-publish on tag, add a `release` job triggered by `release.published` that runs
-`twine upload`. Don't auto-publish from main - every release should be a
-deliberate `git tag vX.Y.Z` + `gh release create`.
+After the first upload, register PyPI Trusted Publishing for `quillx` so future releases ship via OIDC and no API token lives anywhere. The `release.yml` workflow handles this end to end once TP is in place. PEP 740 attestations come for free from `pypa/gh-action-pypi-publish@v1.11.0+` with Trusted Publishing and are now expected default behavior for security-adjacent tools.
 
-### 2. uv / uvx - the fast paste-able install
-
-`uv` is what the landing page shows by default because the install is two
-seconds, no virtualenv ceremony. The command is `uvx quillx` (run directly) or
-`uv tool install quillx` (persistent). uv resolves through PyPI, so PyPI publish
-is enough - there's no separate uv index.
-
-### 3. pipx - the "I want it global" install
-
-`pipx install quillx && quill`. Same: PyPI-backed, no extra publish step.
-
-### 4. Homebrew - `brew install quill`
+### 4. Homebrew - `brew install manumarri-sudo/quill/quill`
 
 Two paths:
 
-- **Tap (fast).** Create `manumarri-sudo/homebrew-quill`, add a `Formula/quill.rb`
-  pointing at the GitHub release tarball + Python deps. Users get
-  `brew install manumarri-sudo/quill/quill`. Set up once; CI bumps the formula
-  via a `homebrew-releaser` GitHub Action on each tag.
-- **Core (gated).** Submit to `Homebrew/homebrew-core` once we hit the
-  notability bar (≥75 GitHub stars, stable releases, active maintenance).
-  Won't qualify for v0.1.
-
-Defer to v0.2.
+- **Self-owned tap (fast, recommended for v0.2).** Create `manumarri-sudo/homebrew-quill`, add a `Formula/quill.rb` pointing at the GitHub release tarball plus Python deps. Users get `brew install manumarri-sudo/quill/quill`. CI bumps the formula via a `homebrew-releaser` GitHub Action on each tag.
+- **Homebrew core (gated).** Submit to `Homebrew/homebrew-core` once the notability bar is met (≥75 GitHub stars, stable releases, active maintenance). Not worth chasing pre-traction.
 
 ### 5. npm wrapper - `npx -y @quill/mcp`
 
@@ -77,23 +60,16 @@ distribution would advertise a half-baked surface.
 
 ### 6. MCP server registries
 
-- **mcp.so** - the de facto community directory. Submit a PR to
-  `https://github.com/lobehub/lobe-chat/tree/main/Docs` mirror or add an entry
-  via their submission form. Required: name, install command, JSON schema of
-  exposed tools.
-- **Smithery** (`smithery.ai`) - has a CLI: `npx @smithery/cli install quill`.
-  Adds Quill to a user's `mcp.json` automatically. Requires us to maintain a
-  manifest in their registry repo.
-- **Anthropic's MCP server gallery** - list of community-maintained servers
-  Anthropic links from their docs. Submit via PR to
-  `modelcontextprotocol/servers` once Quill exposes a stable schema-passthrough.
-- **Cline marketplace** (VS Code extension) - Cline shows MCP servers in its
-  picker. Submit via PR to their repo.
-- **Cursor MCP directory** - Cursor's `Settings > Features > MCP` lists curated
-  servers. Reach out to Anysphere via their public Discord.
+Four primary registries plus one upstream canonical:
 
-Order of operations: ship 0.2 (schema-passthrough), then submit to all five in
-the same week so they cross-link.
+- **Official MCP Registry** at `registry.modelcontextprotocol.io` is the canonical upstream that the other registries ingest from. Submission requires a `server.json` (already at the repo root, namespace `io.github.manumarri-sudo/quill`) and GitHub-auth ownership verification. **Submit this first; the downstream registries pick up from it automatically.**
+- **mcp.so** is the broadest consumer directory (20k+ servers). Self-service submission form.
+- **Smithery** at `smithery.ai` accepts `smithery mcp publish` from the CLI and serves the agent-framework user base.
+- **Cline marketplace** requires an issue against `github.com/cline/mcp-marketplace` with the repo URL, a 400×400 PNG logo, and pre-verification that Cline can install Quill from the README alone.
+- **punkpeye/awesome-mcp-servers** is a PR against the README, alphabetical placement enforced. Cheap and indexes well in search.
+- **Cursor MCP directory** submission process is undocumented in public sources; outreach via the Cursor Discord or a PR against `cursor.directory` is the current path.
+
+Order of operations: submit to the official MCP Registry T-1 (the day before Show HN), then mcp.so / Smithery / awesome-mcp-servers PR same-day as the Show HN so they show up in HN comments as proof of distribution. Cline marketplace T+1 (needs the 400×400 logo ready).
 
 ### 7. VS Code / Cursor / Cline / Windsurf - extensions
 
@@ -125,18 +101,9 @@ then, it's a distraction.
 
 ## DevRel cadence
 
-### Launch week (one-time)
+### Launch arc (T-3 → T+30)
 
-- **Day 0**: Show HN ("quill - a tiny Python proxy that gates risky AI-agent
-  tool calls"). Post the LinkedIn version too. Don't post both within an hour
-  - let HN breathe first.
-- **Day 1**: tweet thread with the 30-second `rm -rf` GIF.
-- **Day 2**: submit to mcp.so + Smithery + Cline marketplace + Cursor in one
-  push.
-- **Day 3**: post in r/LocalLLaMA, r/ChatGPTCoding, r/cursor with the same
-  framing as Show HN but tailored to each sub.
-- **Day 4-7**: respond to every issue, every comment, every DM. The early
-  signal is who's actually using it.
+See the **Launch arc** section in `LAUNCH.md` for the full prep / launch / follow-through plan. In short: T-3 to T-1 is prep (demo GIF in the README, smoke-test the install on a clean machine, badges, SECURITY.md / CITATION.cff, official MCP Registry submission, pre-write the Show HN body, pre-draft canned responses), T-0 is the Show HN with same-day registry sweep, T+1 amplifies via LinkedIn / Substack / Cline marketplace, T+7 publishes a retrospective with traffic and feedback, T+30 ships v0.3 with the top feedback-driven change.
 
 ### Ongoing (weekly)
 
@@ -191,19 +158,14 @@ Things we explicitly do NOT do:
 
 ---
 
-## Status as of 2026-05-07
+## Status as of 2026-05-27
 
-- PyPI: not yet published. Publish v0.1.0 once the audit-chain repair docs land
-  in CHANGELOG.md.
-- GitHub: repo public at `github.com/manumarri-sudo/quill`. CI workflow staged
-  at `.github/workflows/ci.yml`; user needs `gh auth refresh -s workflow` to
-  push it.
-- Landing page: `web/index.html` ready. Not yet deployed to Vercel.
-- Telemetry pipeline: Supabase schema written (`infra/supabase/sql/0001_init.sql`)
-  + ingest/analyze Edge Functions (`infra/supabase/functions/`). Not yet
-  deployed (`supabase functions deploy` pending).
-- npm wrapper: deferred until v0.2 (schema-passthrough).
-- Homebrew tap: deferred until v0.2.
-- MCP registries: deferred until v0.2.
-- VS Code / Cursor / Cline / Windsurf adapters: defined as good-first-issues,
-  not yet built.
+- **PyPI:** live as `quillx` at https://pypi.org/project/quillx/. v0.2.0a4 published with both wheel and sdist. Trusted Publishing not yet registered; bootstrap-token uploads work in the meantime.
+- **GitHub:** repo public at `github.com/manumarri-sudo/quill`. CI workflow active at `.github/workflows/ci.yml`. Release workflow at `.github/workflows/release.yml` targets TP and is dormant until TP is registered.
+- **v0.2.0a4 GitHub release:** draft only; mark public via `gh release edit v0.2.0a4 --draft=false` once TP is in place.
+- **Landing page:** `web/index.html` ready. Not yet deployed to Vercel.
+- **Telemetry pipeline:** Supabase schema and Edge Functions still pending deploy. Not blocking launch (Quill itself is local-only).
+- **npm wrapper:** still deferred — the proxy schema-passthrough lands in 0.2 but the npm packaging is undogfooded.
+- **Homebrew tap:** not yet created. T-3 prep item if going for parity with the launch.
+- **MCP registries:** server.json drafted at the repo root for official MCP Registry submission. mcp.so / Smithery / Cline marketplace / awesome-mcp-servers PRs all queued for the launch week.
+- **VS Code / Cursor / Cline / Windsurf adapters:** Cursor pre-tool-call hook already supported (A2A captures handoffs for Cursor 1.7+). The other IDEs remain good-first-issues.

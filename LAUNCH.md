@@ -18,48 +18,50 @@ Internal-facing notes for shipping `quill` publicly. Edit / discard before posti
 
 ## Short X / Twitter post
 
-> AI coding agents now have shell, file write, and deploy access. None of them ask before doing anything irreversible.
+> AI coding agents have shell access, file write, and deploy permissions, and none of them ask before doing anything irreversible.
 >
-> quill is a 6KB Python proxy that gates `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish` and signs every decision into an audit log.
+> Quill is a small Python proxy that gates `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, and the CVE-2025-59536 chain bypass, then signs every decision into a tamper-evident audit log. Touch ID approval on macOS for critical calls.
 >
-> Drops into Claude Code's PreToolUse hook in one command.
+> One command to install: `uvx quillx start`.
 >
 > [link]
 
 ## LinkedIn post
 
-> Last summer Replit's coding agent deleted Jason Lemkin's production database in a vibe-coding session, ignored an explicit code-freeze instruction, and fabricated data to cover it. The agents writing your code right now have the same authority. The pause button between them and prod just hadn't been built into the framework yet.
+> Last summer Replit's coding agent deleted Jason Lemkin's production database in a vibe-coding session, ignored an explicit code-freeze instruction, and fabricated 4,000 fake users to cover the deletion. The agents writing your code right now have the same authority on your machine, and the frameworks themselves haven't shipped a pause button between those agents and prod.
 >
-> I shipped a small one: quill. It's an MCP proxy + Claude Code hook that gates the destructive moves before they execute, asks the human to confirm the high-risk ones, and signs every decision into a tamper-evident audit log. The format carries everything EU AI Act Article 14 and AIUC-1 want for human-oversight evidence.
+> I built a small one. Quill is an MCP proxy plus a Claude Code PreToolUse hook that gates destructive moves before they execute, asks for a human y/N on high-risk calls, requires Touch ID on macOS for the critical ones, and signs every decision into a tamper-evident HMAC-chained audit log. The format carries the evidence EU AI Act Article 14 and AIUC-1 want for human-oversight requirements.
 >
-> Open source, MIT, six dependencies. v0.1 alpha is up. Feedback welcome - especially missed dangerous-action patterns.
+> Open source, MIT, six runtime dependencies, 598 passing tests. v0.2.0a4 alpha is live on PyPI as `quillx` (install with `uvx quillx start` or `pipx install quillx`). Feedback is the most useful thing you can leave, especially on missed dangerous-action patterns or threat-model gaps.
 >
 > [link]
 
-## Show HN blurb (current, drafted 2026-05-26, updated 2026-05-27 for v0.2.0a4)
+## Show HN blurb v3 (current, 2026-05-27, research-informed)
 
-> Show HN: Quill - a tiny Python proxy that gates risky AI-agent tool calls
+> Show HN: Quill – Touch ID approval gates for AI agent tool calls
 >
-> The coding agents in Claude Code, Cursor, and Cline can run shell commands, write files, push to git, and call deploy APIs, and none of them pause before doing irreversible things. Last summer Replit's agent deleted Jason Lemkin's production database during a vibe-coding session, ignored an explicit code-freeze instruction, and fabricated 4,000 fake users to cover the deletion; a Cursor agent ran `rm -rf ~/` against a developer's home directory two weeks later; an autonomous coding agent leaked a customer's GitHub PAT into a public commit a few weeks after that. The pause button between those agents and your prod just hadn't been built into the framework yet, so I built the smallest version of one I could.
+> Hi HN. I'm Manu, a solo developer, and Quill is a small open-source Python package I've been building since early 2026 that gates risky AI-agent tool calls before they execute. The one-line version: it sits between Claude Code or Cursor and the things your agent can break, pauses for a human y/N on high-risk calls, requires Touch ID on macOS for critical ones, and signs every decision into a tamper-evident audit log.
 >
-> Quill is a small Python package that drops into Claude Code's `PreToolUse` hook in one command and gates every Bash, Edit, Write, and NotebookEdit before it executes. It can also sit in front of your external MCP servers (filesystem, github, postgres, slack) as a real schema-passthrough proxy, so your client still gets full autocomplete and JSON-RPC error codes are preserved end to end. Three layers, all deterministic, no LLM in the gate so nothing is jailbreakable:
+> Three incidents last summer pushed me here. Replit's coding agent deleted Jason Lemkin's production database during a vibe-coding session and then fabricated 4,000 fake users to cover the deletion. A Cursor agent ran `rm -rf ~/` against a developer's home directory shortly after. An autonomous coding agent leaked a customer's GitHub PAT into a public commit a few weeks later. The frameworks themselves didn't ship with a pause button between those agents and prod, so I built the smallest one I could.
 >
-> - **Camera:** every call gets a signed JSONL line, HMAC-chained to the previous entry for tamper evidence
-> - **Badge:** out-of-scope calls are refused before the human is even asked, based on a scope you declared at session start
-> - **Bank manager:** high-risk calls pause for a y/N, and critical ones (rm -rf, git push --force, DROP TABLE, vercel --prod, npm publish, .env reads, the CVE-2025-59536 subcommand-chain bypass) require you to type the action name back so muscle-memory yes-spamming can't ship a $50,000 mistake. When the gate refuses, you get a notification on whatever channel you opted in to (macOS banner, email, Slack, generic webhook) carrying what was tried, why it was blocked, and a paste-able `quill approve <token>` you can run from your phone with Touch ID
+> Quill drops into Claude Code's `PreToolUse` hook in one command and gates every Bash, Edit, Write, and NotebookEdit before it executes, and it can also sit in front of your external MCP servers as a schema-passthrough proxy so your client keeps full autocomplete and JSON-RPC error codes round-trip cleanly. Three deterministic layers, no LLM anywhere, so nothing is jailbreakable. First, a camera: every call gets a signed JSONL line, HMAC-chained to the previous entry, so the log is tamper-evident. Then a badge: out-of-scope calls are refused before you're even asked, against a scope you declared at session start. Then a bank manager: high-risk calls pause for a y/N, and critical ones (rm -rf, git push --force, DROP TABLE, vercel --prod, npm publish, .env reads, the CVE-2025-59536 subcommand-chain bypass) make you type the action name back so muscle-memory yes-spamming can't ship a $50,000 mistake. When the gate refuses, you get a notification on whichever channel you opted into (macOS banner, email, Slack, generic webhook) carrying what was tried, why it was blocked, and a paste-able `quill approve <token>` you can run from your phone with Touch ID on the Secure Enclave.
 >
-> Dogfood evidence, since the only honest version of this claim is the audit log: over 20 days on my own machine, 5,682 tool calls observed, 1,266 paused for input, 130 critical-class blocks, 8 real outbound notify dispatches, 1 Touch ID approval consumed, full chain still verifying at 10k+ entries. Two `chain.repaired` events from a pre-0.1.1 concurrent-write race are recorded in the log itself with the reason and line ranges, which is what tamper-evident logging is supposed to do.
+> The only honest version of any of this is the audit log itself. On my own machine over the past 40+ days: 11k+ tool calls observed, 1.2k+ paused for input, 130+ critical-class blocks, real notify dispatches and Touch ID approvals consumed, the chain still verifying cleanly. Two `chain.repaired` events from a pre-0.1.1 concurrent-write race sit in the log itself with reasons and line ranges, which is what tamper-evident logging is supposed to do.
 >
-> Honest about what's mature vs framework-prepared: the gate, audit, notification dispatch, approve-token, type-to-confirm, Touch ID, and trifecta-close enforcement pillars have on-disk evidence; the A2A bridge captures handoffs for Cursor 1.7+ today but Claude Code subagent capture is pending hook-API support from Anthropic; tool-description pinning works end-to-end but the external-MCP path is undogfooded relative to the built-in tools path. No public security audit yet, one is scheduled post-1.0. v0.2.0a4 is alpha; pair with model-level guardrails and your own legal review before production use.
+> Honest about scope, because alpha-stage projects in this space tend to overclaim. The gate, audit, notification dispatch, approve-token, type-to-confirm, Touch ID, and trifecta-close enforcement all have on-disk evidence. The A2A bridge captures handoffs for Cursor 1.7+ today, but Claude Code subagent capture is pending hook-API support from Anthropic. Tool-description pinning works end-to-end, but the external-MCP path is less exercised than the built-in tools path. On Claude Cowork (Anthropic's desktop product), Quill can run as an MCP connector and gate upstream MCP calls, but Cowork's built-in file and browser tools bypass Quill because Cowork doesn't yet expose a PreToolUse-equivalent hook. There's no public security audit yet; one is scheduled post-1.0. v0.2.0a4 is alpha, so pair with model-level guardrails and your own legal review before any production use.
 >
-> How this compares to others in the agent-gate-and-audit space: AEGIS (USC/UC Davis, MIT-licensed, March 2026, arXiv 2603.12621) is the closest academic analog with a 22-pattern detection library across 7 categories and a published 1.2% FP rate; it instruments via SDK wrappers across 14 frameworks and ships an enterprise web "Compliance Cockpit" for approvals. Snyk's Invariant Gateway (post-acquisition) is the enterprise MCP-gateway play. Anthropic's Claude Code Auto Mode (March 2026) adds cascaded-classifier permission decisions natively at a 0.4% FP rate. Quill's intentional lane is the developer-laptop, MCP-proxy form factor with Touch ID on the Secure Enclave for per-call hardware-attested approval; different audience, different surface, complementary rather than competing for the same buyer. On the v0.3 roadmap: track the IETF AIVS draft (`draft-stone-aivs-00`) so Quill's receipts are interoperable with the emerging agent-audit-trail standard before it's frozen.
+> Some other tools in this space worth knowing about: Microsoft's Agent Governance Toolkit (April 2026, MIT) is the closest direct competitor, with a seven-package monorepo, OWASP Agentic Top 10 framing, and sub-millisecond enforcement. BlueRock's MCP Python Hooks (May 2026) is the closest runtime-sensor analog. Anthropic's Claude Code Auto Mode adds cascaded-classifier permission decisions natively. AEGIS (USC/UC Davis, MIT, arXiv 2603.12621) is an academic project in adjacent territory targeting injection-class attacks. Quill is intentionally smaller and aimed at a different audience — developer laptops with an MCP-proxy form factor, Touch ID on the Secure Enclave for per-call hardware-attested approval, shipped as a single Python package with no daemon and no web service. It isn't trying to compete with any of the above on their axes.
 >
-> 598/598 tests passing. MIT, six runtime dependencies. The HMAC key and audit log live on your disk in mode 0o600, and you own the key, the log, and the verdict.
+> 598/598 tests passing. MIT, six runtime dependencies. The HMAC key and audit log live on your disk in mode 0o600, and you own the key, the log, and the verdict. I'll be in the thread for the next few hours — feedback (especially missed dangerous-action patterns or threat-model gaps) is the most useful thing you can leave.
 >
 > Repo: https://github.com/manumarri-sudo/quill
-> Install: `pipx install quillx` (or `uvx --from quillx quill ...` for a no-install run). PyPI: https://pypi.org/project/quillx/.
+> Install: `uvx quillx start`, or `pipx install quillx` then `quill start`. PyPI: https://pypi.org/project/quillx/.
 >
-> Note on the name: the PyPI dist is `quillx` because the `quill` name on PyPI was held by an unrelated package. The CLI binary, import path, config directory, env vars, and brand all remain `quill`.
+> The PyPI dist is `quillx` because the `quill` name on PyPI is held by an unrelated package. CLI binary, import path, config directory, env vars, and brand all stay `quill`.
+
+## Show HN blurb v2 (archived 2026-05-27, superseded by v3 after launch-research pass)
+
+> [v2 was the May-26 draft with a Cline mention in the opening, an AEGIS-anchored comparables paragraph, and `pipx install quillx` as the lead install. v3 replaces it with: Touch-ID-first title, seven-part structure per the 2026 Show HN best-practice research, Microsoft AGT + BlueRock as the primary comparables, Cowork compatibility scope statement, and `uvx quillx start` as the hero install.]
 
 ## Show HN blurb (archived v0.1 framing, do not use)
 
@@ -79,6 +81,55 @@ Internal-facing notes for shipping `quill` publicly. Edit / discard before posti
 > No telemetry by default. Audit log lives on your disk. You own the key, the log, the verdict.
 >
 > [link to repo]
+
+## Launch arc — T-3 → T+30 (research-informed, 2026-05-27)
+
+Pulled from a 2026-vintage research pass on Show HN mechanics, MCP-ecosystem distribution, and recent comparable launches (Microsoft Agent Governance Toolkit April 2026, BlueRock MCP Python Hooks May 2026). The biggest correction to the previous 3-day plan: the demo GIF and the official MCP Registry submission both need to be live BEFORE the Show HN, not after, and the launch arc should be 5 days plus a follow-through, not 3 days.
+
+### T-3 — visible artifacts in the README
+
+- Record the 30-second demo GIF showing `rm -rf` attempted, blocked by Quill with reason, Touch ID prompt, audit log entry surfaced afterward. The demo should show the failure mode Quill prevents, not just the feature it ships. Embed above the fold in the README.
+- Verify `uvx quillx start` works from a clean machine (fresh shell, no Python venv preloaded, no `~/.quill/` state). Smoke-test on both Intel and Apple Silicon if possible.
+- Confirm the README badge row is live: PyPI version, Python versions (from PyPI metadata), CI status, license, typed. Add codecov once coverage runs are wired.
+- Refresh stale audit-log numbers in the Show HN blurb against the live `~/.quill/audit.log.jsonl` (currently 11k+ entries, 40+ days).
+
+### T-2 — security-tool credibility signals
+
+- Enable PEP 740 attestations on the next release via `pypa/gh-action-pypi-publish@v1.11.0+` plus PyPI Trusted Publishing. Roughly 20k packages already ship attestations by default in 2026; not having them is a negative signal for a security-positioned tool.
+- Confirm SECURITY.md is current (already in repo) — disclosure email, threat model, CWE coverage.
+- CITATION.cff at repo root (added in this commit) — academic-adjacent projects expect this.
+- Decide on Trusted Publishing registration. Either Manu does the ~3-min PyPI web form so future releases ship via OIDC end to end, or we keep using fresh bootstrap tokens per release.
+
+### T-1 — registry submissions + Show HN pre-work
+
+- Submit `server.json` (already drafted at repo root) to the official MCP Registry at `registry.modelcontextprotocol.io`. This is the canonical upstream that mcp.so, Smithery, and others ingest from, so doing it first gives them time to pick up the listing before launch day.
+- Pre-write the full Show HN body (v3 above) in a text file, ready to paste.
+- Pre-draft 3-4 candidate responses to the most likely critical comments: "this already exists / why not OPA / Cerbos / Permit.io", "why Touch ID specifically", "why not WebAuthn or hardware key", "security tool from a non-security background — how do I trust this", "what's the threat model on the audit log itself", "what about Linux / Windows".
+
+### T-0 — Show HN day
+
+- Post Tuesday or Wednesday between 8-9am EST (HN's conventional dev-tool window). Sunday midnight-1am PT is the counter-cyclical alternative with 2x average comments per a 2025 analysis, but the HN community itself has pushed back on timing optimization — quality dominates.
+- Title verbatim: "Show HN: Quill – Touch ID approval gates for AI agent tool calls".
+- Post the LinkedIn version *separately* later in the day, not within the first hour of the HN post. Let HN breathe.
+- Clear your calendar for the next 3+ hours. The first-hour comment window is the load-bearing variable; HN's algorithm watches for sustained author engagement. Handle "this already exists" by agreeing with the legitimate part first, then explaining the specific delta, never deflect.
+- Same day, in parallel with HN engagement: submit to mcp.so (self-service form), Smithery (`smithery mcp publish`), open the PR against `punkpeye/awesome-mcp-servers`. These show up in HN comments as proof of distribution.
+
+### T+1 — amplify
+
+- Submit to the Cline marketplace with a 400×400 PNG logo prepared. Issue against `github.com/cline/mcp-marketplace`.
+- Publish the LinkedIn post (the version above, already drafted).
+- Substack version: write a 600-800 word essay anchored on the Replit / Lemkin incident framing and the Trust Infrastructure thesis. Cross-link to the HN thread for the technical discussion.
+- Cross-post tailored versions to r/LocalLLaMA, r/ChatGPTCoding, r/cursor with each subreddit's idiom.
+
+### T+7 — retrospective
+
+- Publish a retrospective post with concrete numbers: HN traffic, GitHub stars, PyPI downloads, top three feature requests received, what's shipping in v0.3. This is a second wave of distribution for anyone who missed launch day.
+- Update the README "Why this exists" and "What's mature vs framework-prepared" sections with anything the launch surfaced.
+
+### T+30 — v0.3 with feedback-driven change
+
+- Ship v0.3 with the top feedback-driven change from launch week. If the change is substantive enough, re-launch via "Show HN: Quill 0.3" — `dang`'s guidance allows a re-launch for material new work.
+- Backlog items still tracked: A2A bridge workaround for Claude Code via transcript-path heuristics, external MCP server dogfooding for tool pinning, WebAuthn-attested confirmation for cross-platform hardware attestation, IETF AIVS draft (`draft-stone-aivs-00`) interoperability.
 
 ## Five demo ideas
 

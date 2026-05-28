@@ -2,9 +2,10 @@
 
 > The pause button between your AI agent and the things you can't undo.
 
+[![PyPI](https://img.shields.io/pypi/v/quillx.svg)](https://pypi.org/project/quillx/)
+[![Python versions](https://img.shields.io/pypi/pyversions/quillx.svg)](https://pypi.org/project/quillx/)
+[![CI](https://img.shields.io/github/actions/workflow/status/manumarri-sudo/quill/ci.yml?branch=main&label=ci)](https://github.com/manumarri-sudo/quill/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0a4-orange.svg)](CHANGELOG.md)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://peps.python.org/pep-0561/)
 [![Typed](https://img.shields.io/badge/typed-strict-brightgreen.svg)](https://peps.python.org/pep-0561/)
 
 `quill` sits between your MCP client (Claude Code, Cursor, Cline, Claude Desktop) and the upstream MCP servers your agent uses. It also plugs into Claude Code's `PreToolUse` hook so the *built-in* tools (Bash, Edit, Write, NotebookEdit) get the same treatment. Every tool call passes through three deterministic checks:
@@ -54,20 +55,17 @@ Last July, [Replit's coding agent deleted Jason Lemkin's production database dur
 - Permission Decay: tracking infrastructure is wired and tested; no overrides observed in single-developer dogfooding yet because the operator hasn't yet promoted a `loosening_candidate` via `quill suggestions promote`. The decay timer fires when overrides accumulate.
 - Tool description pinning: pin recording, digest verification, and approval/revoke CLI all work; only one tool has been observed in dogfooding because the external MCP proxy path (Path B below) is less exercised than the Claude Code built-in tools path (Path A).
 
-**On the v0.2.0a3 / v0.3 roadmap**: A2A bridge workaround for Claude Code via transcript-path heuristics, more external MCP server dogfooding to populate the pinning subsystem, real-world Permission Decay triggers as the suggestions CLI gets used.
+**On the v0.3 roadmap**: A2A bridge workaround for Claude Code via transcript-path heuristics, more external MCP server dogfooding to populate the pinning subsystem, real-world Permission Decay triggers as the suggestions CLI gets used, and tracking the IETF AIVS draft (`draft-stone-aivs-00`) so Quill's receipts stay interoperable with the agent-audit-trail standard.
 
 ## Install
 
-PyPI publish is in progress. For v0.2.0a2, clone and install:
-
 ```bash
-git clone https://github.com/manumarri-sudo/quill
-cd quill
-pip install -e .
-quill start
+uvx quillx start
 ```
 
-`pip install quillx`, `uvx quillx`, `pipx install quillx`, and `brew install quill` are all coming once the registries are submitted to (see [docs/distribution.md](docs/distribution.md)). The PyPI dist is `quillx` because the `quill` name on PyPI was taken by an unrelated package; the import path, CLI binary (`quill`), config directory (`~/.quill/`), env vars (`QUILL_KEY`), and brand all remain `quill`. Homebrew is a tap we own so the formula stays `quill`.
+That's the whole thing on a fresh machine if you have [`uv`](https://docs.astral.sh/uv/) installed. If you'd rather a persistent install, `pipx install quillx` then `quill start`, or `pip install quillx` inside an existing venv. For a development checkout: `git clone https://github.com/manumarri-sudo/quill && cd quill && pip install -e .`. Homebrew lands as a self-owned tap (`brew install manumarri-sudo/quill/quill`) shortly.
+
+The PyPI dist name is `quillx` because the `quill` PyPI name is held by an unrelated package. The CLI binary (`quill`), import path, config directory (`~/.quill/`), env vars (`QUILL_KEY`), and brand all stay `quill`. A PEP 541 reclaim request for the canonical name is in flight; if it lands, `quillx` becomes a transitional alias for one release cycle and then sunsets.
 
 `quill start` is idempotent: it merges Quill's hook into `~/.claude/settings.json`, runs `quill doctor`, and opens the live dashboard. From the next Claude Code session on, every Bash, Edit, Write, and NotebookEdit goes through Quill's classifier; every external MCP call (if you wire Quill into `mcpServers`) goes through the proxy.
 
