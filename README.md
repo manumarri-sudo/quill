@@ -2,6 +2,8 @@
 
 > The pause button between your AI agent and the things you can't undo.
 
+<!-- mcp-name: io.github.manumarri-sudo/quill -->
+
 [![PyPI](https://img.shields.io/pypi/v/quillx.svg)](https://pypi.org/project/quillx/)
 [![Python versions](https://img.shields.io/pypi/pyversions/quillx.svg)](https://pypi.org/project/quillx/)
 [![CI](https://img.shields.io/github/actions/workflow/status/manumarri-sudo/quill/ci.yml?branch=main&label=ci)](https://github.com/manumarri-sudo/quill/actions/workflows/ci.yml)
