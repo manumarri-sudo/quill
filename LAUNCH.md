@@ -178,23 +178,14 @@ This meets PEP 541's abandonment criteria comfortably. Path is direct outreach f
 > Manu Marri (manumarri-sudo)
 > manu.marri@gmail.com
 
-## AEGIS author outreach (collegial pre-launch flag)
+## AEGIS author outreach — decided NOT to send (2026-05-27)
 
-Architectural overlap with AEGIS (USC/UC Davis, MIT, March 2026) is real and worth flagging before launch so the relationship is collegial rather than adversarial when the two tools get compared in HN threads or follow-on academic write-ups. See `docs/research/aegis-comparison-2026-05.md` for the pattern-library comparison stub.
+Originally planned as a collegial pre-launch flag to USC/UC Davis. Walked through the actual overlap on 2026-05-27 and decided to skip:
 
-### Email draft to AEGIS authors
+- The category-level overlap (both are deterministic pre-execution gates with tamper-evident audit logs) is real but generic — at that level Quill also "overlaps" with Datadog or Sentry, which is to say the framing is too coarse to mean anything.
+- The substantive overlap is thin. AEGIS's 7 categories (SQL Injection, Path Traversal, Shell Injection, Prompt Injection, Sensitive Files, Data Exfiltration, PII Leakage) all target *adversarial inputs that exploit the agent*. Quill's `policy.py` targets *irreversible destructive operations the agent will execute correctly* (`rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, the CVE-2025-59536 chain bypass). Different threat models.
+- Architecture diverges hard too — AEGIS wraps SDKs per framework with a web Compliance Cockpit for enterprise approval queues; Quill hooks the MCP protocol with Touch ID for solo-developer per-call attestation.
 
-> **Subject:** Quill — an MCP-proxy / Touch-ID-native take on the AEGIS pattern
->
-> Hi Aojie, Zhiyuan, and Yue,
->
-> I'm building Quill (https://github.com/manumarri-sudo/quill), an open-source Python package that gates AI-agent tool calls via Claude Code's PreToolUse hook plus an MCP proxy, with per-call Touch ID approval on macOS and an HMAC-chained audit log. I read the AEGIS paper (arXiv 2603.12621) and the architectural overlap is real — I wanted to flag the project to you ahead of a public launch so the relationship can be collegial rather than competitive when the two tools eventually get compared.
->
-> Quill's intentional differences from AEGIS: MCP-proxy form factor instead of SDK wrappers (so it gates any MCP-compliant client without framework-specific shims), Touch ID on the Secure Enclave for per-call hardware-attested approval, and individual-developer audience rather than enterprise compliance buyers. I see Quill and AEGIS as complementary surfaces of the same gating thesis (deterministic gate, no LLM in the hot path, signed audit log), not direct substitutes.
->
-> If useful, I'd love to compare pattern libraries once I've worked through your detection categories properly, share Quill's dogfood audit-log corpus (20+ days, 5,000+ events, two real chain-repair incidents recorded), and discuss whether there's a collaboration path on a shared attack-instance benchmark. Happy to chat any time.
->
-> Best,
-> Manu Marri
-> manu.marri@gmail.com
-> https://github.com/manumarri-sudo/quill
+Reaching out proactively to introduce an alpha pip package to a published academic paper would have manufactured a relationship that doesn't really exist. If the two tools get compared in an HN thread or a follow-on writeup, the right move is to write at that point with a concrete referent ("saw your comparison, here's why I think the threat models are different") rather than introducing the connection unilaterally.
+
+`docs/research/aegis-comparison-2026-05.md` stays as background research — the architectural-deltas table is still useful to have on hand if anyone does the comparison.
