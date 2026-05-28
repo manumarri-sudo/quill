@@ -4,6 +4,12 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [0.2.0a5] - 2026-05-27
+
+### Added — MCP Registry ownership verification
+
+- Added the `mcp-name: io.github.manumarri-sudo/quill` magic line to README (as an HTML comment near the top so it stays out of the rendered display but is present in the raw markdown PyPI ships). The official MCP Registry validates this line against the PyPI package's README as proof that the namespace owner controls both the GitHub repo and the PyPI dist. v0.2.0a5 is functionally identical to v0.2.0a4 — the only change is this line plus the version bump. Submission to `registry.modelcontextprotocol.io` proceeds against this release.
+
 ## [0.2.0a4] - 2026-05-27
 
 ### Changed - PyPI dist rename and first PyPI publish
