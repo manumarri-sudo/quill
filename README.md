@@ -10,6 +10,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Typed](https://img.shields.io/badge/typed-strict-brightgreen.svg)](https://peps.python.org/pep-0561/)
 
+![Quill in action — real recent BLOCK decisions from a dogfooding session](web/quill_demo.gif)
+
 `quill` sits between your MCP client (Claude Code, Cursor, Cline, Claude Desktop) and the upstream MCP servers your agent uses. It also plugs into Claude Code's `PreToolUse` hook so the *built-in* tools (Bash, Edit, Write, NotebookEdit) get the same treatment. Every tool call passes through three deterministic checks:
 
 1. **camera**, logged to a signed JSONL audit log, always
