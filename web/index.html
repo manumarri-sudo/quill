@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
-<title>quill — the pause button between AI agents and the things you can't undo</title>
-<meta name="description" content="An MCP proxy that gates risky AI-agent tool calls. rm -rf, git push --force, DROP TABLE — all paused with a paste-able safer alternative. Every decision signed into a tamper-evident audit log.">
+<title>quill: the pause button between AI agents and the things you can't undo</title>
+<meta name="description" content="An MCP proxy that gates risky AI-agent tool calls. rm -rf, git push --force, DROP TABLE all paused with a paste-able safer alternative. Every decision signed into a tamper-evident audit log.">
 <meta property="og:title" content="quill · stop your AI agent before it does the thing you can't undo">
 <meta property="og:description" content="An MCP proxy that gates risky AI-agent tool calls. Open source · MIT · sub-2ms gate latency.">
 <meta property="og:type" content="website">
@@ -1059,7 +1059,7 @@ footer {
       Stop babysitting your <span class="clipped">AI&nbsp;agent.</span>
     </h1>
     <p class="subhead reveal" style="transition-delay: 140ms">
-      Last summer <a class="underline-grow" href="https://www.tomshardware.com/tech-industry/artificial-intelligence/ai-coding-platform-goes-rogue-during-code-freeze-and-deletes-entire-company-database-replit-ceo-apologizes-after-ai-engine-says-it-made-a-catastrophic-error-in-judgment-and-destroyed-all-production-data" target="_blank" rel="noopener">Replit's agent deleted Jason Lemkin's production database</a> mid&#8209;vibe&#8209;code. In April, a Cursor agent <a class="underline-grow" href="https://www.theregister.com/2026/04/27/cursoropus_agent_snuffs_out_pocketos/" target="_blank" rel="noopener">wiped PocketOS — including all backups — in nine seconds</a>. A Claude Code session <a class="underline-grow" href="https://github.com/anthropics/claude-code/issues/10077" target="_blank" rel="noopener">ran <code>rm&nbsp;-rf&nbsp;~/</code> on someone's Mac</a>. Quill is the pause button before the next one is yours.
+      Last summer <a class="underline-grow" href="https://www.tomshardware.com/tech-industry/artificial-intelligence/ai-coding-platform-goes-rogue-during-code-freeze-and-deletes-entire-company-database-replit-ceo-apologizes-after-ai-engine-says-it-made-a-catastrophic-error-in-judgment-and-destroyed-all-production-data" target="_blank" rel="noopener">Replit's agent deleted Jason Lemkin's production database</a> mid&#8209;vibe&#8209;code. In April, a Cursor agent <a class="underline-grow" href="https://www.theregister.com/2026/04/27/cursoropus_agent_snuffs_out_pocketos/" target="_blank" rel="noopener">wiped PocketOS, including all backups, in nine seconds</a>. A Claude Code session <a class="underline-grow" href="https://github.com/anthropics/claude-code/issues/10077" target="_blank" rel="noopener">ran <code>rm&nbsp;-rf&nbsp;~/</code> on someone's Mac</a>. Quill is the pause button before the next one is yours.
     </p>
 
     <div class="install-tabs reveal" role="tablist" aria-label="install commands by package manager" style="transition-delay: 200ms">
@@ -1214,7 +1214,7 @@ footer {
       <blockquote class="pull reveal">
         "I violated every principle I was given. I guessed instead of verifying. I ran a destructive action without being asked. I didn't understand what I was doing before doing it."
         <footer class="reveal" style="display:block; margin-top: 18px; font-style: normal; font-size: 12.5px; letter-spacing: 0.04em; font-family: var(--mono); color: var(--ink-3);">
-          — the Cursor agent, after deleting PocketOS's prod database <span style="color:var(--ink-4);">·</span> April 2026
+          <span style="color:var(--ink-4);">·</span> the Cursor agent, after deleting PocketOS's prod database <span style="color:var(--ink-4);">·</span> April 2026
         </footer>
       </blockquote>
       <div class="reveal" style="transition-delay: 80ms">
@@ -1233,7 +1233,7 @@ footer {
           </li>
           <li style="font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--ink-2);">
             <span style="color: var(--block); font-weight: 500;">Apr&#8201;2026&nbsp;·</span>
-            <a class="underline-grow" href="https://www.theregister.com/2026/04/27/cursoropus_agent_snuffs_out_pocketos/" target="_blank" rel="noopener">A Cursor agent wipes PocketOS — including all volume backups — in 9 seconds</a>.
+            <a class="underline-grow" href="https://www.theregister.com/2026/04/27/cursoropus_agent_snuffs_out_pocketos/" target="_blank" rel="noopener">A Cursor agent wipes PocketOS, including all volume backups, in 9 seconds</a>.
           </li>
           <li style="font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--ink-2);">
             <span style="color: var(--block); font-weight: 500;">Late&#8201;2025&nbsp;·</span>
@@ -1242,7 +1242,7 @@ footer {
           </li>
           <li style="font-family: var(--mono); font-size: 13px; line-height: 1.55; color: var(--ink-2);">
             <span style="color: var(--block); font-weight: 500;">2025&nbsp;&nbsp;·</span>
-            <a class="underline-grow" href="https://snyk.io/articles/state-of-secrets/" target="_blank" rel="noopener">29M secrets leaked on GitHub</a> — AI-assisted commits leak at 2× the human rate.
+            <a class="underline-grow" href="https://snyk.io/articles/state-of-secrets/" target="_blank" rel="noopener">29M secrets leaked on GitHub</a>. AI-assisted commits leak at 2× the human rate.
           </li>
         </ul>
       </div>
@@ -1317,7 +1317,7 @@ footer {
             <td class="t-risk">high</td>
             <td class="t-tool">Edit</td>
             <td class="t-cmd">src/db.ts</td>
-            <td class="t-why">high risk — file mutation needs ack</td>
+            <td class="t-why">high risk, file mutation needs ack</td>
           </tr>
           <tr data-v="allow">
             <td class="t-time">20:44:11</td>
@@ -1403,15 +1403,15 @@ footer {
           The audit log lives on your disk at <code style="font-family:var(--mono);font-size:.94em;background:rgba(30,58,95,.06);padding:1px 5px;border-radius:3px;">~/.quill/audit.log.jsonl</code>, mode <code style="font-family:var(--mono);font-size:.94em;background:rgba(30,58,95,.06);padding:1px 5px;border-radius:3px;">0o600</code>. The HMAC signing key is generated locally on first run and never leaves your machine.
         </p>
         <p>
-          Nothing is sent to a server unless you explicitly opt in to anonymous aggregate telemetry. Even then, only counts and namespace tops — never tool args, never paths, never your intent.
+          Nothing is sent to a server unless you explicitly opt in to anonymous aggregate telemetry. Even then, only counts and namespace tops. Never tool args, never paths, never your intent.
         </p>
       </div>
       <ul class="reveal" style="transition-delay: 80ms">
-        <li>signing key — generated on your machine, never transmitted</li>
-        <li>audit log — append-only, mode 0o600, owner-only read</li>
-        <li>tool arguments — never logged in full, never sent</li>
-        <li>file paths and intent — never sent, even with telemetry on</li>
-        <li>opt-in — preview the exact JSON with <code style="font-family:var(--mono);font-size:.94em;background:rgba(30,58,95,.06);padding:1px 5px;border-radius:3px;">quill telemetry show</code></li>
+        <li>signing key: generated on your machine, never transmitted</li>
+        <li>audit log: append-only, mode 0o600, owner-only read</li>
+        <li>tool arguments: never logged in full, never sent</li>
+        <li>file paths and intent: never sent, even with telemetry on</li>
+        <li>opt-in: preview the exact JSON with <code style="font-family:var(--mono);font-size:.94em;background:rgba(30,58,95,.06);padding:1px 5px;border-radius:3px;">quill telemetry show</code></li>
       </ul>
     </div>
   </div>
