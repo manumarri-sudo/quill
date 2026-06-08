@@ -1,12 +1,12 @@
-# BYO agents — wiring Quill into an agent loop you wrote yourself
+# BYO agents: wiring Quill into an agent loop you wrote yourself
 
-If you're not on Claude Code, Cursor, Codex CLI, or one of the framework SDKs Quill has an adapter for (LangGraph, OpenAI Agents, CrewAI, Pydantic AI, Google ADK, MS Agent Framework — all on the v0.3 ship list), but you do have an agent loop you wrote yourself, this is the page for you.
+If you're not on Claude Code, Cursor, Codex CLI, or one of the framework SDKs Quill has an adapter for (LangGraph, OpenAI Agents, CrewAI, Pydantic AI, Google ADK, MS Agent Framework, all on the v0.3 ship list), but you do have an agent loop you wrote yourself, this is the page for you.
 
 Two paths today, one library API coming in v0.3. Pick whichever fits the loop you've already got.
 
 ---
 
-## Path 1 — MCP proxy (works today, no Python changes)
+## Path 1: MCP proxy (works today, no Python changes)
 
 If your agent already supports MCP servers as upstream tools, you don't need to touch Quill's Python at all. Run `quill serve` and wire it in as an MCP server in whatever config your loop reads. Every tool call your agent routes through MCP flows through Quill's gate, gets risk-classified, audit-logged with an HMAC chain, and either passes through, asks for approval, or is denied with a paste-able alternative.
 
@@ -31,7 +31,7 @@ What this doesn't cover: tool calls your agent dispatches *directly* (a Python `
 
 ---
 
-## Path 2 — wrap each tool dispatch in `quill.gate()` (coming in v0.3)
+## Path 2: wrap each tool dispatch in `quill.gate()` (coming in v0.3)
 
 If your loop dispatches tool calls directly in Python rather than going through MCP, the v0.3 ship target is a single `quill.gate()` library entry point you call before dispatching. Designed in [`docs/research/universal-adapter-strategy-2026-05.md`](research/universal-adapter-strategy-2026-05.md) §4 and on the Day-4 deliverable list of the v0.3 plan. The contract:
 
@@ -59,13 +59,13 @@ else:  # "allow"
     result = run_my_tool(...)
 ```
 
-The same `gate()` call is what every Quill framework adapter wraps for its specific protocol — `RunHooks.on_tool_start` for OpenAI Agents, `@before_tool_call` for CrewAI, `HumanInTheLoopMiddleware` for LangGraph, `FunctionMiddleware` for MS Agent Framework, `before_tool_callback` for Google ADK, `@hooks.on.before_tool_execute` for Pydantic AI. One function, ten integrations. If you write your own framework adapter, that's the function to wrap.
+The same `gate()` call is what every Quill framework adapter wraps for its specific protocol: `RunHooks.on_tool_start` for OpenAI Agents, `@before_tool_call` for CrewAI, `HumanInTheLoopMiddleware` for LangGraph, `FunctionMiddleware` for MS Agent Framework, `before_tool_callback` for Google ADK, `@hooks.on.before_tool_execute` for Pydantic AI. One function, ten integrations. If you write your own framework adapter, that's the function to wrap.
 
 A sync wrapper `quill.gate_sync(...)` is on the ship list too for loops that don't use asyncio.
 
 ### The universal bare-loop template
 
-Any agent loop that uses Anthropic's `messages` API directly (or anything isomorphic to it — OpenAI tool-use, Google's function-calling, Pydantic's) plugs Quill in at the dispatch site. The whole pattern:
+Any agent loop that uses Anthropic's `messages` API directly (or anything isomorphic to it: OpenAI tool-use, Google's function-calling, Pydantic's) plugs Quill in at the dispatch site. The whole pattern:
 
 ```python
 import anthropic, quill
@@ -115,7 +115,7 @@ Replace `anthropic-bare` with whichever runtime tag fits your loop; the audit lo
 
 ---
 
-## Until `quill.gate()` ships — the interim pattern
+## Until `quill.gate()` ships: the interim pattern
 
 If your loop runs locally and you can't wait for v0.3, the workable interim is: route every direct tool dispatch through your own MCP server, point that MCP server at Quill, and let Path 1 above do the gating. The wiring is heavier than `gate()` will be (you write a tiny stdio MCP server that re-exports your loop's tools), but it works today against the shipped v0.2.0a5 proxy.
 
