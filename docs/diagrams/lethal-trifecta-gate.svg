@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 470" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="a2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#5b6470"/></marker>
+    <style>
+      .h{fill:#1f2733;font-size:18px;font-weight:700}
+      .t{fill:#1f2733;font-size:15px;font-weight:600}
+      .s{fill:#5b6470;font-size:12.5px}
+      .lbl{fill:#7a8595;font-size:11.5px}
+    </style>
+  </defs>
+  <rect width="940" height="470" fill="#fbf9f4"/>
+  <text x="32" y="42" class="h">The lethal trifecta gate</text>
+  <text x="32" y="64" class="s">Meta's "Rule of Two": an agent holding all three capabilities at once is the prompt-injection blast zone.</text>
+
+  <!-- three circles (venn-ish) -->
+  <circle cx="330" cy="250" r="120" fill="#9db8ec" fill-opacity="0.34" stroke="#6f93d8"/>
+  <circle cx="470" cy="190" r="120" fill="#e7b15a" fill-opacity="0.32" stroke="#cf9636"/>
+  <circle cx="470" cy="320" r="120" fill="#e29393" fill-opacity="0.34" stroke="#cf6f6f"/>
+
+  <text x="250" y="250" text-anchor="middle" class="t">untrusted</text>
+  <text x="250" y="270" text-anchor="middle" class="t">input seen</text>
+  <text x="250" y="290" text-anchor="middle" class="lbl">web fetch, file read</text>
+
+  <text x="540" y="160" text-anchor="middle" class="t">private</text>
+  <text x="540" y="180" text-anchor="middle" class="t">data read</text>
+  <text x="540" y="200" text-anchor="middle" class="lbl">secrets, .env, keys</text>
+
+  <text x="560" y="330" text-anchor="middle" class="t">exfil</text>
+  <text x="560" y="350" text-anchor="middle" class="t">vector</text>
+  <text x="560" y="370" text-anchor="middle" class="lbl">network, git push</text>
+
+  <!-- center -->
+  <circle cx="423" cy="255" r="42" fill="#1f2733"/>
+  <text x="423" y="252" text-anchor="middle" class="t" fill="#fff" font-size="12">2 of 3</text>
+  <text x="423" y="270" text-anchor="middle" class="lbl" fill="#cdd6e4">= watch</text>
+
+  <!-- decision rail -->
+  <rect x="700" y="150" width="210" height="64" rx="10" fill="#e7f5ec" stroke="#7cc69a"/>
+  <text x="805" y="178" text-anchor="middle" class="t">≤ 2 flags</text>
+  <text x="805" y="198" text-anchor="middle" class="s">proceed, keep tracking</text>
+
+  <rect x="700" y="262" width="210" height="74" rx="10" fill="#fdeaea" stroke="#e29393"/>
+  <text x="805" y="290" text-anchor="middle" class="t">3rd flag would close</text>
+  <text x="805" y="310" text-anchor="middle" class="s">escalate to CRITICAL deny</text>
+  <text x="805" y="327" text-anchor="middle" class="lbl">human approves to proceed</text>
+
+  <line x1="590" y1="235" x2="700" y2="185" stroke="#5b6470" stroke-width="1.5" marker-end="url(#a2)"/>
+  <line x1="590" y1="285" x2="700" y2="295" stroke="#5b6470" stroke-width="1.5" marker-end="url(#a2)"/>
+  <text x="612" y="232" class="lbl">tracked in taint.json</text>
+
+  <text x="32" y="440" class="lbl">Per-session state: has_seen_untrusted · has_accessed_private · can_exfiltrate — flips are logged as session.taint.update.</text>
+</svg>

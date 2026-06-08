@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 440" font-family="-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="a4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#5b6470"/></marker>
+    <style>
+      .h{fill:#1f2733;font-size:18px;font-weight:700}
+      .t{fill:#1f2733;font-size:14px;font-weight:600}
+      .s{fill:#5b6470;font-size:12px}
+      .m{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;fill:#1f2733;font-size:12px}
+      .lbl{fill:#7a8595;font-size:11.5px}
+    </style>
+  </defs>
+  <rect width="940" height="440" fill="#fbf9f4"/>
+  <text x="32" y="40" class="h">Deterministic replay-verify harness</text>
+  <text x="32" y="61" class="s">quill audit replay — the executable proof that every artifact is a pure fold over the signed log.</text>
+
+  <!-- log -->
+  <rect x="32" y="110" width="180" height="220" rx="12" fill="#1f2733"/>
+  <text x="122" y="138" text-anchor="middle" class="t" fill="#fff">audit.log.jsonl</text>
+  <text x="122" y="158" text-anchor="middle" class="lbl" fill="#aab4c2">append-only · HMAC chain</text>
+  <g class="m" fill="#cdd6e4">
+    <rect x="52" y="172" width="140" height="22" rx="4" fill="#33415c"/><text x="62" y="187">session.open</text>
+    <rect x="52" y="200" width="140" height="22" rx="4" fill="#33415c"/><text x="62" y="215">tool.attempted</text>
+    <rect x="52" y="228" width="140" height="22" rx="4" fill="#33415c"/><text x="62" y="243">verdict.*</text>
+    <rect x="52" y="256" width="140" height="22" rx="4" fill="#33415c"/><text x="62" y="271">flag.uncertain</text>
+    <rect x="52" y="284" width="140" height="22" rx="4" fill="#33415c"/><text x="62" y="299">session.close</text>
+  </g>
+
+  <!-- step 1 verify -->
+  <rect x="270" y="96" width="220" height="74" rx="10" fill="#e7f5ec" stroke="#7cc69a"/>
+  <text x="380" y="124" text-anchor="middle" class="t">1 · verify chain</text>
+  <text x="380" y="144" text-anchor="middle" class="s">re-walk every prev_mac link</text>
+  <text x="380" y="160" text-anchor="middle" class="lbl">any edit → failing line number</text>
+
+  <!-- step 2 fold twice -->
+  <rect x="270" y="190" width="220" height="150" rx="10" fill="#fff" stroke="#1f2733"/>
+  <text x="380" y="216" text-anchor="middle" class="t">2 · fold ×2</text>
+  <rect x="288" y="228" width="184" height="30" rx="6" fill="#f3eee2" stroke="#d8cdb0"/><text x="380" y="248" text-anchor="middle" class="s">receipts</text>
+  <rect x="288" y="262" width="184" height="30" rx="6" fill="#f3eee2" stroke="#d8cdb0"/><text x="380" y="282" text-anchor="middle" class="s">trifecta / taint</text>
+  <rect x="288" y="296" width="184" height="30" rx="6" fill="#f3eee2" stroke="#d8cdb0"/><text x="380" y="316" text-anchor="middle" class="s">handoff graph</text>
+
+  <!-- compare -->
+  <polygon points="560,215 640,255 560,295 480,255" fill="#e7eefc" stroke="#9db8ec"/>
+  <text x="560" y="252" text-anchor="middle" class="t">pass 1</text>
+  <text x="560" y="270" text-anchor="middle" class="s">== pass 2 ?</text>
+
+  <!-- outcomes -->
+  <rect x="690" y="150" width="220" height="60" rx="10" fill="#e7f5ec" stroke="#7cc69a"/>
+  <text x="800" y="178" text-anchor="middle" class="t" fill="#2e7d4f">deterministic ✓</text>
+  <text x="800" y="196" text-anchor="middle" class="m">state_digest = sha256(…)</text>
+
+  <rect x="690" y="300" width="220" height="60" rx="10" fill="#fdeaea" stroke="#e29393"/>
+  <text x="800" y="328" text-anchor="middle" class="t" fill="#b23b3b">drift detected ✗</text>
+  <text x="800" y="346" text-anchor="middle" class="s">names the non-deterministic fold</text>
+
+  <!-- edges -->
+  <line x1="212" y1="150" x2="270" y2="133" stroke="#5b6470" stroke-width="1.5" marker-end="url(#a4)"/>
+  <line x1="212" y1="240" x2="270" y2="250" stroke="#5b6470" stroke-width="1.5" marker-end="url(#a4)"/>
+  <line x1="490" y1="255" x2="480" y2="255" stroke="#5b6470" stroke-width="1.5" marker-end="url(#a4)"/>
+  <line x1="640" y1="240" x2="690" y2="190" stroke="#7cc69a" stroke-width="1.5" marker-end="url(#a4)"/><text x="664" y="218" class="lbl" fill="#2e7d4f">equal</text>
+  <line x1="640" y1="270" x2="690" y2="320" stroke="#cf6f6f" stroke-width="1.5" marker-end="url(#a4)"/><text x="660" y="300" class="lbl" fill="#b23b3b">differ</text>
+
+  <text x="32" y="400" class="lbl">Pin state_digest in CI with --expect-digest; a drifting digest fails the build instead of silently corrupting an audit.</text>
+</svg>

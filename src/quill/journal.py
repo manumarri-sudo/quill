@@ -357,6 +357,17 @@ def _emit_session_close(session_id: str, cwd: str, reason: str) -> None:
                 },
                 force_fsync=True,
             )
+
+            # Freeze a derived Receipt into the chain immediately after the
+            # close, so `did / changed / uncertain / to_verify` for this
+            # session are recorded as a tamper-evident `session.receipt`
+            # event and can be re-verified later without re-folding the
+            # whole log. Best-effort: a failure here never blocks the close.
+            try:
+                from quill.receipt import emit_receipt
+                emit_receipt(audit, session_id, log_path=log_path)
+            except Exception:
+                pass
     except Exception:
         # Audit emission is best-effort; the chain is intact either way.
         return

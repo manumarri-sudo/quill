@@ -144,6 +144,14 @@ def derive_from_events(events: list[dict[str, Any]]) -> dict[str, Receipt]:
             reason = str(payload.get("reason") or tool_name or "")
             r.uncertain.append(f"{risk}: {reason}")
 
+        elif etype == ev.VERDICT_ALLOWED_OVERNIGHT:
+            # Overnight mode auto-approved a HIGH-risk action without a
+            # synchronous human confirmation. By definition that is an
+            # "allowed-while-uncertain" call the operator should see in the
+            # receipt, regardless of the row's recorded risk label.
+            reason = str(payload.get("reason") or tool_name or "")
+            r.uncertain.append(f"overnight: {reason}")
+
         elif etype == ev.VERDICT_BLOCKED:
             r.intervention_count += 1
             r.trust_delta -= 1.0
@@ -185,3 +193,47 @@ def load_audit_events(path: Path | None = None) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 continue
     return out
+
+
+# Event type for a derived receipt written back into the chain.
+def emit_receipt(
+    audit: Any,
+    session_id: str,
+    *,
+    events: list[dict[str, Any]] | None = None,
+    log_path: Path | None = None,
+    force: bool = False,
+) -> str | None:
+    """Derive `session_id`'s Receipt and write it back as a `session.receipt`
+    audit event, returning the new line's MAC (hex) or None.
+
+    Idempotent: if a `session.receipt` already exists for this session in
+    the supplied events, returns None and writes nothing (pass force=True to
+    override). `audit` is any object exposing `.emit(event_type, session_id,
+    agent_id, risk, payload, force_fsync)` - i.e. an `AuditLog`.
+
+    This is the write-time counterpart to `derive_from_events`: receipts are
+    normally *derived* on read, but emitting one freezes the session summary
+    into the tamper-evident chain so it can be shown (and re-verified) later
+    without re-folding the whole log.
+    """
+    evs = events if events is not None else load_audit_events(log_path)
+    if not force:
+        for evt in evs:
+            if (
+                str(evt.get("session_id") or "") == session_id
+                and evt.get("type") == ev.SESSION_RECEIPT
+            ):
+                return None  # already emitted; stay idempotent
+    receipts = derive_from_events(evs)
+    r = receipts.get(session_id)
+    if r is None:
+        return None
+    return audit.emit(
+        event_type=ev.SESSION_RECEIPT,
+        session_id=session_id,
+        agent_id="quill.receipt",
+        risk="low",
+        payload=r.to_dict(),
+        force_fsync=True,
+    )

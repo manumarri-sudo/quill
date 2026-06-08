@@ -30,6 +30,10 @@ from typing import Final
 TOOL_ATTEMPTED: Final[str] = "tool.attempted"
 TOOL_EXECUTED: Final[str] = "tool.executed"
 VERDICT_ALLOWED: Final[str] = "verdict.allowed"
+# Overnight-mode auto-approval of a HIGH-risk action. A distinct type (not
+# plain verdict.allowed) so the morning recap and receipt derivation can
+# single out "what got through while you were away" for post-review.
+VERDICT_ALLOWED_OVERNIGHT: Final[str] = "verdict.allowed.overnight"
 VERDICT_BLOCKED: Final[str] = "verdict.blocked"
 VERDICT_ASK: Final[str] = "verdict.ask"
 VERDICT_SCOPE_VIOLATION: Final[str] = "verdict.scope_violation"
@@ -56,7 +60,8 @@ APPROVE_BIOMETRIC_SKIPPED: Final[str] = "approve.biometric.skipped"
 ALL_EVENT_TYPES: Final[frozenset[str]] = frozenset(
     {
         TOOL_ATTEMPTED, TOOL_EXECUTED,
-        VERDICT_ALLOWED, VERDICT_BLOCKED, VERDICT_ASK, VERDICT_SCOPE_VIOLATION,
+        VERDICT_ALLOWED, VERDICT_ALLOWED_OVERNIGHT,
+        VERDICT_BLOCKED, VERDICT_ASK, VERDICT_SCOPE_VIOLATION,
         BUDGET_EXCEEDED, CHAIN_REPAIRED,
         SESSION_OPEN, SESSION_CLOSE, SESSION_RECEIPT, SESSION_TAINT_UPDATE,
         AGENT_HANDOFF_OUT, AGENT_HANDOFF_IN, AGENT_CASCADE_AFFECTED,

@@ -306,6 +306,10 @@ Honest list of what is shipped vs. observation-only vs. not yet wired. See also 
 - **Schema-passthrough proxy is end-to-end** for tool calls and the gate sees real arguments. Resources, prompts, and notifications all forward; full lifecycle test coverage is in progress.
 - **PyPI / Homebrew / npm wrapper / MCP registries**: not yet submitted. Distribution plan in [docs/distribution.md](docs/distribution.md).
 
+## Guide
+
+A walkthrough of how Quill works, how to read receipts, the determinism guarantee, and a fresh-machine restart runbook lives in [docs/guide/quill-guide.md](docs/guide/quill-guide.md) (with diagrams under [docs/diagrams/](docs/diagrams/)).
+
 ## Security
 
 `quill` is itself a security-critical piece of code. The threat model, hardening recommendations, and responsible-disclosure address are in [SECURITY.md](SECURITY.md). When PyPI publish lands, releases will be signed via [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) with PEP 740 attestations.

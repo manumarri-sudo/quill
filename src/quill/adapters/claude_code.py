@@ -908,6 +908,32 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                 force_fsync=decision.risk in (Risk.HIGH, Risk.CRITICAL),
             )
 
+            # agent.flag.uncertain - overnight mode auto-approved a HIGH-risk
+            # action without a synchronous human decision. Surface it as an
+            # explicit "please verify this" item so the morning recap and the
+            # session Receipt's to_verify[] list are populated from real
+            # events instead of staying perpetually empty. This is the one
+            # place Quill legitimately self-flags: it acted on the operator's
+            # behalf while they were away and is asking them to confirm.
+            if decision.audit_event_type == ev.VERDICT_ALLOWED_OVERNIGHT:
+                audit.emit(
+                    event_type=ev.AGENT_FLAG_UNCERTAIN,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    risk="high",
+                    payload={
+                        "tool_name": tool_name,
+                        "uncertainty": (
+                            f"overnight auto-approved {decision.what or tool_name}"
+                            f" - {decision.why or decision.reason}"
+                        ),
+                        "what": decision.what,
+                        "why": decision.why,
+                        "cwd": cwd,
+                    },
+                    force_fsync=True,
+                )
+
             # Fire out-of-band notifications (macOS, email, Slack, webhook)
             # asynchronously - never blocks the hook's hot path.
             if decision.permission in ("deny", "ask") and issued_token:

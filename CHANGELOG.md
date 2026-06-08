@@ -4,6 +4,18 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Added — receipts wire-up, determinism harness, and operator guide
+
+- **Receipts now populate `uncertain` and `to_verify`.** Two gaps left both lists perpetually empty: nothing ever emitted `agent.flag.uncertain`, and overnight auto-allows used an event type the deriver ignored. Fixed both:
+  - The Claude Code adapter now emits an `agent.flag.uncertain` event whenever overnight mode auto-approves a HIGH-risk action, so the morning recap and the Receipt's `to_verify[]` are populated from real events ("Quill acted while you were away — confirm this").
+  - `derive_from_events` now counts `verdict.allowed.overnight` (new `events.VERDICT_ALLOWED_OVERNIGHT` constant) toward `uncertain[]`.
+- **`session.receipt` is now written at session close.** `journal._emit_session_close` freezes a derived Receipt into the chain right after `session.close`, so each session's `did/changed/uncertain/to_verify` is sealed as a tamper-evident event and re-verifies later without re-folding the whole log. New `receipt.emit_receipt()` helper (idempotent).
+- **New commands:** `quill receipts emit [SESSION]` freezes a session's Receipt into the chain; `quill flag "<note>"` self-flags an uncertainty (the documented agent/operator review path) → lands in `to_verify[]`.
+- **Deterministic replay-verify harness.** New `src/quill/harness.py` + `quill audit replay`: re-verifies the HMAC chain, then folds the log into receipts / taint / handoffs twice and asserts the passes are byte-identical, printing a pinnable `state_digest`. `--expect-digest` fails CI on drift. Exit codes: 0 ok, 2 chain broken, 3 non-deterministic fold, 4 digest mismatch.
+- **Operator guide + diagrams.** `docs/guide/quill-guide.md` covering the data flow, decision flow, lethal trifecta, receipts, the determinism guarantee, and a fresh-machine restart runbook — with four custom SVG diagrams under `docs/diagrams/`.
+- **Tests:** `tests/test_receipts_conformance.py` (a realistic overnight session drives the real adapter and must produce a fully populated Receipt + a verifiable `session.receipt`) and `tests/test_harness_replay.py` (replay determinism, stable digest, tamper detection).
+
+
 ## [0.2.0a5] - 2026-05-27
 
 ### Added — MCP Registry ownership verification

@@ -986,6 +986,64 @@ def audit_verify(
     console.print(f"[green]chain intact[/green]: {total} entries verified.")
 
 
+@audit_app.command("replay")
+def audit_replay(
+    log_path: Annotated[
+        Path | None,
+        typer.Option("--log", "-l"),
+    ] = None,
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="emit the machine-readable ReplayResult"),
+    ] = False,
+    expect_digest: Annotated[
+        str | None,
+        typer.Option(
+            "--expect-digest",
+            help="fail if the replayed state_digest doesn't match this "
+                 "(pin a known-good digest in CI)",
+        ),
+    ] = None,
+) -> None:
+    """Deterministic replay-verify: re-check the chain AND re-fold the log.
+
+    Verifies the HMAC chain, then folds the log into receipts / taint /
+    handoffs twice and confirms the two passes are byte-identical, printing a
+    `state_digest` you can pin. Exit codes: 0 ok, 2 chain broken, 3
+    non-deterministic fold, 4 digest mismatch.
+    """
+    from quill.harness import replay
+
+    p = log_path or default_audit_path()
+    if not p.exists():
+        console.print(f"[yellow]no log:[/yellow] {p}")
+        raise typer.Exit(code=1)
+    res = replay(p, _hmac_key())
+    if json_out:
+        console.print_json(data=res.to_dict())
+    else:
+        chain = ("[green]intact[/green]" if res.chain_ok
+                 else f"[red]BROKEN[/red] ({len(res.chain_failures)} fail)")
+        det = ("[green]deterministic[/green]" if res.deterministic
+               else f"[red]NON-deterministic[/red]: {res.nondeterministic_folds}")
+        console.print(f"events: {res.total_events}")
+        console.print(f"chain:  {chain}")
+        console.print(f"replay: {det}")
+        for name, dg in res.fold_digests.items():
+            console.print(f"  {name:9} {dg[:16]}…")
+        console.print(f"state_digest: [bold]{res.state_digest}[/bold]")
+    if not res.chain_ok:
+        raise typer.Exit(code=2)
+    if not res.deterministic:
+        raise typer.Exit(code=3)
+    if expect_digest and expect_digest != res.state_digest:
+        console.print(
+            f"[red]digest mismatch[/red]: expected {expect_digest[:16]}… "
+            f"got {res.state_digest[:16]}…",
+        )
+        raise typer.Exit(code=4)
+
+
 @audit_app.command("export")
 def audit_export(
     log_path: Annotated[
@@ -2400,6 +2458,101 @@ def receipts_show(
         out.print(f"\n[bold red]to verify[/bold red] ({len(r.to_verify)})")
         for v in r.to_verify:
             out.print(f"  ! {v}")
+
+
+@receipts_app.command("emit")
+def receipts_emit(
+    session_id: Annotated[
+        str | None,
+        typer.Argument(
+            help="session_id (or first 8 chars) to freeze; default: the "
+                 "most recently closed session",
+        ),
+    ] = None,
+    log_path: Annotated[Path | None, typer.Option("--log", "-l")] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="re-emit even if a receipt already exists"),
+    ] = False,
+) -> None:
+    """Freeze a session's Receipt into the audit chain as a `session.receipt`.
+
+    Receipts are normally derived on read; this writes one back so the
+    did/changed/uncertain/to_verify summary is sealed in the tamper-evident
+    chain and re-verifies later without re-folding the whole log.
+    """
+    from quill.receipt import derive_from_events, emit_receipt, load_audit_events
+
+    p_log = log_path or default_audit_path()
+    events = load_audit_events(p_log)
+    if not events:
+        console.print("[yellow]no audit events yet[/yellow]")
+        raise typer.Exit(code=1)
+    receipts = derive_from_events(events)
+
+    sid: str | None = session_id
+    if sid:
+        matches = [r.session_id for r in receipts.values()
+                   if r.session_id.startswith(sid)]
+        if not matches:
+            console.print(f"[red]no session matching[/red] {sid}")
+            raise typer.Exit(code=1)
+        sid = matches[0]
+    else:
+        # Default: most recently closed (then opened) real session.
+        ordered = sorted(
+            (r for r in receipts.values()
+             if not _is_test_session_id(r.session_id)),
+            key=lambda r: r.closed_at or r.opened_at or "",
+            reverse=True,
+        )
+        if not ordered:
+            console.print("[yellow]no completed sessions to emit[/yellow]")
+            raise typer.Exit(code=1)
+        sid = ordered[0].session_id
+
+    with AuditLog(path=p_log, hmac_key=_hmac_key()) as audit:
+        mac = emit_receipt(audit, sid, events=events, log_path=p_log, force=force)
+    if mac is None:
+        console.print(
+            f"[dim]receipt already emitted for[/dim] {sid[:8]} "
+            f"[dim](use --force to re-emit)[/dim]",
+        )
+    else:
+        console.print(
+            f"[green]emitted[/green] session.receipt for {sid[:8]} "
+            f"[dim]mac={mac[:12]}…[/dim]",
+        )
+
+
+@app.command("flag")
+def flag(
+    note: Annotated[str, typer.Argument(help="what you/the agent are unsure about")],
+    session_id: Annotated[
+        str | None,
+        typer.Option("--session", "-s", help="session to attach the flag to"),
+    ] = None,
+    log_path: Annotated[Path | None, typer.Option("--log", "-l")] = None,
+) -> None:
+    """Self-flag an uncertainty - writes an `agent.flag.uncertain` event.
+
+    This is the documented "agent (or operator) surfaces something for human
+    review" path; the note shows up in the session Receipt's to_verify[]
+    list. Useful from inside an agent run (`quill flag "unsure about the
+    migration order"`) or by hand after the fact.
+    """
+    p_log = log_path or default_audit_path()
+    sid = session_id or "manual-flag"
+    with AuditLog(path=p_log, hmac_key=_hmac_key()) as audit:
+        mac = audit.emit(
+            event_type="agent.flag.uncertain",
+            session_id=sid,
+            agent_id="quill.flag",
+            risk="high",
+            payload={"uncertainty": note, "source": "cli"},
+            force_fsync=True,
+        )
+    console.print(f"[yellow]flagged[/yellow] for review [dim]mac={mac[:12]}…[/dim]")
 
 
 # --------------------------------------------------------------------------
