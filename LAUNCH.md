@@ -4,7 +4,9 @@ Internal-facing notes for shipping `quill` publicly. Edit / discard before posti
 
 ## Repo description (GitHub)
 
-> An MCP proxy that gates risky AI-agent actions. Pauses high-risk tool calls for a human, blocks critical ones outright, and signs every decision into a tamper-evident audit log. Drops into Claude Code's PreToolUse hook so it gates Bash, Edit, Write before the agent runs them.
+> MCP proxy that gates AI-agent tool calls before they run. Pauses risky ones for a human, blocks critical ones (`rm -rf`, `git push --force`, `DROP TABLE`), and signs every decision into an HMAC-chained audit log. Plugs into Claude Code's PreToolUse hook so it covers Bash, Edit, and Write.
+
+(Sync this string into the GitHub repo settings → About section by hand. It's not a tracked file there, so the LAUNCH.md copy is the source-of-truth and the GitHub UI has to be edited separately.)
 
 ## Suggested GitHub topics
 
@@ -130,6 +132,87 @@ Pulled from a 2026-vintage research pass on Show HN mechanics, MCP-ecosystem dis
 
 - Ship v0.3 with the top feedback-driven change from launch week. If the change is substantive enough, re-launch via "Show HN: Quill 0.3" — `dang`'s guidance allows a re-launch for material new work.
 - Backlog items still tracked: A2A bridge workaround for Claude Code via transcript-path heuristics, external MCP server dogfooding for tool pinning, WebAuthn-attested confirmation for cross-platform hardware attestation, IETF AIVS draft (`draft-stone-aivs-00`) interoperability.
+
+## Launch arc, Product Hunt parallel track
+
+Product Hunt is a different surface from Hacker News and the arc above does not transfer cleanly. PH runs on a 24-hour cycle starting 12:01 AM Pacific, the ranking algorithm rewards upvote cadence across the full day rather than a first-hour burst, and the audience skews more product-marketing and indie-hacker than HN's infrastructure-engineer crowd, so the framing has to lead with what changes for the developer rather than the deterministic-three-layer architecture. The plan below assumes the same Wednesday 2026-06-17 target as the HN arc so both shipped surfaces share one prep week.
+
+Image dimensions cited here are the sizes used across 2026 PH launch writeups including Flo Merian's awesome-product-hunt guide. Worth a quick check against PH's own submission form before queuing artwork, since the requirements have shifted twice in the last year.
+
+### PH T-3 (Sun 2026-06-14): visual assets ready
+
+- Thumbnail: 240×240 PNG with the wordmark and the quill brand color. The 1024×1024 logo from commit `bda039b` rescales cleanly to this size.
+- Gallery: at least three images at 1270×760 PNG. One hero shot of the Touch ID approval dialog mid-block, one wide shot of the terminal with `quill watch` running alongside Claude Code, and one of the audit log surface showing real blocks.
+- Demo loop: the same 30-second `rm -rf` save asciinema from the README, exported as an MP4 sized to PH's loop player (PH accepts MP4 / GIF up to ~3 MB).
+- One paragraph of body copy under 260 characters that does not repeat the tagline.
+
+### PH T-2 (Mon 2026-06-15): supporter list and hunter call
+
+- Pre-launch supporter list of 30 to 50 people who have engaged with Quill in any form: early GitHub stargazers, Twitter replies on the v0.1 sketches, the people who commented on the audit-log thread in May. Soft pings the day before launch ("hey, I'm shipping tomorrow, no expectation but here's the page") move better than a launch-day cold ask.
+- Hunter decision. Per Flo Merian's 2026 guide, 79% of featured PH posts are self-hunted, and a first-time PH launcher with a niche security-developer audience does not need a hunter to chart. Self-hunt unless a known-in-PH-circles person volunteers in the next 48 hours.
+- Maker account age check. PH wants the account to be at least 30 days old at launch. The account at `producthunt.com/@manumarri` is older than that so this is a no-op verification.
+- PH Ship draft created: title `Quill: Touch ID approval gates for AI agent tool calls`, tagline `Your AI agent has shell access. Quill puts a gate in front of it.`, links to PyPI and GitHub, gallery uploaded.
+
+### PH T-1 (Tue 2026-06-16): queue and final review
+
+- Final review of the Ship draft. Confirm links resolve, demo loop plays without sound, maker name spelled correctly.
+- Pre-write the maker comment in full. See the next section for a draft.
+- Pre-write the Twitter announcement to fire at 6 AM PT on launch day, after the early-cohort PH supporters have voted.
+- Block the calendar from 5 AM PT through 9 PM PT on Wednesday. PH's ranking algorithm weights maker engagement and comment count alongside upvotes, and the awesome-product-hunt guide is explicit that maker presence for the full 24-hour window is what tends to separate top-five from the rest.
+
+### PH T-0 (Wed 2026-06-17): launch day
+
+- 12:01 AM PT: Ship goes live, post the maker comment in the first minute. The comment is the pinned conversation starter, and posting it after upvotes have started arriving means latecomers miss the framing.
+- 12:01 to 4 AM PT: low traffic window, mostly West Coast night owls and EU morning commuters. Reply to anything that lands but do not chase volume here.
+- 5 to 8 AM PT: West Coast wakeup. Most comments arrive in this window. Respond to every one within an hour.
+- 8 AM PT, which is 11 AM ET: Post to Hacker News. This gives PH a five-hour head start and means HN's first-hour critical window happens while PH is mid-cycle. The split-attention risk is real but the load distributes both ways. If that feels too thin, defer HN to Thursday 2026-06-18 morning and run PH solo on Wednesday.
+- Throughout the day: respond to every PH comment within an hour. The ranking algorithm visibly weights maker engagement and the comment count itself, not just upvotes.
+- 6 PM PT: publish the LinkedIn post. Late afternoon PT is a US East Coast evening read, which lands well on LinkedIn.
+- 9 PM PT: Twitter post with a screenshot of the PH ranking at that hour.
+
+### PH maker comment draft
+
+The maker comment is the pinned story under the listing and is the most important piece of copy on the day. Lead with the user problem in plain language, then say what shipped, then invite a conversation. Avoid the architectural framing that works on HN.
+
+> Hi everyone, I'm Manu.
+>
+> Last summer Replit's coding agent deleted Jason Lemkin's production database during a vibe-coding session, then made up 4,000 fake users to cover the deletion. A few weeks later a Cursor agent ran `rm -rf ~/` on a developer's home directory. The agents writing code on your laptop right now have shell access, file write, and deploy permissions, and none of the popular frameworks ship a pause button between those agents and prod.
+>
+> Quill is the smallest pause button I could build. It drops into Claude Code's PreToolUse hook in one command and gates every Bash, Edit, Write, and NotebookEdit before the agent runs it. Critical-class calls (`rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`) require Touch ID on macOS, which uses the Secure Enclave so the approval is hardware-attested. Every decision goes into a tamper-evident HMAC-chained audit log on your disk that `quill doctor` verifies in one command. There's no LLM in the gate, no cloud service, no telemetry on by default.
+>
+> One command to try it: `uvx quillx start`.
+>
+> Two things I would love feedback on. First, missed dangerous-action patterns. The policy table is in `src/quill/policy.py` and every entry is a regex with a test, so "this misses X" is the most useful comment you can leave. Second, the Cowork story. Quill works as an MCP connector inside Claude Cowork today (config snippet in `docs/clients.md`), but Cowork's built-in tools don't flow through the local MCP path so the gate can't see them. That's the same gap Cline and Windsurf have, and the fix has to come from Anthropic shipping a Cowork PreToolUse hook.
+>
+> Repo and PyPI in the links above. I'll be in the thread all day.
+
+## Critical-comment response drafts
+
+These are pre-drafted answers to the comment shapes most likely to land in the first hours on Hacker News and Product Hunt. Each one agrees with the legitimate part of the criticism first, then explains the specific delta. Per HN convention, do not deflect, do not soften, do not pivot to a different defense when the question is sharp. If a real comment lands and the question is materially different from these, write a fresh answer rather than forcing the canned one.
+
+### "This already exists. Why not OPA / Cerbos / Permit.io?"
+
+> Fair, those are the right tools for application authorization and Quill is not trying to replace them. The OPA / Cerbos / Permit.io family targets RBAC and ABAC over the resources inside your application. Quill targets a different layer, which is the AI agent's tool dispatch path on a developer laptop. Two constraints make the layers different enough to justify a separate tool. The gate has to know what `rm -rf node_modules` means, not just that the Bash tool is allowed in this scope, which is content-aware classification rather than authz. And the human-in-the-loop has to be one-touch on a phone or laptop without leaving the dev flow, which is what the Touch ID approval token loop is for. Could you build the same thing on top of OPA with custom policies and a hardware-attested approval extension? Probably, and that would be a fine implementation choice. Quill is the opinionated single-binary version with the policy library already populated for the specific class of irreversible operations AI agents try to run.
+
+### "Why Touch ID specifically?"
+
+> Because it is the lowest-friction hardware-attested approval primitive on the developer machines Quill actually runs on. The Secure Enclave fingerprint already exists, the user already trusts it, and there's no extra hardware to provision. The alternative is a terminal `y` followed by Enter, which loses to muscle-memory yes-spam, and yes-spam is exactly the failure mode the Replit incident was. WebAuthn is a credible cross-platform alternative and it's in the v0.3 backlog. Touch ID is the pragmatic Mac-first answer for v0.2 because most Claude Code and Cursor users are on Mac in disproportion and the Secure Enclave is a hardware path that's already provisioned.
+
+### "Why not WebAuthn or a hardware key?"
+
+> WebAuthn is the right cross-platform answer and it's in the v0.3 backlog. Quill ships Mac-first in v0.2 because the Secure Enclave is the lowest-setup hardware attestation surface on Mac and Mac is where the bulk of Claude Code and Cursor usage actually happens. Building WebAuthn correctly means standing up a relying-party flow, which is more code than I wanted shipping in the v0.2 surface. Hardware keys via FIDO2 fall out of the same work once WebAuthn lands, because the protocol is shared and only the authenticator differs.
+
+### "Security tool from a non-security background. How do I trust this?"
+
+> Honest answer: don't take my word for it, read the diff. The threat model is in SECURITY.md, the HMAC chain is in `src/quill/audit.py` and is about 60 lines, the policy table is in `src/quill/policy.py` with one regex per pattern and one test each. The gate is deterministic with no LLM anywhere, so there's no "model judgment" attack surface. The worst case is that a regex is too narrow and misses a case, which is a feature for someone who wants to grep their own approval rules rather than trust opaque heuristics. I would much rather be told "your regex misses X" than "trust me, I'm a security person." No public audit yet. One is scheduled post-1.0.
+
+### "What's the threat model on the audit log itself?"
+
+> The audit log is an append-only JSONL file at `~/.quill/audit.log.jsonl`, mode 0o600. Each line carries an HMAC over (`previous_hmac` || canonical event payload), so any edit to a past line breaks the chain in a way `quill doctor` and `quill audit verify` catch on a re-walk from the beginning. The key lives at `~/.quill/key` mode 0o600 and is generated once at install. Two `chain.repaired` events from a pre-0.1.1 concurrent-write race sit in the log itself with the line ranges and reasons, which is what tamper-evident logging is supposed to do. You don't hide the repair, you record it. The known limit: if the attacker has root and can read the key, they can rewrite the chain end-to-end. That's the same limit OS-level secret stores have without a TPM or hardware-keystore-attested key. The v0.3 roadmap includes macOS Keychain-attested key storage to close that gap on Mac.
+
+### "What about Linux and Windows?"
+
+> v0.2 ships Mac-first because the Touch ID Secure Enclave path is the differentiated approval primitive and that's Apple-only. The gate, audit log, policy, notification dispatcher, and approve-token flow all work on Linux today. CI runs on Ubuntu and all 598 tests pass. What you don't get on Linux is the per-call hardware-attested approval. You get terminal prompt plus Slack, email, or webhook notification, plus paste-the-token-back from any terminal. WebAuthn is the cross-platform path in v0.3. Windows needs a fresh path-traversal hardening pass before it ships honestly, and that's one of the good-first-issues listed below.
 
 ## Five demo ideas
 
