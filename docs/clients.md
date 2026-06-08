@@ -8,9 +8,9 @@ Quill governs an agent's tool path in one of three shapes. Pick the one that mat
 |-------|---------------|---------------|
 | **Hook** (synchronous pre-tool) | the client's *built-in* tools (Bash, Edit, Write, shell, file IO) plus its MCP calls | Claude Code, Cursor 1.7+ |
 | **MCP proxy** (`quill serve`) | every MCP-routed tool call the client makes, including any custom MCP servers you add | Claude Desktop, Claude Cowork, Cline, Windsurf, Continue, Cody, Zed, GitHub Copilot agent mode, JetBrains AI, OpenAI Codex CLI (fallback) |
-| **Library** (`from quill import gate`) | every tool call in an agent loop you wrote yourself | BYO agents — see [`byo-agent.md`](byo-agent.md). v0.3 surface, not yet shipped. |
+| **Library** (`from quill import gate`) | every tool call in an agent loop you wrote yourself | BYO agents, see [`byo-agent.md`](byo-agent.md). v0.3 surface, not yet shipped. |
 
-For everything in the MCP-proxy column, the *built-in* tools of that client are not gated by Quill — only the calls that flow through MCP are. That distinction matters and is called out per-client below.
+For everything in the MCP-proxy column, the *built-in* tools of that client are not gated by Quill, only the calls that flow through MCP are. That distinction matters and is called out per-client below.
 
 ---
 
@@ -34,7 +34,7 @@ The contract and the deny-instead-of-ask defense (Cursor's Auto-Run allow-list s
 
 ## MCP-proxy clients
 
-Every client below speaks MCP, so the integration is the same: declare `quill` as an MCP server, point it at `quill serve`, and every tool call the agent routes through MCP flows through the gate. What the gate sees and what it doesn't is identical across these clients — *it sees every MCP call (including ones to custom MCP servers you've added behind Quill), and it does not see the client's own built-in tools.* If you want built-ins gated, you need the hook adapter for that client, which only Claude Code and Cursor have today.
+Every client below speaks MCP, so the integration is the same: declare `quill` as an MCP server, point it at `quill serve`, and every tool call the agent routes through MCP flows through the gate. What the gate sees and what it doesn't is identical across these clients. *It sees every MCP call (including ones to custom MCP servers you've added behind Quill), and it does not see the client's own built-in tools.* If you want built-ins gated, you need the hook adapter for that client, which only Claude Code and Cursor have today.
 
 ### Claude Desktop / Claude Cowork / Claude.ai desktop
 
@@ -187,7 +187,7 @@ args = ["serve"]
 - **Aider:** no synchronous pre-tool hook. `--lint` / `--test-cmd` fire after edits, so there's nothing to gate before the bad thing happens. Waiting on upstream for a `--pre-tool-hook` flag.
 - **AutoGen:** in maintenance mode; users moving to MS Agent Framework. The MAF middleware adapter is on the v0.3 ship list instead.
 - **n8n / Make / Zapier:** orchestration vendors, not coding-agent runtimes, and n8n's Sustainable Use License is not OSI-compatible so vendoring is blocked. n8n's own HITL panel covers most of what Quill would do at that layer; if a community n8n node ("Quill review channel") gets built, we'll feature it.
-- **Vellum / Langfuse / Phoenix / Arize:** observability-only. They trace what happened; Quill prevents what's about to happen. Different layer of the stack. Quill emits OTel and Langfuse can ingest those traces if you want the verdicts in your existing dashboard — that's a bridge, not an adapter.
+- **Vellum / Langfuse / Phoenix / Arize:** observability-only. They trace what happened; Quill prevents what's about to happen. Different layer of the stack. Quill emits OTel and Langfuse can ingest those traces if you want the verdicts in your existing dashboard. That's a bridge, not an adapter.
 
 ---
 
