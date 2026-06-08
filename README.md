@@ -111,6 +111,10 @@ Then in your Claude Code `mcpServers` config:
 
 The proxy factory at [`src/quill/_vendor/proxy_factory.py`](src/quill/_vendor/proxy_factory.py) is adapted from `sparfenyuk/mcp-proxy` v0.11.0 (MIT, attributed in [NOTICE](NOTICE)) with three Quill-specific changes: gate callable injection on `_call_tool` / `_read_resource` / `_get_prompt`, upstream-name namespacing (`filesystem.read_file`), and `McpError` preservation (the original swallowed upstream JSON-RPC errors into generic `CallToolResult(isError=True)`, breaking client retry logic).
 
+### Other clients
+
+Beyond Claude Code, the same proxy is what plugs Quill into Cursor, Claude Desktop, Claude Cowork, Cline, Windsurf, Continue, Cody, Zed, GitHub Copilot agent mode, JetBrains AI, and the OpenAI Codex CLI. Copy-paste config per client is in [`docs/clients.md`](docs/clients.md). If you wrote your own agent loop, the wrapper pattern (Path A above is Claude-Code-specific; the universal version applies to any tool-use loop) is in [`docs/byo-agent.md`](docs/byo-agent.md).
+
 ## The notification + approval flow
 
 When Quill blocks a critical-risk call, it fans an out-of-band message to every channel the user opted in to via `[notify]` in `config.toml`. Channels: macOS Notification Center (osascript), email (SMTP), Slack incoming webhook, generic JSON webhook. Zero new dependencies, stdlib only. Each channel runs on a daemon thread; the gate's hot path never blocks. Per-channel results are themselves audit-logged as `notify.dispatched`.

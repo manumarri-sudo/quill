@@ -4,6 +4,12 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Documentation
+
+- `docs/clients.md`: per-client MCP-proxy config snippets for Claude Desktop, Claude Cowork (GA'd 2026-04-09, shares Desktop's `claude_desktop_config.json` on macOS), Cline, Windsurf, Continue, Cody, Zed, GitHub Copilot agent mode, JetBrains AI, and the OpenAI Codex CLI MCP fallback, plus a brief recap of the existing Claude Code and Cursor 1.7+ hook adapters. Each entry is honest about which surfaces Quill gates today (every MCP-routed tool call, including custom MCP servers behind Quill) and which it doesn't (the client's own built-ins — Cowork file edits / scheduled tasks / Anthropic-managed connectors, Cline's built-ins, Windsurf's built-ins). Includes a Cowork-specific note about the OpenTelemetry bridge for Enterprise tenants via `QUILL_OTEL_ENDPOINT`.
+- `docs/byo-agent.md`: how to wire Quill into an agent loop someone wrote themselves. Covers two paths today (MCP-proxy via `quill serve` for any loop that already supports MCP servers, and the interim "wrap your direct dispatches in a local MCP server" pattern for loops that dispatch tools directly in Python), plus the v0.3 ship target — `from quill import gate` as the single public library API per `docs/research/universal-adapter-strategy-2026-05.md` §4 — and the universal bare-loop template that every framework adapter wraps.
+- README "Other clients" subsection added under Path B pointing at both docs pages. No code or behavior change in this slice; v0.3 universal-adapter implementation work is unchanged on the ship list.
+
 ## [0.2.0a5] - 2026-05-27
 
 ### Added — MCP Registry ownership verification
