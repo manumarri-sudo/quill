@@ -75,11 +75,23 @@ Quill's per-event payload covers seven of those eight by construction (the model
 
 ---
 
+## The calibrated three-tier insurance pitch
+
+Three claims about what Quill does for an AI-liability submission, ranked from "load-bearing, lead with this" to "weakest, do not lead with this." Read top-to-bottom.
+
+**Tier 1 (strongest, lead with this): Quill speeds binding.** Underwriters bind faster when evidence packages arrive pre-formatted to their spec. Quill's log plus a five-minute `quill audit export --pack` against AIUC-1 controls is a 90%-reduction in submission-cycle friction. This is the load-bearing claim and is defensible without overclaiming on any single outcome.
+
+**Tier 2 (credible, secondary): Quill anchors a documented retention reduction.** The published template is **Cowbell Prime One MDR Endorsement** (US, April 2026): $25,000 retention reduction for subscribing to Cowbell's Managed Detection and Response service. The "subscribe to a specific control, get a documented retention concession" mechanism is in market. The Quill-shaped equivalent would be a named per-deployment retention concession tied to deploying Quill-style tamper-evident agent logging. This requires one carrier to anchor a published number; that's the next milestone.
+
+**Tier 3 (weakest, do NOT lead with this): Quill unlocks new coverage.** The carriers writing affirmative AI coverage (Coalition, Cowbell, Armilla, Relm, Vouch, Klaimee) will write it with or without Quill; the carriers excluding AI (Chubb, Travelers, Berkshire Hathaway, CNA per their 2026 state filings) will not write it for any artifact. The only honest version of this claim is *"Quill is what makes a contested claim defensible after the fact,"* which is a coverage-survival argument, not a binding-availability argument.
+
+> **The honest one-line positioning:** *"Quill is the evidence package the underwriter wants on Monday morning. It doesn't unlock new coverage, but it shortens binding from weeks to days and gives you a documented control to anchor a retention concession."*
+
 ## How to use this document
 
 **If you're an AIUC-1 auditor:** the audit-log format is stable, the HMAC chain is verifiable in 60 seconds via `quill audit verify`, and `quill audit export --pack` produces the full evidence pack as a PDF (covering EU AI Act Art 12 + 14 + 19, AIUC-1, NIST AI RMF + GenAI Profile, ISO/IEC 42001 A.6.2.8, SOC 2 Common Criteria, and MITRE ATLAS) in one command. Open-source, MIT, no vendor lock-in.
 
-**If you're an AI insurance underwriter:** the controls in the Accountability and Security tables above are exactly the evidence shape your underwriting workflow expects. Quill ships the log; you sample the log; binding decisions accelerate. We're tracking the Cowbell Prime One MDR-endorsement template (subscribe to a specific control, get a retention reduction) and would welcome a conversation about a Quill-shaped equivalent.
+**If you're an AI insurance underwriter:** the controls in the Accountability and Security tables above are exactly the evidence shape your underwriting workflow expects. Quill ships the log; you sample the log; binding decisions accelerate. The Cowbell Prime One MDR Endorsement (US, April 2026, $25K retention reduction) is the structural precedent for the Quill-shaped equivalent we'd love to discuss.
 
 **If you're an AIUC-1 cert candidate:** deploy Quill against your AI agent stack, run it for ≥30 days to build a representative log, then `quill audit export --pack` produces the evidence PDF you hand your auditor. Pair with the rest of your AIUC-1 controls. The 30-day window aligns with AIUC-1's quarterly retest cadence.
 
