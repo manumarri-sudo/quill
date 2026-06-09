@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import html as _html
 import json
+import sys
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -33,10 +34,27 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover
+    import tomli as tomllib  # type: ignore[import-not-found,no-redef]
+
+
 # ---------------------------------------------------------------------------
 # Control mapping - every Quill audit event_type → which compliance control
 # it produces evidence for. This is the core IP of the export: a defensible
 # crosswalk that Manu's audit deliverable hangs on.
+#
+# The crosswalk lives in controls.toml next to this module. Editing the
+# data is a TOML change, not a Python change; new control mappings are
+# data entry. The schema is:
+#
+#   [[controls]]
+#   standard = "EU AI Act Art. 14"
+#   code = "ART-14-IN-LOOP"
+#   title = "Human in-the-loop (...)"
+#   description = "..."
+#   quill_event_types = ["verdict.ask", "approve.biometric.ok"]
 
 
 @dataclass(frozen=True)
@@ -50,147 +68,30 @@ class Control:
     quill_event_types: tuple[str, ...]  # which audit events satisfy this
 
 
-# The crosswalk. Each control names the audit event types whose existence
-# in the log is evidence of compliance with that control.
-CONTROLS: tuple[Control, ...] = (
-    # ---- EU AI Act Article 14 (Human Oversight) ---------------------------
-    Control(
-        standard="EU AI Act Art. 14",
-        code="ART-14-IN-COMMAND",
-        title="Human in command (refusal of unsafe action)",
-        description=(
-            "The high-risk AI system shall be designed and developed in "
-            "such a way that it can be effectively overseen by natural "
-            "persons. Refusal of unsafe actions is recorded with reason."
-        ),
-        quill_event_types=(
-            "verdict.blocked",
-            "verdict.scope_violation",
-        ),
-    ),
-    Control(
-        standard="EU AI Act Art. 14",
-        code="ART-14-IN-LOOP",
-        title="Human in-the-loop (explicit consent for high-risk actions)",
-        description=(
-            "Operators may halt or override the system. Each high-risk "
-            "action requires explicit human consent before execution."
-        ),
-        quill_event_types=(
-            "verdict.ask",
-            "approve.biometric.ok",
-            "approve.biometric.deny",
-        ),
-    ),
-    Control(
-        standard="EU AI Act Art. 14",
-        code="ART-14-ON-LOOP",
-        title="Human on-the-loop (explanation surfaced for low/medium-risk)",
-        description=(
-            "Operators receive a structured WHAT/WHY for each automated "
-            "decision so they can intervene asynchronously."
-        ),
-        quill_event_types=(
-            "verdict.allowed",
-            "notify.dispatched",
-        ),
-    ),
-    # ---- EU AI Act Article 12 (Record-keeping) ----------------------------
-    Control(
-        standard="EU AI Act Art. 12",
-        code="ART-12-RETENTION",
-        title="Tamper-evident records, ≥6 months retention",
-        description=(
-            "High-risk AI systems shall keep records (logs) automatically "
-            "generated throughout their lifetime. Logs must be tamper-"
-            "resistant. Retention ≥6 months."
-        ),
-        quill_event_types=(
-            "tool.attempted",
-            "chain.repaired",
-        ),
-    ),
-    # ---- AIUC-1 -----------------------------------------------------------
-    Control(
-        standard="AIUC-1 Security",
-        code="AIUC-SEC-01",
-        title="Tool poisoning + rug-pull detection",
-        description=(
-            "Tool descriptions visible to the LLM are fingerprinted at "
-            "first sight; silent changes are refused. Catches the "
-            "Invariant Labs MCP tool-poisoning attack class."
-        ),
-        quill_event_types=(
-            "tool.pin_refused",
-        ),
-    ),
-    Control(
-        standard="AIUC-1 Security",
-        code="AIUC-SEC-02",
-        title="Lethal-trifecta exposure detection",
-        description=(
-            "Sessions that combine untrusted input + private data + "
-            "exfiltration vectors trigger heightened gating. Mitigates "
-            "OWASP Agentic Top 10 ASI04 Tool Misuse."
-        ),
-        quill_event_types=(
-            "session.taint.update",
-        ),
-    ),
-    Control(
-        standard="AIUC-1 Reliability",
-        code="AIUC-REL-01",
-        title="Every tool call audited",
-        description=(
-            "No tool call executes without an audit-log entry. The chain "
-            "is HMAC-SHA256-linked so any tampering breaks subsequent "
-            "verifications."
-        ),
-        quill_event_types=(
-            "tool.attempted",
-        ),
-    ),
-    Control(
-        standard="AIUC-1 Accountability",
-        code="AIUC-ACC-01",
-        title="Multi-agent handoff traceability",
-        description=(
-            "Sub-agent spawns and inter-agent handoffs carry a payload "
-            "hash so a downstream consumer's actions can be traced back "
-            "to the originating agent."
-        ),
-        quill_event_types=(
-            "agent.handoff.out",
-            "agent.handoff.in",
-            "agent.cascade.affected",
-        ),
-    ),
-    Control(
-        standard="AIUC-1 Accountability",
-        code="AIUC-ACC-02",
-        title="Permission decay (stale grants self-disable)",
-        description=(
-            "Per-tool policy overrides decay if not reaffirmed. Dormant "
-            "permissions silently downgrade to defaults; the audit log "
-            "records every downgrade."
-        ),
-        quill_event_types=(
-            "policy.decayed",
-        ),
-    ),
-    Control(
-        standard="AIUC-1 Society",
-        code="AIUC-SOC-01",
-        title="Operator self-flagged uncertainty surfaced",
-        description=(
-            "Agent-flagged uncertainties are persisted to the receipt for "
-            "human review at session-end."
-        ),
-        quill_event_types=(
-            "agent.flag.uncertain",
-        ),
-    ),
-)
+_CONTROLS_TOML = Path(__file__).parent / "controls.toml"
+
+
+def _load_controls(path: Path = _CONTROLS_TOML) -> tuple[Control, ...]:
+    """Parse controls.toml into a tuple of frozen Control records."""
+    with path.open("rb") as f:
+        raw = tomllib.load(f)
+    rows = raw.get("controls", [])
+    out: list[Control] = []
+    for r in rows:
+        out.append(
+            Control(
+                standard=str(r["standard"]),
+                code=str(r["code"]),
+                title=str(r["title"]),
+                description=str(r["description"]).strip(),
+                quill_event_types=tuple(str(e) for e in r["quill_event_types"]),
+            ),
+        )
+    return tuple(out)
+
+
+# Load once at module import; the file is small and read-only at runtime.
+CONTROLS: tuple[Control, ...] = _load_controls()
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +138,17 @@ def aggregate(
     chain_failures: list[int] | None = None,
 ) -> ExportReport:
     """Walk events; group by control; compute KPIs."""
-    standards = standards or ["EU AI Act Art. 14", "EU AI Act Art. 12", "AIUC-1"]
+    standards = standards or [
+        "EU AI Act Art. 14",
+        "EU AI Act Art. 12",
+        "EU AI Act Art. 19",
+        "AIUC-1",
+        "NIST AI RMF",
+        "NIST GenAI Profile",
+        "ISO/IEC 42001",
+        "SOC 2 Common Criteria",
+        "MITRE ATLAS",
+    ]
     by_type: Counter[str] = Counter()
     risk_dist: Counter[str] = Counter()
     sample_by_type: dict[str, list[dict[str, Any]]] = {}

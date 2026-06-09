@@ -74,7 +74,12 @@ def test_aggregate_full_session_satisfies_eu_ai_act_controls() -> None:
     assert by_code["ART-14-IN-COMMAND"].matching_events >= 1   # blocked
     assert by_code["ART-14-IN-LOOP"].matching_events >= 1      # ask
     assert by_code["ART-14-ON-LOOP"].matching_events >= 1      # allowed
-    assert by_code["ART-12-RETENTION"].matching_events >= 2    # tool.attempted x2
+    # ART-12-RETENTION was split into ART-12-AUTO-LOGGING + ART-12-TAMPER-EVIDENT
+    # + ART-19-RETENTION (Article 19 owns the retention period; Article 12 owns
+    # auto-logging and tamper-evidence).
+    assert by_code["ART-12-AUTO-LOGGING"].matching_events >= 2 # tool.attempted x2
+    assert by_code["ART-12-TAMPER-EVIDENT"].matching_events >= 2  # tool.attempted x2
+    assert by_code["ART-19-RETENTION"].matching_events >= 2    # tool.attempted x2
 
 
 def test_kpis_compute_tdr_correctly() -> None:

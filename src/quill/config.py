@@ -41,6 +41,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from quill.errors import ConfigError
@@ -193,6 +195,17 @@ class QuillConfig(BaseModel):
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     trust: TrustConfig = Field(default_factory=TrustConfig)
     overnight: OvernightConfig = Field(default_factory=OvernightConfig)
+
+    @field_validator("policy", mode="before")
+    @classmethod
+    def _coerce_policy_risk_strings(cls, v: Any) -> Any:
+        # TOML stores Risk overrides as strings ("critical", "high", ...).
+        # Strict pydantic mode otherwise rejects these because Risk is a
+        # str-enum and isinstance("high", Risk) is False. Coerce here so
+        # the documented `[policy]` section works as advertised.
+        if not isinstance(v, dict):
+            return v
+        return {k: Risk(val) if isinstance(val, str) else val for k, val in v.items()}
 
 
 def load_config(path: Path | None = None) -> QuillConfig:

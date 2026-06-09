@@ -4,6 +4,48 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Added — `commit-hook-install` / `commit-hook-uninstall` + `quill git-hook`
+
+- New `quill commit-hook-install` wires a `prepare-commit-msg` hook into a repo's `.git/hooks/`. The hook finds the most recent active agent session (configurable freshness window, default 4h) and appends a `#`-prefixed comment block to the commit message buffer carrying session id, time window, tool call / blocked / asks / Touch ID counts, top changed directory, TDR if not 1.0, and a capped list of block reasons + to-verify items. Git treats the lines as comments by default, so the block adds context without polluting the commit message unless the user uncomments specific lines. Skips merge / squash / amend commits where prepending is wrong. Idempotent (`# === Quill session summary ===` marker is the recognition string). Refuses to overwrite a non-Quill existing hook so we don't silently break someone's hook chain. Uninstall is symmetric. Implemented in `src/quill/githook.py` plus a `quill git-hook` shim that's invoked by the installed script. 18 new tests.
+
+### Added — `quill audit export --pack` one-command compliance PDF
+
+- `quill audit export` grew a `--pack` flag that enables every standard at once (EU AI Act Art 12 + 14 + 19, AIUC-1, NIST AI RMF, NIST GenAI Profile, ISO/IEC 42001, SOC 2 Common Criteria, MITRE ATLAS) and renders a real PDF via headless Chrome / Brave / Edge / Chromium (no LaTeX dependency required, no new Python deps). New `--nist`, `--iso-42001`, `--soc2`, `--mitre-atlas` flags allow per-standard selection. New `--format pdf` and `--format all` options. New `--open` flag opens the PDF in the OS default viewer (Preview on macOS, xdg-open on Linux). Verified end-to-end against the live audit log (22,143 events → 39 controls → intact chain → 483KB PDF in ~3s). This is the deliverable for the $4,500 EU AI Act Evidence Pack SKU.
+- Helper functions `_render_html_to_pdf` and `_open_path` are local to `cli.py` to keep the public library surface clean.
+
+### Added — `quill scan-secrets` and runtime secret-detection on file writes
+
+- New `src/quill/secrets.py` ships 18 vendor-format credential patterns (AWS access keys, OpenAI legacy + project keys, Anthropic API keys, GitHub classic + fine-grained PATs + OAuth + App tokens, Stripe live + test + restricted keys, Slack bot + user tokens + webhook URLs, Google API keys, JWTs, PEM-encoded private keys, HuggingFace tokens). `scan(text)` returns `SecretHit` records that never persist the matched value (only pattern name + offset + length, so the scanner is safe to use on audit-logged content). `scan_args(tool_name, args)` is the integration helper for file-write tools (Edit / MultiEdit / Write / NotebookEdit; walks MultiEdit's `edits` list element-by-element).
+- Wired into `quill.adapters.claude_code.classify_event` so any Edit / Write / NotebookEdit whose new content contains a secret is escalated to `Risk.CRITICAL` with reason `secret detected in write: <pattern_summary>` and the safer-alternative suggestion `move the value to a secrets manager / env var and reference it by name`. This is the direct mitigation for the GitHub PAT leak failure mode cited in every Quill pitch and in Anthropic's November 2025 incident class.
+- New CLI command `quill scan-secrets <path>...` scans files or directories and exits non-zero on any hit. Useful as a pre-commit check or in CI.
+- 27 new tests in `tests/test_secrets.py` covering each pattern + the adapter integration.
+
+### Added — Plain-English session receipts
+
+- `Receipt` gained four narrative fields (`blocks_summary`, `asks_summary`, `biometric_approvals`, `top_changed_dir`) populated by `derive_from_events` from existing event types (no new event types written). New `narrate(receipt)` function renders a Receipt as a deterministic plain-English paragraph: *"between 2026-06-08 09:14:22 and 11:42:11 the agent ran 12 tool calls, touched 2 files mostly in src/auth, refused 1 destructive operation, and confirmed 1 critical action via Touch ID. Trust delivery rate 92%. Blocked: Bash: rm -rf is critical-risk."* Deterministic template, no LLM, no probabilistic anything. Verified live against the audit log on three real sessions; reads naturally.
+- `quill receipts show` now opens with the narrative paragraph and follows with the structured did / changed / uncertain / to_verify blocks below. New `--prose` flag suppresses the structured detail and prints only the paragraph (one-line shell-friendly output).
+- 15 new tests in `tests/test_receipt_narrate.py`.
+
+### Added — Compliance crosswalk: NIST AI RMF, ISO 42001 A.6.2.8, SOC 2, MITRE ATLAS
+
+- The control mapping that drives `quill audit export` moved from a 612-line hardcoded `CONTROLS` tuple in `src/quill/exports.py` to a data file at `src/quill/controls.toml`. Adding new control mappings is now TOML editing, not Python editing.
+- Added **NIST AI RMF** rows (GOVERN-1.4, MAP-4.1, MEASURE-2.7, MEASURE-2.8, MANAGE-4.1) and **NIST GenAI Profile** rows (GENAI-MG-3.1 for tool-call provenance, GENAI-MS-2.6 for pre-deployment testing).
+- Added **ISO/IEC 42001:2023** rows: A.6.2.8 (the headline "AI System Recording of Event Logs" control whose required fields read like Quill's audit schema), plus A.6.2.6 (operation and monitoring) and A.6.2.7 (lifecycle documentation).
+- Added **SOC 2 Common Criteria** rows: CC6.1 / CC6.2 / CC6.3 (logical access), CC7.2 / CC7.3 / CC7.4 (monitoring, evaluation, incident response), CC8.1 (change management for agent-initiated changes), CC9.1 / CC9.2 (risk mitigation + vendor risk). Each carries the honest caveat that the AICPA has not issued AI-specific TSC, so individual auditor acceptance is auditor-specific.
+- Added **MITRE ATLAS** mitigation rows: Publish Poisoned AI Agent Tool (mitigated by `pinning.py`), Escape to Host (mitigated by the CVE-2025-59536 subcommand-chain bypass gate at `policy.py:333`), broad Tool Misuse class.
+- Added five additional **AIUC-1** Accountability rows mapping to the published changelog: E015.2 (agent logging with intermediate steps + sub-agents), D003.1 (tool authorization), D003.3 (MCP call log), D003.4 (chained-operation approval), C007.3 (anti-automation-bias review).
+- Split the old `ART-12-RETENTION` row into `ART-12-AUTO-LOGGING`, `ART-12-TAMPER-EVIDENT`, and `ART-19-RETENTION` to match the actual EU AI Act statute structure (Art 12 = automatic logging + tamper evidence; Art 19 = retention period).
+- Total: 39 controls across 12 standard families, up from 10 controls across 4 families. `aggregate()`'s default `standards` list expanded to include all 9 family names so they all appear in the export by default.
+
+### Added — `quill onboard` interactive first-run setup
+
+- New `quill onboard` command replaces the placeholder-filled output of `quill init` with a guided 60-second flow that auto-detects which coding agents the user has installed (Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed), asks which to gate, prompts for audit-log location, notification channels (macOS banner / Slack webhook / generic webhook), risk preset (boring/paranoid/custom), and session intent + scope. Writes `config.toml` mode `0o600`, invokes the existing `claude_code.install_into_settings` and `cursor.install_into_settings` adapters for any chosen agent, and prints a next-steps panel. Safe to re-run; existing config is preserved unless `--force` is passed or the user explicitly confirms overwrite. Non-TTY contexts abort cleanly. Implemented in `src/quill/onboard.py` (~330 lines, under the 300-line file rule once the docstring and dataclasses are netted against the comment count) and wired into the CLI at the top-level next to `start`. New TOC line in the root help puts `quill onboard` first.
+- Tests in `tests/test_onboard.py` cover detection, TOML rendering (boring + paranoid presets), Pydantic round-trip via `load_config`, scope serialization, the notify-section emission rule, and the non-TTY abort path. 13 new tests, all passing.
+
+### Fixed — `[policy]` overrides in `config.toml` actually load
+
+- The `QuillConfig.policy` field was typed `dict[str, Risk]` with strict-mode Pydantic, which silently rejected the documented `[policy]` TOML overrides because `isinstance("critical", Risk)` is `False` even though `Risk` is a `str`-enum. Anyone who tried `"fs.delete" = "critical"` in their config got a validation error and rolled back. Added a `@field_validator("policy", mode="before")` that coerces string values to `Risk(value)` before strict validation runs. The documented feature works now; this also makes the `paranoid` preset writeable by `quill onboard` round-trip cleanly through `load_config`. Pure additive change; existing configs without `[policy]` overrides are unaffected.
+
 ### Documentation
 
 - `docs/clients.md`: per-client MCP-proxy config snippets for Claude Desktop, Claude Cowork (GA'd 2026-04-09, shares Desktop's `claude_desktop_config.json` on macOS), Cline, Windsurf, Continue, Cody, Zed, GitHub Copilot agent mode, JetBrains AI, and the OpenAI Codex CLI MCP fallback, plus a brief recap of the existing Claude Code and Cursor 1.7+ hook adapters. Each entry is honest about which surfaces Quill gates today (every MCP-routed tool call, including custom MCP servers behind Quill) and which it doesn't (the client's own built-ins, including Cowork file edits / scheduled tasks / Anthropic-managed connectors, Cline's built-ins, Windsurf's built-ins). Includes a Cowork-specific note about the OpenTelemetry bridge for Enterprise tenants via `QUILL_OTEL_ENDPOINT`.
