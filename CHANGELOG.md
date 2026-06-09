@@ -4,6 +4,23 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Wave 4 — open-source-first reframe + prompt injection as a first-class feature
+
+**Strategic reframe**: Loomiq landing page (paid consulting SKUs + Stripe Payment Links) moved from `web/loomiq-landing/` to `docs/marketing/future-loomiq-saas/` with a README explaining "deploy this after first 100 GitHub stars." The OSS launch wave runs first; charging on Day 1 splits the marketing message. Triggers documented for when to flip the paid surface on.
+
+**README refresh** for emotional conversion:
+- Disaster story (Replit Lemkin, Cursor rm -rf, GitHub PAT leak, Nov 2025 Anthropic Claude Code hijack) hoisted to the top.
+- "Three reasons to install Quill in 30 seconds" up front: destructive-action refusal, prompt-injection defense, audit log your auditor will accept.
+- Calibrated comparison table vs Microsoft AGT, AEGIS, Anthropic native PreToolUse, Cisco AI Defense / F5 CalypsoAI / Lasso / Pillar, Vanta / Drata / Secureframe, Lakera / NeMo / Prompt Security, Cerbos / Permit.io / OPA / WorkOS, Invariant Labs. Each row names the other tool's strengths before naming Quill's wedge.
+- New top-level "Prompt injection defense — the layered story" section pulling the four-layer defense (no-LLM-in-gate, lethal trifecta enforcement, tool description pinning, secret detection) into one place. Pointer at the dedicated marketing doc.
+
+**New `src/quill/prompt_injection.py` heuristic scanner**: 15 published-research-cited regex patterns across the standard taxonomy categories (direct instruction injection, role-token spoofing, context manipulation, instruction override, data exfiltration). Every pattern carries a `source=` attribution citing the academic paper or community guide it's drawn from (Liu et al. Open-Prompt-Injection benchmark, AWS Prescriptive Guidance, OpenAI ChatML format, Meta Llama INST format, Anthropic turn-marker convention, Willison Lethal Trifecta, Shen et al. USENIX DAN-jailbreak family, Maxim AI 2026 Defense Guide). Observation-only signal per OWASP LLM01:2025's explicit guidance that no regex set can guarantee mitigation; hits surface in the audit log + a new `quill scan-prompts` CLI for pre-ingestion review of third-party content (web fetches, RAG corpora, user-uploaded documents). 31 tests covering every pattern + published attack-template corpora; if any documented attack template stops matching, the pattern set has regressed.
+
+**New marketing docs**:
+- `docs/marketing/prompt-injection-defense.md`: dedicated page for developers shipping agents that scour the internet (research bots, RAG-driven retrieval, scrapers). Explains the four-layer defense, the 2025 academic consensus on why content-classifier-alone defenses are bypassed at >90%, and what Quill explicitly does NOT defend against (calibrated).
+- `docs/marketing/why-quill-vs-others.md`: full honest comparison vs every named competitor in the agent-governance space. Each section names the other tool's strengths before Quill's wedge. Closes with the one-line positioning sentence and the wedge / weakness summary.
+- `docs/marketing/future-loomiq-saas/README.md`: explanation of why the paid landing page is parked + the trigger conditions for flipping it on.
+
 ### Wave 3 — marketing artifacts
 
 - **EU AI Act August 2026 readiness guide** at `docs/marketing/eu-ai-act-august-2026-readiness.md`. Primary-source citations from `artificialintelligenceact.eu` for Articles 12 (record-keeping), 14 (human oversight), 19 (retention), and 26 (deployer obligations). Spells out the three gaps most current deployments have (no agent-tool-call logs, no tamper-evidence, weak human-oversight evidence) and maps Quill's audit-event taxonomy onto each Article's requirement. Closes with the four-week onboarding plan for getting compliant before August 2, plus the $4,500 Evidence Pack engagement CTA.

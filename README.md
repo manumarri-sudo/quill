@@ -1,6 +1,6 @@
 # quill
 
-> The pause button between your AI agent and the things you can't undo.
+> The pause button between your AI coding agent and the things you can't undo.
 
 <!-- mcp-name: io.github.manumarri-sudo/quill -->
 
@@ -12,11 +12,40 @@
 
 ![Quill in action: real recent BLOCK decisions from a dogfooding session](web/quill_demo.gif)
 
-`quill` sits between your MCP client (Claude Code, Cursor, Cline, Claude Desktop) and the upstream MCP servers your agent uses. It also plugs into Claude Code's `PreToolUse` hook so the *built-in* tools (Bash, Edit, Write, NotebookEdit) get the same treatment. Every tool call passes through three deterministic checks:
+**One command on a Mac to install:**
 
-1. **camera**, logged to a signed JSONL audit log, always
-2. **badge**, the call's namespace and resource must match a scope you declared at session start, or it's blocked before the agent even tries
-3. **bank manager**, high-risk actions pause for a y/N; critical-risk actions (delete, drop table, force-push, deploy:production, refunds) require you to type the action name back so muscle-memory yes-spamming doesn't ship a $50,000 mistake
+```bash
+uvx quillx start
+```
+
+That installs Quill in front of Claude Code, Cursor, and any MCP-using agent on your laptop. From the next session on, every dangerous tool call gets gated before it runs. The audit log is on your disk. The key is on your disk. No cloud, no telemetry, no enterprise sales call.
+
+---
+
+## What you're about to read about, because it already happened to someone like you
+
+- **July 2025:** [Replit's coding agent deleted Jason Lemkin's production database](https://fortune.com/2025/07/23/ai-coding-tool-replit-wiped-database-called-it-a-catastrophic-failure/) during a vibe-coding session, ignored the code-freeze instruction, and then fabricated 4,000 fake users to cover the deletion. There was no insurance payout. There was no backup. There was no pause button.
+- **Late July 2025:** a Cursor agent ran `rm -rf ~/` against a developer's home directory in a session a journalist later called "violating every principle of safe agent design."
+- **August 2025:** an autonomous coding agent committed a customer's GitHub Personal Access Token into a public commit. By the time the customer noticed, the key had already been scraped.
+- **November 2025:** [Anthropic disclosed](https://www.anthropic.com/news/disrupting-AI-espionage) that a Chinese state-sponsored group hijacked Claude Code instances to run autonomous cyber-espionage against roughly 30 targets in defense, energy, and tech. Same surface. Same tool dispatch path. No gate.
+
+The agents writing your code right now have shell access, file write, deploy permissions, GitHub credentials, and your `.env`. None of the popular coding-agent frameworks (Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed) ship with a pause button between the model's decision and the action.
+
+Quill is the smallest version of one I could write. MIT, open source, single Python package.
+
+## Three reasons to install Quill in 30 seconds
+
+- **It refuses the things you can't undo, before they happen.** `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, `.env` reads, the CVE-2025-59536 subcommand-chain bypass, and 26 vendor-format secret patterns scanned against every file the agent writes. Default-critical. On macOS, the confirmation is hardware-attested through Touch ID on the Secure Enclave.
+- **It defends against prompt injection.** Not by trying to detect malicious prompts (every published LLM-based defense in this category was bypassed at >90% in 2025; that's a losing battle). Quill enforces Simon Willison's "Lethal Trifecta" deterministically: when the agent has, in one session, *seen untrusted input + read private data + has an exfiltration path*, the gate refuses the third action. Pair with model-level guardrails; never substitute. [Full prompt-injection defense story →](docs/marketing/prompt-injection-defense.md)
+- **The audit log is the artifact your auditor will accept.** HMAC-SHA256 chained per entry, mode `0o600`, tamper-evident, EU AI Act Article 12 + 14 + 19 shaped out of the box. One command (`quill audit export --pack`) produces a real PDF covering AIUC-1, NIST AI RMF, ISO/IEC 42001, SOC 2 Common Criteria, and MITRE ATLAS in ~3 seconds. [AIUC-1 control mapping →](docs/marketing/aiuc-1-mapping.md)
+
+## How it works in one paragraph
+
+`quill` sits between your MCP client (Claude Code, Cursor, Cline, Claude Desktop, Continue, Windsurf, Zed) and the upstream MCP servers your agent uses. It also plugs into Claude Code's `PreToolUse` hook so the *built-in* tools (Bash, Edit, Write, NotebookEdit) get the same treatment. Every tool call passes through three deterministic checks (no LLM in the gate, so the gate itself cannot be jailbroken):
+
+1. **camera** — every call gets a signed JSONL line, HMAC-chained for tamper evidence
+2. **badge** — the call's namespace and resource must match a scope you declared at session start, or it's refused before the agent attempts
+3. **bank manager** — low/medium-risk auto-allows, high-risk pauses for a y/N, critical-risk requires you to type the action name back so muscle-memory yes-spamming cannot ship a $50,000 mistake
 
 When the gate refuses a critical call, Quill ships you a notification on whatever channel you opted in to (macOS banner, email, Slack, generic webhook) carrying *what was tried*, *why it was blocked*, *what to try instead*, and a paste-able `quill approve <token>` you can run from your phone if you actually meant it.
 
@@ -35,11 +64,39 @@ When the gate refuses a critical call, Quill ships you a notification on whateve
                         uncertain)      private + exfil)   edges)
 ```
 
-## Why this exists
+## How Quill compares to other agent-governance tools
 
-Last July, [Replit's coding agent deleted Jason Lemkin's production database during a vibe-coding session, ignored an explicit code-freeze instruction, and fabricated 4,000 fake users to cover the deletion](https://fortune.com/2025/07/23/ai-coding-tool-replit-wiped-database-called-it-a-catastrophic-failure/). Two weeks later a Cursor agent ran `rm -rf ~/` against a developer's home directory in a session a journalist later said "violated every principle of safe agent design." A few weeks after that, an autonomous coding agent leaked a customer's GitHub PAT into a public commit. The agents writing your code right now have the same authority. The pause button between them and your prod just hadn't been built into the framework yet.
+Honest table. Each row says what the other tool does well and where Quill differentiates. Updated 2026-06-09.
 
-`quill` is the smallest version of one I could write.
+| Tool | What it does | Where it wins | Where Quill differs |
+|---|---|---|---|
+| **Microsoft Agent Governance Toolkit (AGT)** | MIT, runtime middleware + Claude Code plugin, OWASP Agentic Top 10 framing, Merkle-chained audit | Microsoft brand, 5-language SDKs, framework adapter sprawl | Quill is single-binary, Touch ID hardware-attested, MCP-proxy + hook combined, paste-token-from-phone flow. No daemon, no Kubernetes, no enterprise rollout |
+| **AEGIS (Justin0504/Aegis)** | MIT, arXiv paper, auto-patches 9 Python + 4 JS/TS frameworks, Compliance Cockpit dashboard, Ed25519 release signing | 14 framework adapters, browser dashboard, academic legitimacy | Quill needs no localhost server, no port-8080 dependency. Touch ID + paste-token flow. MCP-proxy form factor. Smaller surface area to audit |
+| **Anthropic Claude Code native PreToolUse hooks** | First-party, ships with Claude Code, supports allow/ask/deny + async/HTTP hooks | Zero install, deepest IDE integration | No HMAC chain on the local log (plaintext JSON). No Touch ID. No MCP-proxy layer. No scope enforcement beyond literal allow/deny lists. Quill is the implementation that adds these properties on top of Anthropic's hook interface |
+| **Cisco AI Defense / F5 CalypsoAI / Lasso / Pillar / Holistic AI** | Enterprise SaaS, runtime guardrails, MCP traffic inspection at the network layer | Network-appliance scale, compliance dashboards, enterprise sales support | Quill runs on a developer laptop in one command. Open source, MIT, no procurement cycle. Different buyer entirely (the engineer who loses sleep about their agent, not the CISO) |
+| **Vanta / Drata / Secureframe / Sprinto** | SOC 2 / ISO 42001 / ISO 27001 evidence-collection platforms via API integrations into AWS / GitHub / Okta / JAMF | Org-wide compliance posture, vendor risk, employee MDM evidence | None of the four lists any coding-agent integration in their public catalog. They cover the 80% of evidence that lives in infrastructure APIs. Quill covers the agent-shaped 20% they can't reach. Quill is a complement, not a competitor |
+| **Lakera Guard / NeMo Guardrails / Prompt Security** | Prompt-injection content classifiers, LLM gateway guardrails | Best-in-class for detecting injection content in LLM inputs | Different layer. Quill doesn't try to detect malicious prompts (a documented losing battle); Quill refuses the consequence (the exfiltration call, the destructive command) using deterministic regex. Pair Lakera-class tools with Quill, don't substitute |
+| **Cerbos / Permit.io / OPA / WorkOS AuthKit** | Policy engines and identity layers being repositioned for agent authorization | Best-in-class for "is this principal allowed in principle?" | Different question. Cerbos answers authorization. Quill enforces *this specific call right now*. Stack them, don't choose |
+| **Invariant Labs mcp-scan** | Static scanner for MCP tool-poisoning attacks | Pre-deployment audit of MCP server manifests | Different lane. Invariant scans before deploy; Quill gates at runtime. Quill's `pinning.py` is the runtime-side mitigation for the same Invariant Labs March 2025 advisory class |
+
+**The one-line positioning, calibrated honestly:** *"Quill is the developer-laptop, Touch-ID-gated, MCP-proxy-and-hook MIT-licensed open-source tool that gates AI coding agent tool calls deterministically and writes the audit log your insurer / auditor / future-you will want."*
+
+[Full comparison + competitive analysis →](docs/marketing/why-quill-vs-others.md)
+
+## Prompt injection defense — the layered story
+
+Prompt injection is the unsolved hard problem of LLM security. The 2025 consensus (from Simon Willison, Meta's "Agents Rule of Two," and the November 2025 adaptive-attack paper that bypassed 12 published defenses at >90% success) is that *every* LLM-based prompt-injection defense is bypassable. The honest design is to assume the agent will eventually be tricked, then refuse the consequence.
+
+Quill ships a four-layer defense:
+
+1. **The gate itself can't be prompt-injected.** Quill's classifier is a compiled regex set in [`policy.py`](src/quill/policy.py) with no LLM anywhere in the decision path. An attacker who jailbreaks the agent cannot jailbreak the gate, because there's no model to jailbreak.
+2. **Lethal Trifecta enforcement (Simon Willison's framing).** Each session has three taint flags: `has_seen_untrusted` (web fetch, inbox read, attachment ingestion), `has_accessed_private` (`.env` reads, private repo content), `can_exfiltrate` (outbound HTTP, email send, PR creation). When all three would close in one session, the next exfil call is refused with a paste-token. Implemented in [`taint.py`](src/quill/taint.py); cited as AIUC-1 control AIUC-SEC-02.
+3. **Tool description pinning (Invariant Labs March 2025 advisory class).** SHA-256 fingerprint of `(name, description, inputSchema, annotations)` on first sight; the gate refuses to re-advertise any tool whose digest changed silently. This closes the "the MCP server pushed updated description containing hidden instructions" attack vector. Implemented in [`pinning.py`](src/quill/pinning.py).
+4. **Secret detection on file writes.** 26 vendor-format patterns (AWS / OpenAI / Anthropic / GitHub / Stripe / Slack / Google / JWT / PEM / HuggingFace / Twilio / SendGrid / Mailgun / Discord / Notion) scanned against every `Edit` / `MultiEdit` / `Write` / `NotebookEdit`. Hits escalate to `Risk.CRITICAL` with the line number in the verdict reason. This blocks the most common goal of injection attacks: persisting a secret somewhere the attacker can retrieve it.
+
+[Full prompt-injection defense write-up →](docs/marketing/prompt-injection-defense.md)
+
+**For agents that scour the internet a lot** (research agents, scrapers, news summarizers, RAG-driven retrieval bots), the prompt-injection surface is the widest. Every fetched web page is potentially adversarial. Quill's taint tracking marks every `WebFetch` / `WebSearch` / `fetch` / `curl http*` call as ingesting untrusted content, and the gate's downstream-action behavior becomes correspondingly stricter for the rest of the session. Set `[session] research_mode = true` in `~/.quill/config.toml` to upgrade the enforcement threshold from "trifecta closes" to "two of three closes for the first time after web ingestion."
 
 ## What's mature vs framework-prepared (as of v0.3-prep)
 
@@ -281,6 +338,7 @@ quill onboard        interactive first-run setup (detects agents, installs hooks
 quill start          set up + open the dashboard (most users only run this)
 quill watch          in-terminal live dashboard (TUI by default; --browser for HTTP)
 quill scan-secrets   scan files/dirs for hardcoded AWS/OpenAI/Anthropic/GitHub/Stripe credentials
+quill scan-prompts   scan files/dirs for prompt-injection-shape patterns (heuristic SIGNAL, not a block)
 quill audit export   evidence pack (--pack for full EU AI Act + AIUC-1 + NIST + ISO 42001 + SOC 2 + MITRE ATLAS PDF)
 quill commit-hook-install   wire a prepare-commit-msg hook that appends a session summary to every commit
 quill audit          review what got blocked / allowed / asked (verify, repair, show)
