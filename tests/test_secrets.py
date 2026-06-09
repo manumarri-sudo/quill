@@ -205,9 +205,39 @@ def test_hit_summary_handles_multiple_pattern_types():
     }
     hits = scan_args("Write", args)
     summary = hit_summary(hits)
-    # 1× GitHub PAT, 2× Stripe Live
+    # 1× GitHub PAT, 2× Stripe Live, all with line numbers
     assert "GitHub Personal Access Token (classic)" in summary
-    assert "2×Stripe Live Secret Key" in summary
+    assert "2× Stripe Live Secret Key" in summary
+    # Line numbers should appear
+    assert "line 1" in summary  # the GitHub PAT is on line 1
+
+
+def test_hit_carries_line_number():
+    from quill.secrets import scan
+    text = "first line, clean\nsecond line: ghp_" + "A" * 36 + "\nthird line\n"
+    hits = scan(text)
+    assert len(hits) == 1
+    assert hits[0].line == 2
+
+
+def test_hit_line_one_when_no_newline():
+    from quill.secrets import scan
+    hits = scan("ghp_" + "A" * 36)
+    assert hits[0].line == 1
+
+
+def test_hit_summary_groups_lines_when_same_pattern_fires_multiple():
+    from quill.secrets import scan
+    text = (
+        "ghp_" + "A" * 36 + "\n"
+        "ghp_" + "B" * 36 + "\n"
+        "ghp_" + "C" * 36 + "\n"
+    )
+    hits = scan(text)
+    summary = hit_summary(hits)
+    # Three GitHub PATs at lines 1, 2, 3
+    assert "3× GitHub Personal Access Token (classic)" in summary
+    assert "1" in summary and "2" in summary and "3" in summary
 
 
 def test_hit_summary_empty():
@@ -217,7 +247,31 @@ def test_hit_summary_empty():
 def test_patterns_returns_immutable_view():
     p = patterns()
     assert isinstance(p, tuple)
-    assert len(p) >= 15
+    assert len(p) >= 25
+
+
+def test_twilio_account_sid_detected():
+    s = "TWILIO_ACCOUNT_SID = 'AC" + "a" * 32 + "'"
+    hits = scan(s)
+    assert any(h.pattern_name == "Twilio Account SID" for h in hits)
+
+
+def test_sendgrid_api_key_detected():
+    s = "SG." + "a" * 22 + "." + "b" * 43
+    hits = scan(s)
+    assert any(h.pattern_name == "SendGrid API Key" for h in hits)
+
+
+def test_stripe_webhook_secret_detected():
+    s = "STRIPE_WEBHOOK_SECRET = 'whsec_" + "a" * 50 + "'"
+    hits = scan(s)
+    assert any(h.pattern_name == "Stripe Webhook Secret" for h in hits)
+
+
+def test_notion_integration_secret_detected():
+    s = "NOTION = 'secret_" + "x" * 43 + "'"
+    hits = scan(s)
+    assert any(h.pattern_name == "Notion Integration Secret" for h in hits)
 
 
 # ---------------------------------------------------------------------------

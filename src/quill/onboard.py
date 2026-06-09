@@ -324,6 +324,36 @@ def _prompt_intent_and_scope(console: Console) -> tuple[str, list[str]]:
     return intent, scope
 
 
+def _prompt_trust_paths(console: Console) -> list[str]:
+    """Ask which directories the operator considers their working trees.
+
+    Default-HIGH-risk Edit / Write / NotebookEdit calls inside a trusted
+    path auto-allow rather than prompting; this is THE fix for approval-
+    prompt fatigue. Pattern-matched HIGHs (curl, pip install, etc.) and
+    every CRITICAL event still fire regardless of trust scope.
+    """
+    cwd = str(Path.cwd().resolve())
+    console.print(
+        "\n[bold]trusted directories[/bold]\n"
+        "  [dim]inside these paths, default Edit/Write asks become auto-allow.[/dim]\n"
+        "  [dim]critical events (rm -rf, force-push, deploy, secrets in diffs) still gate regardless.[/dim]",
+    )
+    paths: list[str] = []
+    if Confirm.ask(f"  trust current directory ([cyan]{cwd}[/cyan])?", default=True):
+        paths.append(cwd)
+    if Confirm.ask("  add other trusted paths?", default=False):
+        console.print(
+            "    [dim]one path per line, blank to finish (~ is expanded)[/dim]",
+        )
+        while True:
+            raw = Prompt.ask("    path", default="")
+            if not raw:
+                break
+            p = Path(raw).expanduser().resolve()
+            paths.append(str(p))
+    return paths
+
+
 # ---------------------------------------------------------------------------
 # install dispatch
 # ---------------------------------------------------------------------------
@@ -385,7 +415,7 @@ def run(force: bool = False, console: Console | None = None) -> int:
     notify = _prompt_notifications(out)
     preset = _prompt_risk_preset(out)
     intent, scope = _prompt_intent_and_scope(out)
-    trust_paths = [str(Path.cwd().resolve())]
+    trust_paths = _prompt_trust_paths(out)
 
     config_text = build_config_toml(
         intent=intent,

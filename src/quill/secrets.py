@@ -36,11 +36,17 @@ class SecretPattern:
 
 @dataclass(frozen=True, slots=True)
 class SecretHit:
-    """One match found by scan()."""
+    """One match found by scan().
+
+    `line` is 1-indexed line number where the match starts; computed by
+    counting newlines up to `matched_at`. Useful for jumping to the
+    offending line in an editor without persisting the matched value.
+    """
 
     pattern_name: str
     matched_at: int       # offset in scanned text
     length: int           # match length (we never persist the value)
+    line: int = 0         # 1-indexed line where the match starts (0 = unknown)
 
 
 # Vendor-format credential patterns. Each regex is anchored to the
@@ -143,12 +149,65 @@ _PATTERNS: Final[tuple[SecretPattern, ...]] = (
         regex=re.compile(r"\bhf_[A-Za-z0-9]{30,}\b"),
         description="HuggingFace user access token",
     ),
+    SecretPattern(
+        name="Twilio Account SID",
+        regex=re.compile(r"\bAC[a-f0-9]{32}\b"),
+        description="Twilio Account SID (paired with the Auth Token below)",
+    ),
+    SecretPattern(
+        name="Twilio API Key SID",
+        regex=re.compile(r"\bSK[a-f0-9]{32}\b"),
+        description="Twilio scoped API key SID",
+    ),
+    SecretPattern(
+        name="SendGrid API Key",
+        regex=re.compile(r"\bSG\.[A-Za-z0-9_-]{16,32}\.[A-Za-z0-9_-]{16,64}\b"),
+        description="SendGrid API key (SG.XXX.YYY format)",
+    ),
+    SecretPattern(
+        name="Mailgun API Key",
+        regex=re.compile(r"\bkey-[a-f0-9]{32}\b"),
+        description="Mailgun legacy API key",
+    ),
+    SecretPattern(
+        name="Mailgun Domain Sending Key",
+        regex=re.compile(r"\b(?:pubkey|sk)-[a-f0-9]{32}\b"),
+        description="Mailgun domain-scoped sending key",
+    ),
+    SecretPattern(
+        name="Stripe Webhook Secret",
+        regex=re.compile(r"\bwhsec_[A-Za-z0-9]{32,}\b"),
+        description="Stripe webhook signing secret",
+    ),
+    SecretPattern(
+        name="Discord Bot Token",
+        regex=re.compile(
+            r"\b[MN][A-Za-z0-9_-]{23}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27}\b",
+        ),
+        description="Discord bot token (three base64-ish segments)",
+    ),
+    SecretPattern(
+        name="Notion Integration Secret",
+        regex=re.compile(r"\bsecret_[A-Za-z0-9]{43}\b"),
+        description="Notion integration secret",
+    ),
 )
 
 
 def patterns() -> tuple[SecretPattern, ...]:
     """Read-only view of the built-in pattern set."""
     return _PATTERNS
+
+
+def _line_for_offset(text: str, offset: int) -> int:
+    """Return the 1-indexed line number containing `offset`.
+
+    Counts newlines in text[:offset]. O(offset) per call; for many hits
+    in one body, prefer batching via _line_index.
+    """
+    if offset <= 0:
+        return 1
+    return text.count("\n", 0, offset) + 1
 
 
 def scan(
@@ -160,8 +219,9 @@ def scan(
 
     Conservative: a single text body is scanned against every pattern;
     each match contributes one SecretHit. The matched value is NEVER
-    persisted in the hit (only the pattern name, offset, and length),
-    so the scanner can be used safely on audit-logged content.
+    persisted in the hit (only the pattern name, offset, length, and
+    line number), so the scanner can be used safely on audit-logged
+    content.
 
     `extra_patterns` lets the caller append custom org-specific patterns
     (e.g. an internal token prefix) without forking this module.
@@ -171,11 +231,13 @@ def scan(
     hits: list[SecretHit] = []
     for pat in (*_PATTERNS, *extra_patterns):
         for m in pat.regex.finditer(text):
+            start = m.start()
             hits.append(
                 SecretHit(
                     pattern_name=pat.name,
-                    matched_at=m.start(),
-                    length=m.end() - m.start(),
+                    matched_at=start,
+                    length=m.end() - start,
+                    line=_line_for_offset(text, start),
                 ),
             )
     return hits
@@ -222,14 +284,28 @@ def scan_args(tool_name: str, args: Mapping[str, Any]) -> list[SecretHit]:
 
 
 def hit_summary(hits: list[SecretHit]) -> str:
-    """One-line summary of detected secrets, safe to put in audit log."""
+    """One-line summary of detected secrets, safe to put in audit log.
+
+    Includes line numbers when available. Format: `Name (line N)`,
+    or `Name (lines N, M)` if the same pattern fires twice, or
+    `2× Name (lines N, M)` if there are more.
+    """
     if not hits:
         return ""
-    by_pattern: dict[str, int] = {}
+    by_pattern: dict[str, list[int]] = {}
     for h in hits:
-        by_pattern[h.pattern_name] = by_pattern.get(h.pattern_name, 0) + 1
-    parts = [
-        f"{n}×{name}" if n > 1 else name
-        for name, n in sorted(by_pattern.items())
-    ]
+        by_pattern.setdefault(h.pattern_name, []).append(h.line)
+    parts: list[str] = []
+    for name in sorted(by_pattern):
+        lines = [n for n in by_pattern[name] if n > 0]
+        count = len(by_pattern[name])
+        prefix = f"{count}× " if count > 1 else ""
+        if lines:
+            ln = ", ".join(str(n) for n in lines[:3])
+            tail = f" (line{'s' if len(lines) > 1 else ''} {ln})"
+            if len(lines) > 3:
+                tail = f" (lines {ln}+{len(lines) - 3})"
+        else:
+            tail = ""
+        parts.append(f"{prefix}{name}{tail}")
     return ", ".join(parts)

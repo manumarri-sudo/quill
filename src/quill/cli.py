@@ -138,11 +138,27 @@ suggestions_app = typer.Typer(
 app.add_typer(suggestions_app, name="suggestions")
 
 
-@app.command("git-hook", hidden=True)
-def git_hook_cmd() -> None:
-    """Run as the prepare-commit-msg hook (called by the installed shim)."""
-    from quill.githook import main as git_hook_main
-    raise typer.Exit(code=git_hook_main())
+@app.command(
+    "git-hook",
+    hidden=True,
+    # Git's prepare-commit-msg passes positional args (msg path, source type,
+    # optional SHA). Typer must accept them without typing them as a single
+    # Argument because the count varies.
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def git_hook_cmd(ctx: typer.Context) -> None:
+    """Run as the prepare-commit-msg hook (called by the installed shim).
+
+    Git passes: <commit_msg_path> <source_type> [<sha>]. We forward
+    these to quill.githook.prepare_commit_msg.
+    """
+    from quill.githook import prepare_commit_msg
+    args = list(ctx.args)
+    if not args:
+        raise typer.Exit(code=0)
+    msg_path = Path(args[0])
+    source_type = args[1] if len(args) > 1 else ""
+    raise typer.Exit(code=prepare_commit_msg(msg_path, source_type=source_type))
 
 
 @app.command("commit-hook-install")
@@ -214,24 +230,31 @@ def scan_secrets_cmd(
         list[Path],
         typer.Argument(help="one or more files or directories to scan"),
     ],
+    no_gitignore: Annotated[
+        bool,
+        typer.Option(
+            "--no-gitignore",
+            help="don't ask git which files to ignore; scan everything (slower)",
+        ),
+    ] = False,
 ) -> None:
     """Scan files for hardcoded credentials (AWS, OpenAI, Anthropic, GitHub, Stripe...).
 
     Returns exit code 1 if any secrets are detected, 0 otherwise. Useful
     as a pre-commit check or in CI. Uses the same regex set as the
     runtime gate's file-write protection.
+
+    Inside a git repo, scan-secrets walks `git ls-files` by default so it
+    skips node_modules, build artifacts, .venv, and anything else listed
+    in .gitignore. Use `--no-gitignore` to scan everything regardless.
     """
     from quill.secrets import scan
     out = Console()
     total_hits = 0
     files_scanned = 0
     for p in paths:
-        targets: list[Path] = []
-        if p.is_dir():
-            targets.extend(f for f in p.rglob("*") if f.is_file())
-        elif p.is_file():
-            targets.append(p)
-        else:
+        targets = _collect_scan_targets(p, respect_gitignore=not no_gitignore)
+        if targets is None:
             out.print(f"[yellow]skip:[/yellow] {p} (not a file or directory)")
             continue
         for f in targets:
@@ -244,9 +267,10 @@ def scan_secrets_cmd(
             hits = scan(text)
             for h in hits:
                 total_hits += 1
+                location = f"line {h.line}" if h.line else f"offset {h.matched_at}"
                 out.print(
-                    f"[red]secret[/red] {f}: [bold]{h.pattern_name}[/bold] "
-                    f"at offset {h.matched_at} (length {h.length})",
+                    f"[red]secret[/red] {f}:{h.line if h.line else '?'}: "
+                    f"[bold]{h.pattern_name}[/bold] at {location}",
                 )
     if total_hits:
         out.print(
@@ -255,6 +279,73 @@ def scan_secrets_cmd(
         )
         raise typer.Exit(code=1)
     out.print(f"[green]no secrets detected[/green] across {files_scanned} file(s).")
+
+
+def _collect_scan_targets(
+    path: Path,
+    *,
+    respect_gitignore: bool,
+) -> list[Path] | None:
+    """Resolve a path into the list of files to scan.
+
+    Returns None if path is neither file nor directory. For directories
+    inside a git repo (when respect_gitignore=True), uses `git ls-files`
+    so .gitignore'd content is skipped. Falls back to rglob otherwise.
+    """
+    if path.is_file():
+        return [path]
+    if not path.is_dir():
+        return None
+
+    if respect_gitignore and _is_inside_git_repo(path):
+        files = _git_ls_files(path)
+        if files is not None:
+            return files
+    return [f for f in path.rglob("*") if f.is_file()]
+
+
+def _is_inside_git_repo(path: Path) -> bool:
+    """True if `path` is inside a directory that contains a .git directory
+    or has one in any ancestor up to the filesystem root."""
+    p = path.resolve()
+    for ancestor in (p, *p.parents):
+        if (ancestor / ".git").exists():
+            return True
+    return False
+
+
+def _git_ls_files(path: Path) -> list[Path] | None:
+    """Return absolute paths of files git considers tracked or unignored.
+
+    Uses `git ls-files --cached --others --exclude-standard` so we get
+    both tracked files and new untracked files that aren't in .gitignore.
+    Returns None if git isn't available or the command fails.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            [
+                "git", "-C", str(path),
+                "ls-files", "--cached", "--others", "--exclude-standard",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    base = path.resolve()
+    files: list[Path] = []
+    for line in result.stdout.splitlines():
+        rel = line.strip()
+        if not rel:
+            continue
+        absolute = (base / rel).resolve()
+        if absolute.is_file():
+            files.append(absolute)
+    return files
 
 
 @app.command("onboard")
@@ -1308,11 +1399,32 @@ def audit_export(
 
 
 def _render_html_to_pdf(html_path: Path, pdf_path: Path) -> tuple[bool, str]:
-    """Convert an HTML file to PDF using headless Chrome on macOS.
+    """Convert an HTML file to PDF.
 
-    Returns (ok, error_message). Tries the system Chrome / Brave / Edge in
-    order. No external Python deps (no weasyprint, no wkhtmltopdf).
+    Returns (ok, error_message). Tries headless Chrome / Brave / Edge /
+    Chromium first (no Python deps, fast). Falls back to weasyprint if
+    installed (cross-platform, slower, requires `pip install quillx[pdf]`).
     """
+    # Path 1: headless browser. Fast, no Python deps.
+    ok, msg = _try_headless_browser_pdf(html_path, pdf_path)
+    if ok:
+        return True, ""
+
+    # Path 2: weasyprint fallback (optional [pdf] extra).
+    ok_w, msg_w = _try_weasyprint_pdf(html_path, pdf_path)
+    if ok_w:
+        return True, ""
+
+    return False, (
+        f"no PDF renderer available (browser path: {msg}; "
+        f"weasyprint path: {msg_w}). "
+        "Install Chrome/Brave/Edge/Chromium, OR `pip install quillx[pdf]` "
+        "for the weasyprint fallback."
+    )
+
+
+def _try_headless_browser_pdf(html_path: Path, pdf_path: Path) -> tuple[bool, str]:
+    """First-choice PDF path: headless Chrome / Brave / Edge / Chromium."""
     import platform
     import subprocess
 
@@ -1334,7 +1446,7 @@ def _render_html_to_pdf(html_path: Path, pdf_path: Path) -> tuple[bool, str]:
 
     chrome: Path | None = next((c for c in candidates if c.exists()), None)
     if not chrome:
-        return False, "no headless-capable browser found (Chrome / Brave / Edge / Chromium)"
+        return False, "no Chrome/Brave/Edge/Chromium found"
 
     try:
         result = subprocess.run(
@@ -1350,11 +1462,26 @@ def _render_html_to_pdf(html_path: Path, pdf_path: Path) -> tuple[bool, str]:
             timeout=60,
         )
     except subprocess.TimeoutExpired:
-        return False, "headless Chrome timed out after 60s"
+        return False, "headless browser timed out after 60s"
     except OSError as e:
-        return False, f"could not invoke headless Chrome: {e}"
+        return False, f"could not invoke browser: {e}"
     if not pdf_path.exists():
-        return False, f"Chrome exited {result.returncode} without writing PDF"
+        return False, f"browser exited {result.returncode} without writing PDF"
+    return True, ""
+
+
+def _try_weasyprint_pdf(html_path: Path, pdf_path: Path) -> tuple[bool, str]:
+    """Fallback PDF path: weasyprint (requires `pip install quillx[pdf]`)."""
+    try:
+        from weasyprint import HTML  # type: ignore[import-not-found]
+    except ImportError:
+        return False, "weasyprint not installed (pip install quillx[pdf])"
+    try:
+        HTML(filename=str(html_path)).write_pdf(str(pdf_path))
+    except Exception as e:  # noqa: BLE001 - report any rendering error verbatim
+        return False, f"weasyprint failed: {e}"
+    if not pdf_path.exists():
+        return False, "weasyprint completed without writing PDF"
     return True, ""
 
 

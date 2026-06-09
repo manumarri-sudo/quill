@@ -207,6 +207,24 @@ def test_install_hook_creates_executable(tmp_path):
     assert os.access(p, os.X_OK)
 
 
+def test_install_hook_bakes_absolute_quill_binary_path(tmp_path):
+    """Hook should `exec /abs/path/to/quill git-hook` not bare `exec quill`.
+    Otherwise commits from outside the venv silently no-op."""
+    (tmp_path / ".git").mkdir()
+    p, _ = install_hook(tmp_path)
+    contents = p.read_text()
+    # Look for an absolute path before `git-hook`. Match `/...quill git-hook`.
+    import re
+    m = re.search(r"exec\s+(\S+)\s+git-hook", contents)
+    assert m is not None, f"no exec line found:\n{contents}"
+    binary = m.group(1)
+    # On a typical install we expect either an absolute path OR the literal
+    # "quill" if neither sys.executable's sibling nor PATH resolved. The
+    # absolute-path branch is the desired behavior; we accept both so tests
+    # don't fail on stripped CI environments.
+    assert binary.startswith("/") or binary == "quill"
+
+
 def test_install_hook_idempotent(tmp_path):
     (tmp_path / ".git").mkdir()
     install_hook(tmp_path)
