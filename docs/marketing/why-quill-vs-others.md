@@ -119,6 +119,7 @@ If your buying motion is `brew install`, your team is a solo developer through a
 - **None of the four lists any coding-agent integration in their published integration catalog as of June 2026.** TruvoCyber and Screenata both describe a "20% manual gap" — the platforms cover infrastructure-as-API but not application-internal AI agent activity.
 - Quill is *not* a Vanta competitor. Quill is the artifact Vanta-class platforms can't reach.
 - The integration story is "Quill produces the agent-activity evidence, Vanta ingests it into the SOC 2 / ISO 42001 evidence vault."
+- **Different buyer entirely.** Vanta's buyer is the CFO or VP of Compliance who signs annual six-figure checks. Quill's buyer is the engineer who installs `uvx quillx start` because their coding agent almost deleted their `.env` last Tuesday. The two products do not compete for the same procurement budget; one comes out of compliance OpEx, the other out of nothing (Quill is free).
 
 **The honest positioning**: *"Vanta covers the 80% of compliance evidence that lives in infrastructure APIs. Quill covers the agent-shaped 20% they can't reach. Stack them; don't choose."*
 

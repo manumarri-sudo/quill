@@ -35,9 +35,19 @@ Quill is the smallest version of one I could write. MIT, open source, single Pyt
 
 ## Three reasons to install Quill in 30 seconds
 
-- **It refuses the things you can't undo, before they happen.** `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, `.env` reads, the CVE-2025-59536 subcommand-chain bypass, and 26 vendor-format secret patterns scanned against every file the agent writes. Default-critical. On macOS, the confirmation is hardware-attested through Touch ID on the Secure Enclave.
-- **It defends against prompt injection.** Not by trying to detect malicious prompts (every published LLM-based defense in this category was bypassed at >90% in 2025; that's a losing battle). Quill enforces Simon Willison's "Lethal Trifecta" deterministically: when the agent has, in one session, *seen untrusted input + read private data + has an exfiltration path*, the gate refuses the third action. Pair with model-level guardrails; never substitute. [Full prompt-injection defense story →](docs/marketing/prompt-injection-defense.md)
-- **The audit log is the artifact your auditor will accept.** HMAC-SHA256 chained per entry, mode `0o600`, tamper-evident, EU AI Act Article 12 + 14 + 19 shaped out of the box. One command (`quill audit export --pack`) produces a real PDF covering AIUC-1, NIST AI RMF, ISO/IEC 42001, SOC 2 Common Criteria, and MITRE ATLAS in ~3 seconds. [AIUC-1 control mapping →](docs/marketing/aiuc-1-mapping.md)
+- **It refuses the things you can't undo, before they happen.** `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, `.env` reads, the CVE-2025-59536 subcommand-chain bypass, and 26 vendor-format secret patterns scanned against every file the agent writes. Default-critical. On macOS, the confirmation is hardware-attested through Touch ID on the Secure Enclave. **Don't take our word for it — read the regexes.** Every critical pattern lives in [`src/quill/policy.py`](src/quill/policy.py); you can grep them, fork them, and challenge them. Other tools in this space ship opaque heuristics; Quill ships inspectable rules.
+- **It defends against prompt injection by refusing the consequence, not detecting the cause.** Every published LLM-based prompt-injection defense was bypassed at >90% in 2025 (per the [November 2025 adaptive-attack paper](https://simonwillison.net/2025/Nov/2/new-prompt-injection-papers/)); that's a losing battle. Quill enforces Simon Willison's "Lethal Trifecta" deterministically: when the agent has, in one session, *seen untrusted input + read private data + has an exfiltration path*, the gate refuses the third action. Pair with model-level guardrails; never substitute. [Full prompt-injection defense story →](docs/marketing/prompt-injection-defense.md)
+- **The audit log is the artifact your auditor will accept on Monday morning.** HMAC-SHA256 chained per entry, mode `0o600`, tamper-evident, EU AI Act Article 12 + 14 + 19 shaped out of the box. **ISO/IEC 42001 control A.6.2.8 reads like it was specified for Quill** — the required fields (actor identification, synchronized tamper-evident timestamp, action in business terms, justification, anomaly flags) and the auditor-verification criteria (append-only storage, cryptographic hashing, immutable records) are exactly the audit log Quill produces. One command (`quill audit export --pack`) yields a real PDF covering AIUC-1, NIST AI RMF, ISO/IEC 42001, SOC 2 Common Criteria, and MITRE ATLAS in ~3 seconds. [AIUC-1 control mapping →](docs/marketing/aiuc-1-mapping.md)
+
+> **The strategic position, in one sentence:** Vanta, Drata, Secureframe, and Sprinto cover the 80% of compliance evidence that lives in infrastructure APIs (AWS / GitHub / Okta / JAMF). None of the four lists any coding-agent integration in their public catalog. **Quill covers the agent-shaped 20% they can't reach.** Stack them, don't choose.
+
+## What Quill is, and what Quill is not
+
+Calibration matters more than marketing. Three lines worth repeating verbatim before anyone files an issue:
+
+- **Quill is not an AI safety system.** It does not predict whether an action is bad. It records, scope-checks, and asks a human on dangerous calls. There is no LLM in the gate, which is exactly what makes the gate not bypassable through prompt injection of the gate itself.
+- **Quill is not a replacement for OAuth or RBAC.** Identity says you are *allowed* to refund. Quill says *this specific refund, in this specific session, deserves a confirmation*. You need both. Stack Quill on top of Cerbos / Permit.io / WorkOS, don't choose between them.
+- **Quill is not a hosted service.** It is a single Python package. The audit log lives on your disk, you own the key, the log, and the verdict. No telemetry by default. No cloud round-trip on the gate's hot path.
 
 ## How it works in one paragraph
 
@@ -379,6 +389,7 @@ Honest list of what is shipped vs. observation-only vs. not yet wired. See also 
 
 ## Further reading
 
+- [`docs/marketing/messaging-guide.md`](docs/marketing/messaging-guide.md) — canonical hooks, three concentric circles of buyers, what-not-to-claim, provenance-label discipline. Read before drafting any public-facing content.
 - [`docs/marketing/aiuc-1-mapping.md`](docs/marketing/aiuc-1-mapping.md) — Quill ↔ AIUC-1 control crosswalk for AIUC-1 auditors and AI insurance underwriters
 - [`docs/marketing/eu-ai-act-august-2026-readiness.md`](docs/marketing/eu-ai-act-august-2026-readiness.md) — what the August 2, 2026 EU AI Act high-risk obligations actually require, and how Quill produces the evidence
 - [`docs/marketing/cve-2025-59536-mitigation.md`](docs/marketing/cve-2025-59536-mitigation.md) — CVE-2025-59536 Claude Code subcommand-chain bypass, mitigated by `policy.py:333`
