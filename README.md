@@ -67,7 +67,7 @@ Last July, [Replit's coding agent deleted Jason Lemkin's production database dur
 uvx quillx start
 ```
 
-That's the whole thing on a fresh machine if you have [`uv`](https://docs.astral.sh/uv/) installed. If you'd rather a persistent install, `pipx install quillx` then `quill start`, or `pip install quillx` inside an existing venv. For a development checkout: `git clone https://github.com/manumarri-sudo/quill && cd quill && pip install -e .`. Homebrew lands as a self-owned tap (`brew install manumarri-sudo/quill/quill`) shortly.
+That's the whole thing on a fresh machine if you have [`uv`](https://docs.astral.sh/uv/) installed. If you'd rather walk through an interactive setup that auto-detects which coding agents are on your machine (Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed), asks which to gate, and lets you pick log location, notification channels (macOS banner / Slack / email / generic webhook), and a risk preset (boring / paranoid), run `quill onboard` instead. It writes a clean `config.toml` and installs the hooks for the agents you chose. Safe to re-run. If you'd rather a persistent install, `pipx install quillx` then `quill start`, or `pip install quillx` inside an existing venv. For a development checkout: `git clone https://github.com/manumarri-sudo/quill && cd quill && pip install -e .`. Homebrew lands as a self-owned tap (`brew install manumarri-sudo/quill/quill`) shortly.
 
 The PyPI dist name is `quillx` because the `quill` PyPI name is held by an unrelated package. The CLI binary (`quill`), import path, config directory (`~/.quill/`), env vars (`QUILL_KEY`), and brand all stay `quill`. A PEP 541 reclaim request for the canonical name is in flight; if it lands, `quillx` becomes a transitional alias for one release cycle and then sunsets.
 
@@ -272,8 +272,12 @@ Per-file env-var overrides still work: `QUILL_LOG`, `QUILL_KEY`, `QUILL_CONFIG`,
 ## CLI surface
 
 ```
+quill onboard        interactive first-run setup (detects agents, installs hooks, picks channels)
 quill start          set up + open the dashboard (most users only run this)
 quill watch          in-terminal live dashboard (TUI by default; --browser for HTTP)
+quill scan-secrets   scan files/dirs for hardcoded AWS/OpenAI/Anthropic/GitHub/Stripe credentials
+quill audit export   evidence pack (--pack for full EU AI Act + AIUC-1 + NIST + ISO 42001 + SOC 2 + MITRE ATLAS PDF)
+quill commit-hook-install   wire a prepare-commit-msg hook that appends a session summary to every commit
 quill audit          review what got blocked / allowed / asked (verify, repair, show)
 quill decay          permissions that erode without reinforcement (Permission Decay)
 quill receipts       per-session did / changed / uncertain / to-verify (list / show)

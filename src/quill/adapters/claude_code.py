@@ -134,6 +134,20 @@ def classify_event(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[Risk,
         c = classify_command(cmd)
         return c.risk, c.reason, c.suggestion
 
+    # Secret detection on file writes runs FIRST: an agent writing a hardcoded
+    # AWS / OpenAI / Anthropic / GitHub / Stripe credential into source is
+    # the GitHub-PAT-leak failure mode (Anthropic Nov 2025 incident class).
+    # If hits found, escalate to CRITICAL regardless of any policy override.
+    from quill.secrets import hit_summary, scan_args
+    secret_hits = scan_args(tool_name, tool_input)
+    if secret_hits:
+        summary = hit_summary(secret_hits)
+        return (
+            Risk.CRITICAL,
+            f"secret detected in write: {summary}",
+            "move the value to a secrets manager / env var and reference it by name",
+        )
+
     # User config can override per-tool risk via the [policy] table:
     # ["Bash"] = "high", ["Edit"] = "low", etc. Loaded best-effort: the hook
     # never crashes on a missing/invalid config, it just falls back to defaults.

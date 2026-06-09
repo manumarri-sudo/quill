@@ -51,6 +51,7 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,  # `quill` with no args runs `start`
     help="quill: the pause button between AI agents and the things you can't undo.\n\n"
+         "  quill onboard    first-run interactive setup (detects agents, installs hooks)\n"
          "  quill start      set up + open the dashboard (this is the only command most users need)\n"
          "  quill approve    go-ahead a blocked call (run from a notification)\n"
          "  quill watch      in-terminal live dashboard\n"
@@ -135,6 +136,149 @@ suggestions_app = typer.Typer(
     help="review and promote learner-surfaced suggestions. Auto-tightenings already applied; loosenings stay pending until the operator promotes.",
 )
 app.add_typer(suggestions_app, name="suggestions")
+
+
+@app.command("git-hook", hidden=True)
+def git_hook_cmd() -> None:
+    """Run as the prepare-commit-msg hook (called by the installed shim)."""
+    from quill.githook import main as git_hook_main
+    raise typer.Exit(code=git_hook_main())
+
+
+@app.command("commit-hook-install")
+def commit_hook_install(
+    repo: Annotated[
+        Path | None,
+        typer.Option(
+            "--repo",
+            help="path to a git repo (default: current working directory)",
+        ),
+    ] = None,
+) -> None:
+    """Install the prepare-commit-msg hook into a repo.
+
+    The hook reads the latest active agent session from your audit log
+    and appends a `#`-prefixed summary block to the commit message
+    template. Git ignores the comment lines by default; uncomment a
+    line to surface it in the commit message, or delete the block.
+
+    Safe to re-run. Refuses to overwrite a non-Quill prepare-commit-msg.
+    """
+    from quill.githook import install_hook
+    repo_root = repo or Path.cwd()
+    if not (repo_root / ".git").exists():
+        console.print(f"[red]not a git repo:[/red] {repo_root}")
+        raise typer.Exit(code=1)
+    try:
+        p, already = install_hook(repo_root)
+    except FileExistsError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        raise typer.Exit(code=1) from e
+    if already:
+        console.print(f"[dim]already installed[/dim] at {p}")
+    else:
+        console.print(f"[green]installed[/green] {p}")
+        console.print(
+            "  every `git commit` in this repo will now pre-fill a Quill "
+            "session summary as comment lines.",
+        )
+
+
+@app.command("commit-hook-uninstall")
+def commit_hook_uninstall(
+    repo: Annotated[
+        Path | None,
+        typer.Option(
+            "--repo",
+            help="path to a git repo (default: current working directory)",
+        ),
+    ] = None,
+) -> None:
+    """Remove the prepare-commit-msg hook from a repo."""
+    from quill.githook import uninstall_hook
+    repo_root = repo or Path.cwd()
+    try:
+        p, removed = uninstall_hook(repo_root)
+    except RuntimeError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+        raise typer.Exit(code=1) from e
+    if removed:
+        console.print(f"[green]removed[/green] {p}")
+    else:
+        console.print(f"[dim]no hook to remove at[/dim] {p}")
+
+
+@app.command("scan-secrets")
+def scan_secrets_cmd(
+    paths: Annotated[
+        list[Path],
+        typer.Argument(help="one or more files or directories to scan"),
+    ],
+) -> None:
+    """Scan files for hardcoded credentials (AWS, OpenAI, Anthropic, GitHub, Stripe...).
+
+    Returns exit code 1 if any secrets are detected, 0 otherwise. Useful
+    as a pre-commit check or in CI. Uses the same regex set as the
+    runtime gate's file-write protection.
+    """
+    from quill.secrets import scan
+    out = Console()
+    total_hits = 0
+    files_scanned = 0
+    for p in paths:
+        targets: list[Path] = []
+        if p.is_dir():
+            targets.extend(f for f in p.rglob("*") if f.is_file())
+        elif p.is_file():
+            targets.append(p)
+        else:
+            out.print(f"[yellow]skip:[/yellow] {p} (not a file or directory)")
+            continue
+        for f in targets:
+            try:
+                text = f.read_text(errors="replace")
+            except OSError as e:
+                out.print(f"[yellow]skip:[/yellow] {f} ({e})")
+                continue
+            files_scanned += 1
+            hits = scan(text)
+            for h in hits:
+                total_hits += 1
+                out.print(
+                    f"[red]secret[/red] {f}: [bold]{h.pattern_name}[/bold] "
+                    f"at offset {h.matched_at} (length {h.length})",
+                )
+    if total_hits:
+        out.print(
+            f"\n[red]{total_hits} secret(s) found across {files_scanned} file(s).[/red] "
+            "Move them to environment variables or a secrets manager.",
+        )
+        raise typer.Exit(code=1)
+    out.print(f"[green]no secrets detected[/green] across {files_scanned} file(s).")
+
+
+@app.command("onboard")
+def onboard_cmd(
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="overwrite existing config without asking",
+        ),
+    ] = False,
+) -> None:
+    """Interactive 60-second setup: detect agents, pick channels, install hooks.
+
+    Replaces the placeholder values from `quill init` with a guided flow
+    that auto-detects Claude Code, Cursor, Cline, Aider, Continue, Windsurf,
+    and Zed; asks which to gate; prompts for log location, notification
+    channels, and a risk preset; writes config.toml and installs hooks.
+
+    Safe to re-run. Existing config is preserved unless you confirm
+    overwrite (or pass --force).
+    """
+    from quill.onboard import run as run_onboard
+    raise typer.Exit(code=run_onboard(force=force))
 
 
 @app.command("learn")
@@ -1004,25 +1148,56 @@ def audit_export(
         bool,
         typer.Option(
             "--eu-ai-act-art-14/--no-eu-ai-act-art-14",
-            help="include EU AI Act Art. 14 + Art. 12 controls",
+            help="include EU AI Act Art. 14 + Art. 12 + Art. 19 controls",
         ),
     ] = True,
+    nist: Annotated[
+        bool,
+        typer.Option("--nist/--no-nist", help="include NIST AI RMF + GenAI Profile"),
+    ] = False,
+    iso_42001: Annotated[
+        bool,
+        typer.Option("--iso-42001/--no-iso-42001", help="include ISO/IEC 42001"),
+    ] = False,
+    soc2: Annotated[
+        bool,
+        typer.Option("--soc2/--no-soc2", help="include SOC 2 Common Criteria"),
+    ] = False,
+    mitre_atlas: Annotated[
+        bool,
+        typer.Option("--mitre-atlas/--no-mitre-atlas", help="include MITRE ATLAS"),
+    ] = False,
+    pack: Annotated[
+        bool,
+        typer.Option(
+            "--pack",
+            help=(
+                "one-command full pack: enables every standard, renders to "
+                "PDF via headless Chrome (no LaTeX needed), and opens it"
+            ),
+        ),
+    ] = False,
     fmt: Annotated[
         str,
         typer.Option(
             "--format", "-f",
-            help="emit format: html | md | both (default: both)",
+            help="emit format: html | md | pdf | all (default: both md+html)",
         ),
     ] = "both",
+    open_after: Annotated[
+        bool,
+        typer.Option("--open/--no-open", help="open the PDF/HTML when done"),
+    ] = False,
 ) -> None:
     """Export the audit log as a customer-shareable evidence pack.
 
-    Maps Quill's audit-event taxonomy to AIUC-1 + EU AI Act Article 14
-    (human oversight) + EU AI Act Article 12 (record-keeping). Emits
-    Markdown + HTML; print the HTML to PDF via your browser (Cmd+P) for
-    the executive deliverable. Zero new dependencies.
+    Maps Quill's audit-event taxonomy to EU AI Act (Art 12 + 14 + 19),
+    AIUC-1 (E015.2, D003.1/3/4, C007.3, plus Security/Reliability/Society),
+    NIST AI RMF + GenAI Profile, ISO/IEC 42001 A.6.2.8, SOC 2 Common
+    Criteria (CC6/7/8/9), and MITRE ATLAS techniques.
 
-    The deliverable for the "AI Agent Risk Audit" SKU on Loomiq.
+    Use `--pack` to enable every standard + produce a real PDF in one
+    shot (the $4,500 EU AI Act Evidence Pack SKU deliverable).
     """
     from quill.exports import aggregate, render_html, render_markdown
 
@@ -1031,14 +1206,34 @@ def audit_export(
         console.print(f"[yellow]no log:[/yellow] {p}")
         raise typer.Exit(code=1)
 
+    # --pack: turn everything on, force PDF, force open.
+    if pack:
+        aiuc_1 = True
+        eu_ai_act = True
+        nist = True
+        iso_42001 = True
+        soc2 = True
+        mitre_atlas = True
+        if fmt == "both":
+            fmt = "all"
+        open_after = True
+
     standards: list[str] = []
     if eu_ai_act:
-        standards += ["EU AI Act Art. 14", "EU AI Act Art. 12"]
+        standards += ["EU AI Act Art. 14", "EU AI Act Art. 12", "EU AI Act Art. 19"]
     if aiuc_1:
         standards.append("AIUC-1")
+    if nist:
+        standards += ["NIST AI RMF", "NIST GenAI Profile"]
+    if iso_42001:
+        standards.append("ISO/IEC 42001")
+    if soc2:
+        standards.append("SOC 2 Common Criteria")
+    if mitre_atlas:
+        standards.append("MITRE ATLAS")
     if not standards:
         console.print("[red]no standards selected - pass --aiuc-1 or "
-                      "--eu-ai-act-art-14[/red]")
+                      "--eu-ai-act-art-14, or use --pack for the full set[/red]")
         raise typer.Exit(code=1)
 
     # Verify the chain so the export reports tamper-evidence status honestly.
@@ -1070,15 +1265,32 @@ def audit_export(
     out_dir = output_dir or Path.cwd() / "quill-evidence-pack"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    want_md = fmt in ("md", "both", "all")
+    want_html = fmt in ("html", "both", "all")
+    want_pdf = fmt in ("pdf", "all")
+
     written: list[Path] = []
-    if fmt in ("md", "both"):
+    if want_md:
         md_path = out_dir / "audit-evidence.md"
         md_path.write_text(render_markdown(report))
         written.append(md_path)
-    if fmt in ("html", "both"):
+    html_path: Path | None = None
+    if want_html or want_pdf:
         html_path = out_dir / "audit-evidence.html"
         html_path.write_text(render_html(report))
-        written.append(html_path)
+        if want_html:
+            written.append(html_path)
+    if want_pdf:
+        assert html_path is not None
+        pdf_path = out_dir / "audit-evidence.pdf"
+        ok, msg = _render_html_to_pdf(html_path, pdf_path)
+        if ok:
+            written.append(pdf_path)
+        else:
+            console.print(f"  [yellow]pdf render failed:[/yellow] {msg}")
+            console.print(
+                "  [dim]fallback: print the HTML to PDF via your browser (Cmd+P).[/dim]",
+            )
 
     console.print(
         f"[green]exported[/green] {report.total_events} events · "
@@ -1086,11 +1298,79 @@ def audit_export(
     )
     for w in written:
         console.print(f"  [dim]wrote[/dim] {w}")
-    if written and "html" in str(written[-1]):
-        console.print(
-            "  [dim]print the HTML to PDF via your browser (Cmd+P) for "
-            "the executive deliverable.[/dim]",
+
+    if open_after and written:
+        # Prefer PDF, then HTML, then md.
+        for w in reversed(written):
+            if w.suffix in (".pdf", ".html", ".md"):
+                _open_path(w)
+                break
+
+
+def _render_html_to_pdf(html_path: Path, pdf_path: Path) -> tuple[bool, str]:
+    """Convert an HTML file to PDF using headless Chrome on macOS.
+
+    Returns (ok, error_message). Tries the system Chrome / Brave / Edge in
+    order. No external Python deps (no weasyprint, no wkhtmltopdf).
+    """
+    import platform
+    import subprocess
+
+    from shutil import which as _which
+
+    candidates: list[Path] = []
+    if platform.system() == "Darwin":
+        candidates = [
+            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            Path("/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
+            Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+            Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        ]
+    else:
+        for bin_name in ("google-chrome", "chromium", "chromium-browser", "brave-browser"):
+            found = _which(bin_name)
+            if found:
+                candidates.append(Path(found))
+
+    chrome: Path | None = next((c for c in candidates if c.exists()), None)
+    if not chrome:
+        return False, "no headless-capable browser found (Chrome / Brave / Edge / Chromium)"
+
+    try:
+        result = subprocess.run(
+            [
+                str(chrome),
+                "--headless",
+                "--disable-gpu",
+                "--no-pdf-header-footer",
+                f"--print-to-pdf={pdf_path}",
+                f"file://{html_path.resolve()}",
+            ],
+            capture_output=True,
+            timeout=60,
         )
+    except subprocess.TimeoutExpired:
+        return False, "headless Chrome timed out after 60s"
+    except OSError as e:
+        return False, f"could not invoke headless Chrome: {e}"
+    if not pdf_path.exists():
+        return False, f"Chrome exited {result.returncode} without writing PDF"
+    return True, ""
+
+
+def _open_path(p: Path) -> None:
+    """Open a file in the OS default viewer (Preview on Mac, xdg-open on Linux)."""
+    import platform
+    import subprocess
+
+    try:
+        if platform.system() == "Darwin":
+            subprocess.run(["open", str(p)], check=False)
+        elif platform.system() == "Linux":
+            subprocess.run(["xdg-open", str(p)], check=False)
+        # Windows: skip; no reliable default-app launcher
+    except OSError:
+        pass
 
 
 @audit_app.command("repair")
@@ -2365,9 +2645,16 @@ def receipts_list(
 def receipts_show(
     session_id: Annotated[str, typer.Argument(help="session_id (or first 8 chars)")],
     log_path: Annotated[Path | None, typer.Option("--log", "-l")] = None,
+    prose_only: Annotated[
+        bool,
+        typer.Option(
+            "--prose",
+            help="only the plain-English paragraph; suppress the structured detail",
+        ),
+    ] = False,
 ) -> None:
-    """Print one full Receipt as did / changed / uncertain / to_verify."""
-    from quill.receipt import derive_from_events, load_audit_events
+    """Print one full Receipt: plain-English paragraph + structured detail."""
+    from quill.receipt import derive_from_events, load_audit_events, narrate
 
     events = load_audit_events(log_path)
     receipts = derive_from_events(events)
@@ -2377,7 +2664,13 @@ def receipts_show(
         raise typer.Exit(code=1)
     r = matches[0]
     out = Console()
+    # Headline: plain-English paragraph always prints first.
     out.print(f"[bold]session[/bold] {r.session_id}")
+    out.print()
+    out.print(narrate(r))
+    if prose_only:
+        return
+    out.print()
     out.print(f"  opened: {r.opened_at or '(unknown)'}")
     out.print(f"  closed: {r.closed_at or '(open)'}")
     if r.intent:
