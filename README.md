@@ -41,25 +41,30 @@ Last July, [Replit's coding agent deleted Jason Lemkin's production database dur
 
 `quill` is the smallest version of one I could write.
 
-## What's mature in 0.2.0a2 vs framework-prepared
+## What's mature vs framework-prepared (as of v0.3-prep)
 
 `quill` is built around three pillars and the maturity of each is honestly different. This section exists because dogfooding evidence matters more than design intent.
 
 **Mature, with on-disk evidence in real-world dogfooding** (the gate + audit pillar):
 - Destructive-action gate: hundreds of critical blocks observed across `rm -rf`, `vercel --prod`, `git push --force`, `DROP TABLE`, `TRUNCATE`, `npm publish`, `sudo`, `.env` reads, and the CVE-2025-59536 subcommand-chain bypass. Zero false positives in the critical class.
-- HMAC-chained audit log: 10k+ entries verified end-to-end. Tamper-evident, mode `0o600`, EU AI Act Article 14 fields on every block.
+- HMAC-chained audit log: 22k+ entries verified end-to-end. Tamper-evident, mode `0o600`, EU AI Act Article 12 + 14 fields on every block, audit-log path resolves cleanly through `quill audit verify`.
 - Out-of-band notification dispatch on real blocks: macOS banner, email, Slack, generic webhook. Synchronous-with-100ms-timeout on the hot path so the dispatch can't be killed mid-flight by the hook subprocess exiting.
 - One-shot approve tokens, Touch ID hardware-attested approval, anti-yes-fatigue, type-to-confirm: full block-to-approve cycle observed end-to-end with audit chain evidence.
 - Trust scope with trifecta enforcement priority: trusted directories suppress default-risk Edit/Write asks, but yield to trifecta enforcement when the session is at 2-of-3 flags and the call would close the third.
 - Self-improving classifier: drift detection, suggestions CLI, learner persistence.
+- **`quill onboard`** interactive first-run setup (new in v0.3-prep): auto-detects Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed; prompts for log location, notification channels, risk preset, intent + scope, and trusted directories; installs hooks for chosen agents; idempotent. Replaces the placeholder-filled `quill init` flow.
+- **Secret detection on file writes** (new in v0.3-prep): 18 vendor-format patterns (AWS / OpenAI legacy + project / Anthropic / GitHub classic + fine-grained + OAuth + App / Stripe live + test + restricted / Slack bot + user + webhook / Google / JWT / PEM private keys / HuggingFace) scanned against every Edit / MultiEdit / Write / NotebookEdit; hits escalate to `Risk.CRITICAL` with line numbers in the verdict reason. Also exposed as a standalone `quill scan-secrets` CLI that respects `.gitignore` when run inside a git repo.
+- **`quill audit export --pack`** (new in v0.3-prep): one-command compliance PDF covering EU AI Act (Art 12 + 14 + 19), AIUC-1 (E015.2, D003.1/3/4, C007.3), NIST AI RMF + GenAI Profile, ISO/IEC 42001 A.6.2.8, SOC 2 Common Criteria (CC6 / CC7 / CC8.1 / CC9), MITRE ATLAS. 39 controls across 12 standard families. Renders via headless Chrome / Brave / Edge / Chromium (no LaTeX dep). Verified end-to-end against the live audit log: 22,143 events → 39 controls → 483KB PDF in ~3s.
+- **Prepare-commit-msg git hook** (new in v0.3-prep): `quill commit-hook-install` wires a hook that appends the active agent session's summary (calls, blocks, asks, Touch ID approvals, top changed dir, TDR, block reasons) as `#`-prefixed comment lines to every commit message buffer. Skips merge / squash / amend. Idempotent. Refuses to overwrite non-Quill existing hooks. Bakes the absolute path to the venv's `quill` binary so the hook works even from a non-venv shell.
 
 **Framework-prepared, with thinner dogfooded evidence** (the Trust Infrastructure pillar):
 - Lethal-trifecta detection AND enforcement: detection observed across dozens of sessions; enforcement (escalate allow → deny when a call would close the trifecta) verified end-to-end on a synthetic test. Real-world enforcement triggers depend on operator workflow.
 - A2A Bridge: handoff edge tracking works for the **Cursor adapter** and for tests; **Claude Code subagent capture is pending hook-API support from Anthropic** (the PreToolUse payload doesn't currently expose subagent session_ids, so subagent spawns audit-log under the parent session). If you're using Quill with Cursor, you get full A2A; with Claude Code today you get parent-level audit only.
 - Permission Decay: tracking infrastructure is wired and tested; no overrides observed in single-developer dogfooding yet because the operator hasn't yet promoted a `loosening_candidate` via `quill suggestions promote`. The decay timer fires when overrides accumulate.
 - Tool description pinning: pin recording, digest verification, and approval/revoke CLI all work; only one tool has been observed in dogfooding because the external MCP proxy path (Path B below) is less exercised than the Claude Code built-in tools path (Path A).
+- Native per-tool hook adapters for **Cline / Aider / Continue / Windsurf / Zed** (planned for v0.3): today these tools work via Quill's MCP-proxy mode (Path B) which gates every MCP-routed tool call, but their built-in tools are not gated. Per-tool hook adapters are next on the roadmap; each needs research on that tool's hook contract.
 
-**On the v0.3 roadmap**: A2A bridge workaround for Claude Code via transcript-path heuristics, more external MCP server dogfooding to populate the pinning subsystem, real-world Permission Decay triggers as the suggestions CLI gets used, and tracking the IETF AIVS draft (`draft-stone-aivs-00`) so Quill's receipts stay interoperable with the agent-audit-trail standard.
+**On the v0.3 roadmap**: per-tool hook adapters for the MCP-proxy-only clients above, A2A bridge workaround for Claude Code via transcript-path heuristics, real-world Permission Decay triggers as the suggestions CLI gets used, the `from quill import gate` BYO-agent library API, and tracking the IETF AIVS draft (`draft-stone-aivs-00`) so Quill's receipts stay interoperable with the agent-audit-trail standard.
 
 ## Install
 

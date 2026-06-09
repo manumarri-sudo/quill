@@ -65,7 +65,12 @@ otel = [
     "opentelemetry-sdk>=1.27,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
 ]
-all = ["quillx[keyring,postgres,touchid,otel]"]
+# Cross-platform PDF rendering for `quill audit export --pack` when no
+# system browser (Chrome / Brave / Edge / Chromium) is available.
+# Optional because weasyprint pulls in pango / cairo / harfbuzz at runtime
+# on Linux; the browser path is preferred when present (faster, fewer deps).
+pdf = ["weasyprint>=62"]
+all = ["quillx[keyring,postgres,touchid,otel,pdf]"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

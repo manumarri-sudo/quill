@@ -20,6 +20,7 @@ new block would be wrong.
 """
 from __future__ import annotations
 
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -191,11 +192,52 @@ def main() -> int:
 # install / uninstall
 
 
-_HOOK_SCRIPT: Final[str] = """#!/bin/sh
-# quill prepare-commit-msg hook
-# Installed by `quill git-hook install`. Removes cleanly with `quill git-hook uninstall`.
-exec quill git-hook "$@"
-"""
+def _resolve_quill_binary() -> str:
+    """Find the absolute path to the `quill` binary that should be invoked
+    by the installed hook.
+
+    Prefers `sys.executable`'s sibling `quill` (matches the interpreter
+    running the install, which is what the user wants in a venv). Falls
+    back to `shutil.which("quill")`. Final fallback is the literal
+    string `quill`, which leaves the hook depending on PATH.
+    """
+    import shutil
+    import sys
+    venv_quill = Path(sys.executable).parent / "quill"
+    if venv_quill.exists() and os.access(venv_quill, os.X_OK):
+        return str(venv_quill)
+    on_path = shutil.which("quill")
+    if on_path:
+        return on_path
+    return "quill"
+
+
+def _hook_script() -> str:
+    """Render the prepare-commit-msg shim that exec's quill git-hook.
+
+    Resolves the absolute path to the quill binary at install time so
+    the hook works even when the user's shell at commit time doesn't
+    have the venv activated. The string "quill git-hook" remains
+    discoverable for the install/uninstall idempotency check.
+    """
+    binary = _resolve_quill_binary()
+    return (
+        "#!/bin/sh\n"
+        "# quill prepare-commit-msg hook\n"
+        "# Installed by `quill commit-hook-install`; remove with "
+        "`quill commit-hook-uninstall`.\n"
+        f"exec {binary} git-hook \"$@\"\n"
+    )
+
+
+# Kept for back-compat with any code that imported _HOOK_SCRIPT before
+# this change; new code should call _hook_script() to get the resolved
+# binary path baked in.
+_HOOK_SCRIPT: Final[str] = (
+    "#!/bin/sh\n"
+    "# quill prepare-commit-msg hook\n"
+    "exec quill git-hook \"$@\"\n"
+)
 
 
 def hook_path(repo_root: Path) -> Path:
@@ -223,7 +265,7 @@ def install_hook(repo_root: Path) -> tuple[Path, bool]:
             "back it up and remove it before installing the quill hook",
         )
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(_HOOK_SCRIPT)
+    p.write_text(_hook_script())
     p.chmod(0o755)
     return p, False
 
