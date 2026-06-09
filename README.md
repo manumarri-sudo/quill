@@ -319,6 +319,14 @@ Honest list of what is shipped vs. observation-only vs. not yet wired. See also 
 - **Schema-passthrough proxy is end-to-end** for tool calls and the gate sees real arguments. Resources, prompts, and notifications all forward; full lifecycle test coverage is in progress.
 - **PyPI / Homebrew / npm wrapper / MCP registries**: not yet submitted. Distribution plan in [docs/distribution.md](docs/distribution.md).
 
+## Further reading
+
+- [`docs/marketing/aiuc-1-mapping.md`](docs/marketing/aiuc-1-mapping.md) — Quill ↔ AIUC-1 control crosswalk for AIUC-1 auditors and AI insurance underwriters
+- [`docs/marketing/eu-ai-act-august-2026-readiness.md`](docs/marketing/eu-ai-act-august-2026-readiness.md) — what the August 2, 2026 EU AI Act high-risk obligations actually require, and how Quill produces the evidence
+- [`docs/marketing/cve-2025-59536-mitigation.md`](docs/marketing/cve-2025-59536-mitigation.md) — CVE-2025-59536 Claude Code subcommand-chain bypass, mitigated by `policy.py:333`
+- [`docs/clients.md`](docs/clients.md) — per-client integration recipes for Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed, Claude Desktop / Cowork, JetBrains AI, GitHub Copilot agent mode, OpenAI Codex CLI
+- [`docs/byo-agent.md`](docs/byo-agent.md) — wire Quill into an agent loop you wrote yourself
+
 ## Security
 
 `quill` is itself a security-critical piece of code. The threat model, hardening recommendations, and responsible-disclosure address are in [SECURITY.md](SECURITY.md). When PyPI publish lands, releases will be signed via [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) with PEP 740 attestations.
