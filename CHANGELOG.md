@@ -4,6 +4,12 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Wave 3 — marketing artifacts
+
+- **EU AI Act August 2026 readiness guide** at `docs/marketing/eu-ai-act-august-2026-readiness.md`. Primary-source citations from `artificialintelligenceact.eu` for Articles 12 (record-keeping), 14 (human oversight), 19 (retention), and 26 (deployer obligations). Spells out the three gaps most current deployments have (no agent-tool-call logs, no tamper-evidence, weak human-oversight evidence) and maps Quill's audit-event taxonomy onto each Article's requirement. Closes with the four-week onboarding plan for getting compliant before August 2, plus the $4,500 Evidence Pack engagement CTA.
+- **Coding-agent incident recovery guide** at `docs/marketing/coding-agent-incident-recovery.md`. SEO-targeted at the post-incident search queries ("claude code deleted my files", "cursor agent rm -rf", "ai agent committed secrets"). Lead with "first three things" (stop the agent, don't touch the disk, screenshot scrollback) then per-failure-mode recovery: `rm -rf`, force-push, `DROP TABLE`, leaked secrets, accidental prod deploy, fabrication-to-pass-tests. Each failure mode closes with the Quill prevention path.
+- **README "Further reading" section** added before Security, pointing at all three marketing docs plus the existing `clients.md` and `byo-agent.md`. Discoverability for the v0.3-prep marketing assets.
+
 ### Wave 2 — polish round
 
 - **`quill onboard` trusted-directories prompt**: instead of silently adding `cwd` to `[trust]` paths, the wizard now asks `trust current directory ($cwd)?` with default Yes and offers a follow-up prompt to add additional paths. The "fix for approval-prompt fatigue" feature surfaces explicitly to new users.
