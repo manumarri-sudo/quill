@@ -170,6 +170,32 @@ def check_hmac_key() -> CheckResult:
     return CheckResult("hmac key", PASS, f"{p} (32 bytes, mode 0o600)")
 
 
+def _hook_command_from_settings(
+    settings_path: Path | None = None,
+) -> str | None:
+    """Return the hook command string from settings.json, or None.
+
+    Recognizes both bare `quill claude-hook` and any absolute-path form
+    like `/Users/foo/.venv/bin/quill claude-hook`. The check is
+    suffix-based on `quill claude-hook` so future-proofing across
+    installation locations is automatic.
+    """
+    p = settings_path or Path("~/.claude/settings.json").expanduser()
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text() or "{}")
+    except json.JSONDecodeError:
+        return None
+    pre_list = (data.get("hooks") or {}).get("PreToolUse") or []
+    for block in pre_list:
+        for h in (block.get("hooks") or []):
+            cmd = h.get("command", "")
+            if cmd.endswith("quill claude-hook"):
+                return cmd
+    return None
+
+
 def check_claude_hook_installed(
     settings_path: Path | None = None,
 ) -> CheckResult:
@@ -181,37 +207,80 @@ def check_claude_hook_installed(
             fix="Run `quill claude-hook-install` once Claude Code is installed.",
         )
     try:
-        data = json.loads(p.read_text() or "{}")
+        json.loads(p.read_text() or "{}")
     except json.JSONDecodeError as e:
         return CheckResult(
             "claude code hook", FAIL,
             f"{p} is not valid JSON: {e}",
             fix="Fix the JSON, then re-run quill claude-hook-install.",
         )
-    pre_list = (data.get("hooks") or {}).get("PreToolUse") or []
-    has_quill = any(
-        any(h.get("command") == "quill claude-hook" for h in (block.get("hooks") or []))
-        for block in pre_list
-    )
-    if not has_quill:
+    cmd = _hook_command_from_settings(p)
+    if cmd is None:
         return CheckResult(
             "claude code hook", WARN,
             f"hook not installed in {p}",
             fix="Run `quill claude-hook-install` to enable gating Claude Code's "
                 "built-in tools.",
         )
-    return CheckResult("claude code hook", PASS, f"installed in {p}")
+    return CheckResult(
+        "claude code hook", PASS,
+        f"installed in {p} (command: {cmd})",
+    )
 
 
-def check_quill_on_path() -> CheckResult:
-    found = shutil.which("quill")
+def check_quill_on_path(
+    settings_path: Path | None = None,
+) -> CheckResult:
+    """Verify that whichever quill the hook uses is actually executable.
+
+    Three cases:
+      1. Hook uses an absolute path that exists + is executable -> PASS
+         (no PATH lookup needed because the hook bypasses PATH)
+      2. Hook uses a bare `quill claude-hook` -> requires `quill` on PATH
+      3. Hook is not installed -> not our problem here; the hook check
+         already reported that
+    """
+    cmd = _hook_command_from_settings(settings_path)
+    if cmd is None:
+        # Falls back to the legacy "is quill on PATH?" check so a fresh
+        # install without a hook still gets a useful answer.
+        found = shutil.which("quill")
+        if not found:
+            return CheckResult(
+                "quill on PATH", WARN,
+                "the `quill` command is not on PATH and no hook is installed yet",
+                fix="Install with `pipx install quillx` or activate the venv, "
+                    "then run `quill onboard` or `quill claude-hook-install`.",
+            )
+        return CheckResult("quill on PATH", PASS, found)
+
+    # Hook command is `<binary path> claude-hook`. Extract the binary.
+    binary_token = cmd.split()[0]
+    binary_path = Path(binary_token)
+    if binary_path.is_absolute():
+        if binary_path.exists() and os.access(binary_path, os.X_OK):
+            return CheckResult(
+                "quill binary", PASS,
+                f"hook resolves to {binary_path} (executable)",
+            )
+        return CheckResult(
+            "quill binary", FAIL,
+            f"hook points at {binary_path} which is missing or not executable",
+            fix="Re-run `quill claude-hook-install` from the correct venv, "
+                "or edit the absolute path in ~/.claude/settings.json.",
+        )
+
+    # Bare command (e.g. "quill"). Falls back to PATH lookup.
+    found = shutil.which(binary_token)
     if not found:
         return CheckResult(
             "quill on PATH", FAIL,
-            "the `quill` command is not on PATH",
-            fix="Install with `pip install quill`, or activate the venv where it lives.",
+            f"hook uses bare `{binary_token}` but it is not on PATH",
+            fix="Either install quill on PATH (`pipx install quillx`) OR "
+                "re-run `quill claude-hook-install` from your venv to bake "
+                "the absolute path into settings.json.",
         )
-    return CheckResult("quill on PATH", PASS, found)
+    return CheckResult("quill on PATH", PASS, f"hook resolves to {found}")
 
 
 def check_upstream_executables(cfg: QuillConfig | None) -> list[CheckResult]:

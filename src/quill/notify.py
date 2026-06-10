@@ -74,6 +74,7 @@ class BlockMessage:
     approve_token: str = ""                # `quill approve <token>` if set
     cwd: str = ""
     session_id: str = ""
+    hint: str = ""                         # optional rotating tip; surfaced by hints.select()
 
     def short_title(self) -> str:
         verb = "asking" if self.decision == "ask" else "blocked"
@@ -86,6 +87,8 @@ class BlockMessage:
             body += f"\ntry: {self.try_instead}"
         if self.approve_token:
             body += f"\napprove: quill approve {self.approve_token}"
+        if self.hint:
+            body += f"\nhint: {self.hint}"
         return body
 
     def long_body(self) -> str:
@@ -109,6 +112,8 @@ class BlockMessage:
                 "To allow this exact call (one-shot, expires in 10 minutes):",
                 f"    quill approve {self.approve_token}",
             ]
+        if self.hint:
+            parts += ["", f"hint: {self.hint}"]
         return "\n".join(parts)
 
 
