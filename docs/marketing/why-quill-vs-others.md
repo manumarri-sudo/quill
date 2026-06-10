@@ -121,7 +121,9 @@ If your buying motion is `brew install`, your team is a solo developer through a
 - The integration story is "Quill produces the agent-activity evidence, Vanta ingests it into the SOC 2 / ISO 42001 evidence vault."
 - **Different buyer entirely.** Vanta's buyer is the CFO or VP of Compliance who signs annual six-figure checks. Quill's buyer is the engineer who installs `uvx quillx start` because their coding agent almost deleted their `.env` last Tuesday. The two products do not compete for the same procurement budget; one comes out of compliance OpEx, the other out of nothing (Quill is free).
 
-**The honest positioning**: *"Vanta covers the 80% of compliance evidence that lives in infrastructure APIs. Quill covers the agent-shaped 20% they can't reach. Stack them; don't choose."*
+**The honest positioning**: *"Vanta logs your infrastructure posture. Quill is the gate that stops your AI agent from typing `rm -rf` in your shell at 2am. Different layers, both necessary regardless of stack — you'll deploy Vanta for compliance evidence and Quill for the gate that actually prevents the incident Vanta would have just documented."*
+
+**Why "20% complement" is the wrong framing**: it makes Quill sound optional. The reality is that the deterministic gate at the per-developer-laptop tool-dispatch layer doesn't exist in any other product — Vanta doesn't fire there, AGT doesn't ship the laptop-binary + Touch ID flow there, Cisco AI Defense is network-appliance scale. The gate is *necessary* infrastructure for any team running AI coding agents in production, and it has no substitute. Vanta is the right answer for "we need an evidence vault for our SOC 2 auditor." Quill is the right answer for "we need to stop the agent before the incident, not document it afterward."
 
 ---
 

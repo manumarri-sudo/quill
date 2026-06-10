@@ -485,6 +485,24 @@ def _maybe_notify(
     if not notify_cfg.enabled:
         return
 
+    # Pick a context-aware hint to surface under the block. Never fails the
+    # block path; if hints fail to load, the block message just lacks a hint.
+    hint_text = ""
+    try:
+        from quill import saves as _saves
+        from quill.hints import HintContext, select as _select_hint
+        ctx = HintContext(
+            pattern=_saves.canonicalize_pattern(decision.reason or decision.why or ""),
+            reason=decision.reason or decision.why or "",
+            risk=decision.risk.value,
+            is_first_block=False,  # could derive from audit log; left for v0.4
+        )
+        chosen = _select_hint(ctx)
+        if chosen is not None:
+            hint_text = chosen.text
+    except Exception:  # noqa: BLE001 - hints are decorative, never fail the gate
+        hint_text = ""
+
     msg = BlockMessage(
         risk=decision.risk.value,
         decision="blocked" if decision.permission == "deny" else "ask",
@@ -496,6 +514,7 @@ def _maybe_notify(
         approve_token=approve_token,
         cwd=cwd,
         session_id=session_id,
+        hint=hint_text,
     )
 
     def _emit_dispatched(event_type: str, payload: Mapping[str, Any]) -> None:
