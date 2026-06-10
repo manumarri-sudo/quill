@@ -4,6 +4,30 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Wave 5 — rigid menu commands + integrate path + cross-user learning design
+
+Strategic shift: the open-source Quill becomes a tool with an actively-useful surface (not just a "pause button" people forget about until something breaks). Three new top-level commands plus a privacy-respecting plan for collective learning.
+
+**`quill saves` — rigorous, audit-log-grounded value report.** Streams the audit log line-by-line (safe on hundred-MB chains), filters to a configurable window (`--today` / `--week` / `--month` / `--all` / `--since YYYY-MM-DD`), and separates **verified counts** (every event type the log emits) from **estimated time saved** (with the per-prompt assumption documented inline). Reports: trust-scope auto-allows, critical-risk blocks, secrets caught, Touch ID approvals consumed/denied, tool-description rug-pulls refused, trifecta enforcements, scope violations, chain repairs, top-N patterns blocked (canonicalized from raw reason text via 18 normalizers anchored to `policy.py`), the first critical catch in the window. Time-saved estimate uses configurable bounds (2.5s to 5s per y/N prompt). Pure aggregation, no LLM. Implemented in `src/quill/saves.py` (~310 lines) + 42 tests covering every metric path against synthetic fixtures. Verified against the live 22k-event audit log: 61 critical blocks, 15 trifecta enforcements, 32 `rm -rf` catches across the window.
+
+**`quill insights` — per-pattern analysis + recommendations.** Goes deeper than `saves`: for each pattern, computes fire frequency, block-vs-ask ratio, most-recent fire, and a calibrated heuristic recommendation (`keep critical` / `trust-path candidate` / `watching (low signal)` / `review (mixed signal)`). Surfaces trust-path effectiveness ranked by auto-allows-per-path. Flags sessions worth reviewing (trifecta closes, chain repairs, critical blocks between 2-4am as the "probable tired-eyes catches" heuristic). Output includes explicit downgrade candidates and per-row next-step CLI suggestions. Implemented in `src/quill/insights.py` (~280 lines) + 19 tests. Verified against the live log: Bash (default) correctly flagged as trust-path candidate (78 asks, 0 blocks); 5 trifecta sessions surfaced for review.
+
+**`quill integrate <agent>` — teach your coding agent to query Quill data.** No LLM ships in Quill. Instead, this command appends a Quill-instructions snippet to the user's coding-agent rules file (`~/.claude/CLAUDE.md` for Claude Code, `./.cursorrules` for Cursor, `./CONVENTIONS.md` for Aider). The snippet lists the deterministic `quill` commands the agent can run when the user asks "what did the agent do this morning?" or "show me recent blocks." The user's existing coding agent does the inference; Quill provides the data layer. Auto-detects installed agents, idempotent via a `<!-- quill-integration v1 -->` marker, supports project-scope and per-user-global-scope installs, includes `--remove` for clean uninstall. Implemented in `src/quill/integrate.py` (~250 lines) + 18 tests covering install / idempotent re-run / refresh-on-drift / uninstall / content-preservation.
+
+**`docs/research/cross-user-learning-design-2026-06.md` — privacy-respecting design exploration.** Three architecture paths laid out with honest tradeoffs: Path A (community policy packs, no telemetry, human-curated PRs), Path B (opt-in aggregated statistics with k-anonymity + differential privacy + no cross-day linkage), Path C (federated-style local-only learning that publishes signed pattern-deltas). Recommendation: ship Path A in v0.4, Path C in v0.5, Path B only if v0.6+ community demand warrants. The recommendation explicitly preserves the no-telemetry-by-default voice that's a brand pillar.
+
+**Six new feature ideas captured as `[NEEDS RESEARCH]` tasks**, not built unattended:
+- `quill audit export --format soc2-evidence-pack` (tar.gz with chain-verified slice + per-control summary + auditor PDF)
+- `quill audit export --format eu-ai-act-article-12` (Article-12-shaped evidence with biometric retention semantics)
+- Retention policy enforcement (`[retention]` config block with presets soc2-1y / eu-ai-act-6mo / eu-ai-act-biometric-24mo / hipaa-6y / glba-7y; verify each against primary regulator source before shipping)
+- Multi-party approval for Article 14 dual-verification (2-of-N Touch ID / WebAuthn)
+- Compliance mapping prose docs in `docs/compliance/`
+- Vanta / Drata / Secureframe evidence-vault connectors (precondition: ship the SOC 2 evidence pack format first)
+
+Each captured task includes the research questions that need answering before code lands.
+
+Tests: 733 → 812. 79 new tests across `test_saves.py` (42), `test_insights.py` (19), `test_integrate.py` (18). Lint clean. Zero regressions.
+
 ### Wave 4 — open-source-first reframe + prompt injection as a first-class feature
 
 **Strategic reframe**: Loomiq landing page (paid consulting SKUs + Stripe Payment Links) moved from `web/loomiq-landing/` to `docs/marketing/future-loomiq-saas/` with a README explaining "deploy this after first 100 GitHub stars." The OSS launch wave runs first; charging on Day 1 splits the marketing message. Triggers documented for when to flip the paid surface on.

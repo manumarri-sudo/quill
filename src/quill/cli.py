@@ -224,6 +224,194 @@ def commit_hook_uninstall(
         console.print(f"[dim]no hook to remove at[/dim] {p}")
 
 
+@app.command("insights")
+def insights_cmd(
+    window_today: Annotated[bool, typer.Option("--today")] = False,
+    window_week: Annotated[bool, typer.Option("--week")] = False,
+    window_month: Annotated[bool, typer.Option("--month")] = False,
+    window_all: Annotated[bool, typer.Option("--all")] = False,
+    since: Annotated[str | None, typer.Option("--since")] = None,
+    log_path: Annotated[Path | None, typer.Option("--log", "-l")] = None,
+    plain: Annotated[bool, typer.Option("--plain")] = False,
+) -> None:
+    """Per-pattern analysis + suggested overrides + sessions worth reviewing.
+
+    Goes deeper than `quill saves`: for each pattern, shows fire frequency,
+    block vs ask ratio, and a calibrated recommendation (keep critical,
+    trust-path candidate, watching). Surfaces trust-path effectiveness and
+    flags sessions that closed the trifecta or had critical blocks at
+    unusual hours.
+    """
+    from quill.insights import compute_insights, format_insights
+    from quill.saves import parse_window
+
+    p = log_path or default_audit_path()
+    start, end = parse_window(
+        today=window_today, week=window_week, month=window_month,
+        all_time=window_all, since=since,
+    )
+    insights = compute_insights(p, window_start=start, window_end=end)
+    Console().print(format_insights(insights, plain=plain))
+
+
+@app.command("integrate")
+def integrate_cmd(
+    agent: Annotated[
+        str,
+        typer.Argument(
+            help="agent id (claude-code / cursor / aider) or 'auto' / 'list'",
+        ),
+    ] = "auto",
+    global_scope: Annotated[
+        bool,
+        typer.Option(
+            "--global",
+            help="write to the per-user rules file (~/.claude/CLAUDE.md) instead of the project one",
+        ),
+    ] = False,
+    remove: Annotated[
+        bool,
+        typer.Option("--remove", help="remove the Quill snippet instead of installing"),
+    ] = False,
+) -> None:
+    """Teach your coding agent how to query Quill data via its existing LLM.
+
+    Appends a small instructions snippet to your coding-agent's rules file
+    (CLAUDE.md / .cursorrules / CONVENTIONS.md). The snippet lists the
+    deterministic `quill` commands your agent can run when you ask about
+    agent activity. Idempotent; safe to re-run after Quill upgrades.
+
+    No LLM ships in Quill itself. Your existing coding agent does the asking.
+
+    Examples:
+      quill integrate            # auto-detect agents and prompt for which to set up
+      quill integrate list       # show what's supported + currently installed
+      quill integrate claude-code           # install for Claude Code (project scope)
+      quill integrate claude-code --global  # install for Claude Code (user scope)
+      quill integrate cursor                # install for Cursor in current repo
+      quill integrate claude-code --remove  # uninstall
+    """
+    from quill.integrate import (
+        all_integrations,
+        detect_installed,
+        get_integration,
+        install,
+        uninstall,
+    )
+    out = Console()
+
+    if agent == "list":
+        installed = {i.name for i in detect_installed()}
+        out.print("[bold]quill integrate — supported agents[/bold]\n")
+        for integ in all_integrations():
+            mark = "[green]found[/green]" if integ.name in installed else "[dim]not found[/dim]"
+            out.print(f"  {integ.name:14}  {integ.label:18}  {mark}")
+        out.print(
+            "\n[dim]run `quill integrate <name>` to install the rules snippet.[/dim]",
+        )
+        return
+
+    if agent == "auto":
+        found = detect_installed()
+        if not found:
+            out.print("[yellow]no supported coding agents detected.[/yellow]")
+            out.print("  run `quill integrate list` to see what's supported.")
+            raise typer.Exit(code=1)
+        if len(found) == 1:
+            agent = found[0].name
+        else:
+            out.print("[bold]multiple agents detected.[/bold] pick one:")
+            for integ in found:
+                out.print(f"  quill integrate {integ.name}   ({integ.label})")
+            raise typer.Exit(code=0)
+
+    integ = get_integration(agent)
+    if integ is None:
+        out.print(f"[red]unknown agent:[/red] {agent}")
+        out.print("  run `quill integrate list` to see supported agents.")
+        raise typer.Exit(code=1)
+
+    if remove:
+        path, removed = uninstall(integ, global_scope=global_scope)
+        if removed:
+            out.print(f"[green]removed[/green] Quill snippet from {path}")
+        else:
+            out.print(f"[dim]no snippet to remove[/dim] in {path}")
+        return
+
+    try:
+        path, status = install(integ, global_scope=global_scope)
+    except ValueError as e:
+        out.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+
+    status_color = {
+        "installed": "green",
+        "refreshed": "yellow",
+        "current": "dim",
+    }[status]
+    out.print(f"[{status_color}]{status}[/{status_color}]  {path}")
+    if status in ("installed", "refreshed"):
+        out.print(
+            "\n[dim]your coding agent will now know how to query Quill data when you ask.\n"
+            f"try: open {integ.label} and ask \"what did the agent do this morning?\"[/dim]",
+        )
+
+
+@app.command("saves")
+def saves_cmd(
+    window_today: Annotated[
+        bool, typer.Option("--today", help="window: last calendar day (UTC)"),
+    ] = False,
+    window_week: Annotated[
+        bool, typer.Option("--week", help="window: last 7 days (default)"),
+    ] = False,
+    window_month: Annotated[
+        bool, typer.Option("--month", help="window: last 30 days"),
+    ] = False,
+    window_all: Annotated[
+        bool, typer.Option("--all", help="window: every event ever logged"),
+    ] = False,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help="window start: ISO date or datetime, e.g. 2026-05-01",
+        ),
+    ] = None,
+    log_path: Annotated[
+        Path | None,
+        typer.Option("--log", "-l", help="audit log path (default: ~/.quill/audit.log.jsonl)"),
+    ] = None,
+    plain: Annotated[
+        bool,
+        typer.Option("--plain", help="strip Rich markup; useful for piping / CI"),
+    ] = False,
+) -> None:
+    """Show what Quill caught for you (verified counts + estimated savings).
+
+    Reads the audit log, classifies every event in the selected window, and
+    prints a summary that separates verified counts (every event type the
+    log emits) from estimated time-saved (with the per-prompt assumption
+    documented inline). Default window is the last 7 days; override with
+    --today, --month, --all, or --since YYYY-MM-DD.
+
+    Streaming O(N) over the log; safe on hundred-MB audit chains.
+    """
+    from quill.saves import compute_saves, format_saves, parse_window
+
+    p = log_path or default_audit_path()
+    start, end = parse_window(
+        today=window_today,
+        week=window_week,
+        month=window_month,
+        all_time=window_all,
+        since=since,
+    )
+    saves = compute_saves(p, window_start=start, window_end=end)
+    Console().print(format_saves(saves, plain=plain))
+
+
 @app.command("scan-prompts")
 def scan_prompts_cmd(
     paths: Annotated[
