@@ -13,6 +13,7 @@ Pins:
   - The silent-failure analyzer fires when the last N journals are
     all zero-turn stubs.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,12 +32,12 @@ from quill.learn import (
 
 
 def _ev(type_: str, **payload_kv) -> dict:
-    return {"type": type_, "session_id": "s", "ts": "2026-05-12T00:00:00Z",
-            "payload": payload_kv}
+    return {"type": type_, "session_id": "s", "ts": "2026-05-12T00:00:00Z", "payload": payload_kv}
 
 
 # ---------------------------------------------------------------------------
 # normalize_block_reason - the key thing that makes top-patterns useful
+
 
 @pytest.mark.parametrize(
     ("raw", "expected"),
@@ -44,14 +45,16 @@ def _ev(type_: str, **payload_kv) -> dict:
         ("rm -rf", "rm -rf"),
         ("rm -rf.", "rm -rf"),
         ("Quill blocked: rm -rf.", "rm -rf"),
-        ("Quill blocked: rm -rf. To allow, lower the risk in your quill config "
-         "or run the command outside Claude Code.", "rm -rf"),
+        (
+            "Quill blocked: rm -rf. To allow, lower the risk in your quill config "
+            "or run the command outside Claude Code.",
+            "rm -rf",
+        ),
         ("rm -rf · try instead: Move to /tmp/quarantine.", "rm -rf"),
         ("rm -rf - try instead: Move to /tmp/quarantine.", "rm -rf"),
         ("rm -rf.  ↪ try: Move to a quarantine dir", "rm -rf"),
         ("vercel --prod", "vercel --prod"),
-        ("Quill blocked: vercel --prod. To allow, lower the risk...",
-         "vercel --prod"),
+        ("Quill blocked: vercel --prod. To allow, lower the risk...", "vercel --prod"),
         ("DROP TABLE/DATABASE/SCHEMA", "DROP TABLE/DATABASE/SCHEMA"),
         ("", ""),
     ],
@@ -66,11 +69,11 @@ def test_normalize_block_reason_collapses_history(raw: str, expected: str) -> No
 # ---------------------------------------------------------------------------
 # KPI shape + math
 
+
 def test_kpi_noise_ratio_basic() -> None:
-    events = (
-        [_ev(ev.VERDICT_ASK, reason="default risk for Edit")] * 100
-        + [_ev(ev.VERDICT_BLOCKED, reason="rm -rf")] * 10
-    )
+    events = [_ev(ev.VERDICT_ASK, reason="default risk for Edit")] * 100 + [
+        _ev(ev.VERDICT_BLOCKED, reason="rm -rf")
+    ] * 10
     k = derive_kpis(events)
     assert k.n_asks == 100
     assert k.n_blocks == 10
@@ -97,36 +100,46 @@ def test_kpi_noise_ratio_zero_events() -> None:
 
 def test_kpi_health_thresholds() -> None:
     """Healthy < 5 < loud < 20 < broken. Exact boundary check."""
+
     def k(asks: int, blocks: int) -> KPIReport:
         return derive_kpis(
-            [_ev(ev.VERDICT_ASK)] * asks
-            + [_ev(ev.VERDICT_BLOCKED, reason="rm -rf")] * blocks,
+            [_ev(ev.VERDICT_ASK)] * asks + [_ev(ev.VERDICT_BLOCKED, reason="rm -rf")] * blocks,
         )
-    assert k(4, 1).health == "healthy"      # ratio 4
-    assert k(5, 1).health == "loud"         # ratio 5
-    assert k(19, 1).health == "loud"        # ratio 19
-    assert k(20, 1).health == "broken"      # ratio 20
+
+    assert k(4, 1).health == "healthy"  # ratio 4
+    assert k(5, 1).health == "loud"  # ratio 5
+    assert k(19, 1).health == "loud"  # ratio 19
+    assert k(20, 1).health == "broken"  # ratio 20
 
 
 def test_kpi_taint_closures_counts_only_full_trifecta() -> None:
     """session.taint.update events count toward closures ONLY when all
     three flags are true. Single-flag flips are not closures."""
     events = [
-        _ev(ev.SESSION_TAINT_UPDATE, trifecta={
-            "has_seen_untrusted": True,
-            "has_accessed_private": False,
-            "can_exfiltrate": False,
-        }),
-        _ev(ev.SESSION_TAINT_UPDATE, trifecta={
-            "has_seen_untrusted": True,
-            "has_accessed_private": True,
-            "can_exfiltrate": True,
-        }),  # this one
-        _ev(ev.SESSION_TAINT_UPDATE, trifecta={
-            "has_seen_untrusted": True,
-            "has_accessed_private": True,
-            "can_exfiltrate": False,
-        }),
+        _ev(
+            ev.SESSION_TAINT_UPDATE,
+            trifecta={
+                "has_seen_untrusted": True,
+                "has_accessed_private": False,
+                "can_exfiltrate": False,
+            },
+        ),
+        _ev(
+            ev.SESSION_TAINT_UPDATE,
+            trifecta={
+                "has_seen_untrusted": True,
+                "has_accessed_private": True,
+                "can_exfiltrate": True,
+            },
+        ),  # this one
+        _ev(
+            ev.SESSION_TAINT_UPDATE,
+            trifecta={
+                "has_seen_untrusted": True,
+                "has_accessed_private": True,
+                "can_exfiltrate": False,
+            },
+        ),
     ]
     k = derive_kpis(events)
     assert k.n_taint_closures == 1
@@ -157,8 +170,7 @@ def test_kpi_top_blocked_patterns_dedupes_via_normalizer() -> None:
         _ev(ev.VERDICT_BLOCKED, reason="rm -rf"),
         _ev(ev.VERDICT_BLOCKED, reason="rm -rf."),
         _ev(ev.VERDICT_BLOCKED, reason="Quill blocked: rm -rf."),
-        _ev(ev.VERDICT_BLOCKED,
-            reason="rm -rf.  ↪ try: Move to a quarantine dir"),
+        _ev(ev.VERDICT_BLOCKED, reason="rm -rf.  ↪ try: Move to a quarantine dir"),
         _ev(ev.VERDICT_BLOCKED, reason="vercel --prod"),
     ]
     k = derive_kpis(events)
@@ -171,21 +183,23 @@ def test_kpi_top_blocked_patterns_dedupes_via_normalizer() -> None:
 # ---------------------------------------------------------------------------
 # Suggestion engine
 
+
 def test_trust_scope_suggestion_fires_on_noisy_dir() -> None:
     events = []
     for _ in range(30):
-        events.append({
-            "type": ev.VERDICT_ASK,
-            "payload": {
-                "tool_name": "Edit",
-                "reason": "default risk for Edit",
-                "cwd": "/Users/u/my-app",
-            },
-        })
+        events.append(
+            {
+                "type": ev.VERDICT_ASK,
+                "payload": {
+                    "tool_name": "Edit",
+                    "reason": "default risk for Edit",
+                    "cwd": "/Users/u/my-app",
+                },
+            }
+        )
     suggestions = analyze_trust_scope_candidates(events)
     assert any(
-        s.category == SuggestionCategory.TRUST_SCOPE
-        and "/Users/u/my-app" in s.title
+        s.category == SuggestionCategory.TRUST_SCOPE and "/Users/u/my-app" in s.title
         for s in suggestions
     )
 
@@ -195,17 +209,23 @@ def test_trust_scope_suggestion_does_not_fire_on_dir_with_many_real_blocks() -> 
     work; the gate should NOT suggest trusting it away."""
     events = []
     for _ in range(30):
-        events.append({
-            "type": ev.VERDICT_ASK,
-            "payload": {"tool_name": "Edit", "reason": "default risk for Edit",
-                        "cwd": "/Users/u/risky"},
-        })
+        events.append(
+            {
+                "type": ev.VERDICT_ASK,
+                "payload": {
+                    "tool_name": "Edit",
+                    "reason": "default risk for Edit",
+                    "cwd": "/Users/u/risky",
+                },
+            }
+        )
     for _ in range(20):
-        events.append({
-            "type": ev.VERDICT_BLOCKED,
-            "payload": {"tool_name": "Bash", "reason": "rm -rf",
-                        "cwd": "/Users/u/risky"},
-        })
+        events.append(
+            {
+                "type": ev.VERDICT_BLOCKED,
+                "payload": {"tool_name": "Bash", "reason": "rm -rf", "cwd": "/Users/u/risky"},
+            }
+        )
     suggestions = analyze_trust_scope_candidates(events)
     assert not any("/Users/u/risky" in s.title for s in suggestions)
 

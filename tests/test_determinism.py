@@ -19,6 +19,7 @@ What we pin:
   - `payload_hash` is stable across dict key order.
   - `fingerprint` (pinning) is stable across dict key order.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,34 +36,72 @@ def _sample_audit_events() -> list[dict[str, object]]:
     """A small but varied audit-log sample touching every fold path."""
     h = payload_hash({"to": "sub", "from": "root"})
     return [
-        {"type": ev.SESSION_OPEN, "session_id": "root",
-         "ts": "2026-05-11T10:00:00Z", "payload": {"intent": "ship"}},
-        {"type": ev.TOOL_ATTEMPTED, "session_id": "root", "risk": "low",
-         "payload": {"tool_name": "Bash", "args_preview": {"command": "ls"}}},
-        {"type": ev.TOOL_ATTEMPTED, "session_id": "root", "risk": "high",
-         "payload": {"tool_name": "Edit",
-                     "args_preview": {"file_path": "/x/y.py"}}},
-        {"type": ev.VERDICT_ALLOWED, "session_id": "root", "risk": "high",
-         "payload": {"tool_name": "Edit", "reason": "operator confirmed"}},
-        {"type": ev.AGENT_HANDOFF_OUT, "session_id": "root",
-         "payload": {"to_agent_id": "sub", "payload_hash": h}},
-        {"type": ev.AGENT_HANDOFF_IN, "session_id": "sub",
-         "payload": {"from_session_id": "root", "payload_hash": h}},
-        {"type": ev.SESSION_TAINT_UPDATE, "session_id": "root", "risk": "low",
-         "payload": {"trifecta": {"has_seen_untrusted": True,
-                                   "has_accessed_private": False,
-                                   "can_exfiltrate": False}}},
-        {"type": ev.SESSION_CLOSE, "session_id": "root",
-         "ts": "2026-05-11T10:30:00Z",
-         "payload": {"reason": "user_quit", "duration_seconds": 1800,
-                     "tool_call_count": 2}},
+        {
+            "type": ev.SESSION_OPEN,
+            "session_id": "root",
+            "ts": "2026-05-11T10:00:00Z",
+            "payload": {"intent": "ship"},
+        },
+        {
+            "type": ev.TOOL_ATTEMPTED,
+            "session_id": "root",
+            "risk": "low",
+            "payload": {"tool_name": "Bash", "args_preview": {"command": "ls"}},
+        },
+        {
+            "type": ev.TOOL_ATTEMPTED,
+            "session_id": "root",
+            "risk": "high",
+            "payload": {"tool_name": "Edit", "args_preview": {"file_path": "/x/y.py"}},
+        },
+        {
+            "type": ev.VERDICT_ALLOWED,
+            "session_id": "root",
+            "risk": "high",
+            "payload": {"tool_name": "Edit", "reason": "operator confirmed"},
+        },
+        {
+            "type": ev.AGENT_HANDOFF_OUT,
+            "session_id": "root",
+            "payload": {"to_agent_id": "sub", "payload_hash": h},
+        },
+        {
+            "type": ev.AGENT_HANDOFF_IN,
+            "session_id": "sub",
+            "payload": {"from_session_id": "root", "payload_hash": h},
+        },
+        {
+            "type": ev.SESSION_TAINT_UPDATE,
+            "session_id": "root",
+            "risk": "low",
+            "payload": {
+                "trifecta": {
+                    "has_seen_untrusted": True,
+                    "has_accessed_private": False,
+                    "can_exfiltrate": False,
+                }
+            },
+        },
+        {
+            "type": ev.SESSION_CLOSE,
+            "session_id": "root",
+            "ts": "2026-05-11T10:30:00Z",
+            "payload": {"reason": "user_quit", "duration_seconds": 1800, "tool_call_count": 2},
+        },
     ]
 
 
 def test_classify_is_deterministic() -> None:
     """Same tool_name must classify the same way every time."""
-    for op in ("Bash", "Edit", "stripe.create_charge", "stripe.list_charges",
-               "banking.send_money", "filesystem.read_file", "Write"):
+    for op in (
+        "Bash",
+        "Edit",
+        "stripe.create_charge",
+        "stripe.list_charges",
+        "banking.send_money",
+        "filesystem.read_file",
+        "Write",
+    ):
         r1, r2, r3 = classify(op), classify(op), classify(op)
         assert r1 is r2 is r3, f"{op}: {r1} != {r2} != {r3}"
         assert isinstance(r1, Risk)
@@ -132,10 +171,16 @@ def test_payload_hash_stable_across_key_order() -> None:
 def test_fingerprint_stable_across_key_order() -> None:
     """Tool description fingerprint MUST be stable across dict key
     order. A drifting hash would force re-approval on every connect."""
-    a = {"name": "search", "description": "find things",
-         "inputSchema": {"properties": {"q": {"type": "string"}}}}
-    b = {"description": "find things", "name": "search",
-         "inputSchema": {"properties": {"q": {"type": "string"}}}}
+    a = {
+        "name": "search",
+        "description": "find things",
+        "inputSchema": {"properties": {"q": {"type": "string"}}},
+    }
+    b = {
+        "description": "find things",
+        "name": "search",
+        "inputSchema": {"properties": {"q": {"type": "string"}}},
+    }
     assert fingerprint(a) == fingerprint(b)
 
 
@@ -145,8 +190,6 @@ def test_classifier_no_hidden_state_between_calls() -> None:
     per-input result must not depend on the order of prior queries."""
     for first in ("Bash", "stripe.create_charge", "fs.delete", "Edit"):
         classify(first)  # warm
-    risks_a = [classify(op) for op in
-               ("Edit", "stripe.create_charge", "fs.delete", "Bash")]
-    risks_b = [classify(op) for op in
-               ("Edit", "stripe.create_charge", "fs.delete", "Bash")]
+    risks_a = [classify(op) for op in ("Edit", "stripe.create_charge", "fs.delete", "Bash")]
+    risks_b = [classify(op) for op in ("Edit", "stripe.create_charge", "fs.delete", "Bash")]
     assert risks_a == risks_b

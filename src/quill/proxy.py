@@ -23,6 +23,7 @@ Performance budget:
   policy-allow path:  P50 < 2 ms, P99 < 10 ms (excluding upstream + human)
   human-ack path:     dominated by user think-time, not Quill
 """
+
 from __future__ import annotations
 
 import sys
@@ -177,7 +178,8 @@ class QuillProxy:
                 )
                 session = await self._exit_stack.enter_async_context(
                     ClientSession(
-                        read, write,
+                        read,
+                        write,
                         message_handler=handler,
                         sampling_callback=sampler,
                     ),
@@ -251,10 +253,20 @@ class QuillProxy:
                 identity = {
                     "name": tool.name,
                     "description": tool.description,
-                    "inputSchema": tool.inputSchema if isinstance(tool.inputSchema, dict)
-                        else (tool.inputSchema.model_dump() if hasattr(tool.inputSchema, "model_dump") else {}),
-                    "annotations": tool.annotations if isinstance(tool.annotations, dict)
-                        else (tool.annotations.model_dump() if tool.annotations and hasattr(tool.annotations, "model_dump") else {}),
+                    "inputSchema": tool.inputSchema
+                    if isinstance(tool.inputSchema, dict)
+                    else (
+                        tool.inputSchema.model_dump()
+                        if hasattr(tool.inputSchema, "model_dump")
+                        else {}
+                    ),
+                    "annotations": tool.annotations
+                    if isinstance(tool.annotations, dict)
+                    else (
+                        tool.annotations.model_dump()
+                        if tool.annotations and hasattr(tool.annotations, "model_dump")
+                        else {}
+                    ),
                 }
                 ok, reason = self._pin_store.verify(up.name, identity)
                 if not ok:
@@ -272,12 +284,14 @@ class QuillProxy:
                         force_fsync=True,
                     )
                     continue  # hide the tool from the client
-                out.append(Tool(
-                    name=f"{up.name}.{tool.name}",
-                    description=tool.description,
-                    inputSchema=tool.inputSchema,
-                    annotations=tool.annotations,
-                ))
+                out.append(
+                    Tool(
+                        name=f"{up.name}.{tool.name}",
+                        description=tool.description,
+                        inputSchema=tool.inputSchema,
+                        annotations=tool.annotations,
+                    )
+                )
         return out
 
     async def call_tool(
@@ -455,7 +469,8 @@ def build_proxy_server(proxy: QuillProxy) -> Server[dict[str, Any], Any]:
 
     @server.call_tool()
     async def _handle_call_tool(
-        name: str, arguments: dict[str, Any] | None,
+        name: str,
+        arguments: dict[str, Any] | None,
     ) -> list[TextContent]:
         args = dict(arguments or {})
         try:

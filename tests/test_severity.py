@@ -6,6 +6,7 @@ Two invariants:
      in plain mode, so NO_COLOR terminals and screen readers still convey
      the severity.
 """
+
 from __future__ import annotations
 
 from quill.policy import Risk
@@ -87,8 +88,17 @@ def test_stat_line_rich_wraps_count_in_color():
 def test_text_label_is_screen_reader_safe():
     """Text label is what assistive tech reads when icons + color are
     unavailable. Must be uppercase, no punctuation."""
-    for sev in ("critical", "high", "medium", "low", "ok",
-                "trifecta", "chain", "secret", "pin_refusal"):
+    for sev in (
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "ok",
+        "trifecta",
+        "chain",
+        "secret",
+        "pin_refusal",
+    ):
         label = text_label(sev)
         assert label.isupper() or "-" in label
         assert " " not in label
@@ -98,8 +108,17 @@ def test_every_label_has_complete_mapping():
     """Catch the bug where someone adds a label to one of the three dicts
     but forgets the other two. Every label that appears in any dict must
     appear in all three."""
-    for sev in ("critical", "high", "medium", "low", "ok",
-                "trifecta", "chain", "secret", "pin_refusal"):
+    for sev in (
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "ok",
+        "trifecta",
+        "chain",
+        "secret",
+        "pin_refusal",
+    ):
         assert icon(sev)
         assert color(sev)
         assert text_label(sev)

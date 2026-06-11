@@ -4,6 +4,7 @@ Pins the framework's load-bearing claim: actively-used permissions stay
 healthy, dormant ones decay, and decayed permissions are ignored at
 the gate.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -26,13 +27,12 @@ def test_policy_kind_composes_correctly() -> None:
 
 def test_default_window_uses_specific_first_then_fallback() -> None:
     assert _default_window("policy.critical_to_low") == 14
-    assert _default_window("policy.unknown_combo") == 60   # policy.default
-    assert _default_window("scope.unknown") == 90          # scope.default
+    assert _default_window("policy.unknown_combo") == 60  # policy.default
+    assert _default_window("scope.unknown") == 90  # scope.default
     assert _default_window("totally_made_up") == 60
 
 
-def test_record_use_creates_then_bumps(tmp_path: Path,
-                                         monkeypatch: pytest.MonkeyPatch) -> None:
+def test_record_use_creates_then_bumps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUILL_DECAY_FILE", str(tmp_path / "perm.json"))
     store = DecayStore.load()
     p, was_decayed = store.record_use("policy.high_to_low", "fs.delete")
@@ -50,8 +50,7 @@ def test_record_use_creates_then_bumps(tmp_path: Path,
     assert again.permissions["policy.high_to_low:fs.delete"].use_count == 2
 
 
-def test_decayed_when_age_exceeds_window(tmp_path: Path,
-                                            monkeypatch: pytest.MonkeyPatch) -> None:
+def test_decayed_when_age_exceeds_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUILL_DECAY_FILE", str(tmp_path / "perm.json"))
     store = DecayStore.load()
     store.record_use("policy.high_to_low", "fs.delete")
@@ -67,8 +66,9 @@ def test_decayed_when_age_exceeds_window(tmp_path: Path,
     assert perm.age_days >= 60
 
 
-def test_record_use_returns_was_decayed_flag(tmp_path: Path,
-                                                monkeypatch: pytest.MonkeyPatch) -> None:
+def test_record_use_returns_was_decayed_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("QUILL_DECAY_FILE", str(tmp_path / "perm.json"))
     store = DecayStore.load()
     store.record_use("policy.high_to_low", "fs.delete")
@@ -85,8 +85,7 @@ def test_record_use_returns_was_decayed_flag(tmp_path: Path,
     assert perm.use_count == 2
 
 
-def test_reaffirm_bumps_without_use(tmp_path: Path,
-                                       monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reaffirm_bumps_without_use(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUILL_DECAY_FILE", str(tmp_path / "perm.json"))
     store = DecayStore.load()
     store.record_use("policy.high_to_low", "fs.delete")
@@ -105,17 +104,18 @@ def test_forget_removes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert "policy.high_to_low:fs.delete" not in DecayStore.load().permissions
 
 
-def test_decayed_and_approaching_helpers(tmp_path: Path,
-                                            monkeypatch: pytest.MonkeyPatch) -> None:
+def test_decayed_and_approaching_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUILL_DECAY_FILE", str(tmp_path / "perm.json"))
     store = DecayStore.load()
     # one decayed, one approaching, one healthy
     store.record_use("policy.high_to_low", "decayed.tool")
     store.permissions["policy.high_to_low:decayed.tool"].last_reaffirmed = (
-        datetime.now(UTC) - timedelta(days=60)).isoformat()
+        datetime.now(UTC) - timedelta(days=60)
+    ).isoformat()
     store.record_use("policy.high_to_low", "approaching.tool")
     store.permissions["policy.high_to_low:approaching.tool"].last_reaffirmed = (
-        datetime.now(UTC) - timedelta(days=20)).isoformat()  # 30d window, 10d left
+        datetime.now(UTC) - timedelta(days=20)
+    ).isoformat()  # 30d window, 10d left
     store.record_use("policy.high_to_low", "healthy.tool")
     store.save()
 
@@ -126,13 +126,13 @@ def test_decayed_and_approaching_helpers(tmp_path: Path,
     assert approaching_names == {"approaching.tool"}
 
 
-def test_permission_file_is_chmod_600(tmp_path: Path,
-                                       monkeypatch: pytest.MonkeyPatch) -> None:
+def test_permission_file_is_chmod_600(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     p = tmp_path / "perm.json"
     monkeypatch.setenv("QUILL_DECAY_FILE", str(p))
     store = DecayStore.load()
     store.record_use("policy.high_to_low", "fs.delete")
     import stat
+
     mode = stat.S_IMODE(p.stat().st_mode)
     assert mode & 0o077 == 0
 

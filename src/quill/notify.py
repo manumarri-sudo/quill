@@ -32,6 +32,7 @@ Channels run on a thread so they never block the gate (the hook has a
 Zero new dependencies - stdlib only. macOS uses `osascript`, email uses
 `smtplib`, Slack/webhook use `urllib.request`.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -52,6 +53,7 @@ from typing import Any
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
+
 # -----------------------------------------------------------------------------
 # Structured message every channel renders
 
@@ -64,17 +66,17 @@ class BlockMessage:
     a full body, Slack gets a markdown block, webhook gets the raw JSON.
     """
 
-    risk: str                              # "low" | "medium" | "high" | "critical"
-    decision: str                          # "blocked" | "ask"
+    risk: str  # "low" | "medium" | "high" | "critical"
+    decision: str  # "blocked" | "ask"
     tool_name: str
     args_preview: dict[str, Any]
-    what: str                              # one-line: "rm -rf node_modules"
-    why: str                               # plain-English: "matches `rm -rf` rule"
-    try_instead: str = ""                  # paste-able safer alt
-    approve_token: str = ""                # `quill approve <token>` if set
+    what: str  # one-line: "rm -rf node_modules"
+    why: str  # plain-English: "matches `rm -rf` rule"
+    try_instead: str = ""  # paste-able safer alt
+    approve_token: str = ""  # `quill approve <token>` if set
     cwd: str = ""
     session_id: str = ""
-    hint: str = ""                         # optional rotating tip; surfaced by hints.select()
+    hint: str = ""  # optional rotating tip; surfaced by hints.select()
 
     def short_title(self) -> str:
         verb = "asking" if self.decision == "ask" else "blocked"
@@ -182,6 +184,7 @@ def _send_macos(cfg: NotifyConfig, msg: BlockMessage) -> bool:
         return False
     title = msg.short_title()
     body = msg.short_body()
+
     # AppleScript string-escape: backslashes and quotes.
     def _esc(s: str) -> str:
         return s.replace("\\", "\\\\").replace('"', '\\"')
@@ -192,7 +195,9 @@ def _send_macos(cfg: NotifyConfig, msg: BlockMessage) -> bool:
     try:
         result = subprocess.run(
             ["osascript", "-e", script],
-            check=False, capture_output=True, timeout=5,
+            check=False,
+            capture_output=True,
+            timeout=5,
         )
     except (subprocess.SubprocessError, OSError):
         return False
@@ -223,16 +228,19 @@ def _send_email(cfg: NotifyConfig, msg: BlockMessage) -> bool:
 def _send_slack(cfg: NotifyConfig, msg: BlockMessage) -> bool:
     if not cfg.slack_webhook_url:
         return False
-    color = {"critical": "#c1442f", "high": "#b8862b",
-             "medium": "#5E81AC", "low": "#7a7a7a"}.get(msg.risk, "#7a7a7a")
+    color = {"critical": "#c1442f", "high": "#b8862b", "medium": "#5E81AC", "low": "#7a7a7a"}.get(
+        msg.risk, "#7a7a7a"
+    )
     payload = {
         "text": msg.short_title(),
-        "attachments": [{
-            "color": color,
-            "title": msg.short_title(),
-            "text": f"```\n{msg.long_body()}\n```",
-            "mrkdwn_in": ["text"],
-        }],
+        "attachments": [
+            {
+                "color": color,
+                "title": msg.short_title(),
+                "text": f"```\n{msg.long_body()}\n```",
+                "mrkdwn_in": ["text"],
+            }
+        ],
     }
     return _post_json(cfg.slack_webhook_url, payload)
 
@@ -260,7 +268,9 @@ def _post_json(url: str, payload: Mapping[str, Any]) -> bool:
         body = json.dumps(payload).encode("utf-8")
         # nosec - url is user-configured, not user-input from a request.
         req = urllib.request.Request(
-            url, data=body, method="POST",
+            url,
+            data=body,
+            method="POST",
             headers={"Content-Type": "application/json"},
         )
         with contextlib.closing(urllib.request.urlopen(req, timeout=8)) as resp:
@@ -350,9 +360,12 @@ class NotifyDispatcher:
             self._append_delivery_log(msg, results)
 
     def _append_delivery_log(
-        self, msg: BlockMessage, results: dict[str, bool],
+        self,
+        msg: BlockMessage,
+        results: dict[str, bool],
     ) -> None:
         from quill.paths import default_path
+
         line = json.dumps(
             {
                 "ts": _now_iso(),

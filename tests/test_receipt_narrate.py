@@ -3,6 +3,7 @@
 The narrator is a deterministic template, so we can pin specific phrases
 and check the grammar (singular/plural, "and" connective, capped blocks).
 """
+
 from __future__ import annotations
 
 from quill import events as ev
@@ -185,16 +186,19 @@ def test_narrate_includes_flagged_to_verify_count():
 def test_derive_populates_narrative_fields():
     events = [
         _evt(ev.SESSION_OPEN, intent="exploratory dev"),
-        _evt(ev.TOOL_ATTEMPTED, tool_name="Edit",
-             args_preview={"file_path": "src/auth/login.py"}),
+        _evt(ev.TOOL_ATTEMPTED, tool_name="Edit", args_preview={"file_path": "src/auth/login.py"}),
         _evt(ev.VERDICT_ALLOWED, tool_name="Edit"),
-        _evt(ev.TOOL_ATTEMPTED, tool_name="Edit",
-             args_preview={"file_path": "src/auth/signup.py"}),
+        _evt(ev.TOOL_ATTEMPTED, tool_name="Edit", args_preview={"file_path": "src/auth/signup.py"}),
         _evt(ev.VERDICT_ALLOWED, tool_name="Edit"),
-        _evt(ev.TOOL_ATTEMPTED, tool_name="Bash", risk="critical",
-             args_preview={"command": "rm -rf /"}),
-        _evt(ev.VERDICT_BLOCKED, tool_name="Bash", risk="critical",
-             reason="rm -rf is critical-risk"),
+        _evt(
+            ev.TOOL_ATTEMPTED,
+            tool_name="Bash",
+            risk="critical",
+            args_preview={"command": "rm -rf /"},
+        ),
+        _evt(
+            ev.VERDICT_BLOCKED, tool_name="Bash", risk="critical", reason="rm -rf is critical-risk"
+        ),
         _evt(ev.APPROVE_BIOMETRIC_OK, tool_name="Bash"),
         _evt(ev.SESSION_CLOSE),
     ]

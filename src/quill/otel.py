@@ -28,6 +28,7 @@ If the user doesn't `pip install 'quill[otel]'`, the import in this
 module fails gracefully and `EmitToOtel.is_active()` returns False -
 no behavior change in the audit hot path.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -54,12 +55,13 @@ def _try_load_otel() -> bool:
     Returns True if OTel is wired up and we should emit spans, False
     otherwise. Idempotent - safe to call from the hot path.
     """
-    global _otel_tracer, _otel_loaded  # noqa: PLW0603 - module-level cache by design
+    global _otel_tracer, _otel_loaded
     if _otel_loaded:
         return _otel_tracer is not None
     _otel_loaded = True
     try:
         from opentelemetry import trace
+
         _otel_tracer = trace.get_tracer("quill", "0.2.0")
     except ImportError:
         _otel_tracer = None
@@ -77,8 +79,12 @@ def is_active() -> bool:
 
 _TOOL_EVENT_TYPES = frozenset(
     {
-        "tool.attempted", "tool.executed", "tool.completed",
-        "verdict.allowed", "verdict.blocked", "verdict.ask",
+        "tool.attempted",
+        "tool.executed",
+        "tool.completed",
+        "verdict.allowed",
+        "verdict.blocked",
+        "verdict.ask",
         "verdict.scope_violation",
     },
 )
@@ -166,15 +172,24 @@ def emit_span(
     payload = payload or {}
     name = _span_name(event_type, payload)
     attrs = _span_attributes(event_type, session_id, agent_id, risk, payload)
-    with contextlib.suppress(Exception), _otel_tracer.start_as_current_span(
-        name, attributes=attrs,
+    with (
+        contextlib.suppress(Exception),
+        _otel_tracer.start_as_current_span(
+            name,
+            attributes=attrs,
+        ),
     ):
         # Tag failure spans so dashboards can filter by status without
         # relying on quill.event_type substring matching.
-        if event_type in ("verdict.blocked", "verdict.scope_violation",
-                          "tool.errored", "upstream.error"):
+        if event_type in (
+            "verdict.blocked",
+            "verdict.scope_violation",
+            "tool.errored",
+            "upstream.error",
+        ):
             from opentelemetry import trace
             from opentelemetry.trace import Status, StatusCode
+
             trace.get_current_span().set_status(
                 Status(StatusCode.ERROR, description=event_type),
             )

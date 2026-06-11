@@ -21,6 +21,7 @@ Privacy contract:
     NEVER SHIPPED: scope strings, tool arguments, file paths, intent
         text, audit log contents, the HMAC key, anything user-identifiable.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -41,6 +42,7 @@ SCHEMA_VERSION: Final[int] = 1
 
 def _state_path() -> Path:
     from quill.paths import default_path
+
     return default_path("telemetry.json", env_override="QUILL_TELEMETRY_PATH")
 
 
@@ -210,6 +212,7 @@ def build_event(
 ) -> dict[str, Any]:
     """Compose the JSON envelope that ships, given a state + aggregate."""
     from quill._version import __version__
+
     py = platform.python_version()
     return {
         "schema_version": SCHEMA_VERSION,
@@ -259,6 +262,7 @@ def emit_session_summary(
     try:
         # Use stdlib only - never add an httpx hard-dep just for this.
         import urllib.request
+
         req = urllib.request.Request(
             endpoint,
             data=raw,

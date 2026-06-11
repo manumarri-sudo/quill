@@ -23,6 +23,7 @@ Usage:
             # coder writes, but only inside src/dashboard
             ...
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -202,9 +203,7 @@ class SessionTree:
         any tool call.
         """
         with self._lock:
-            parent = (
-                self._all_nodes[parent_id] if parent_id is not None else self.root
-            )
+            parent = self._all_nodes[parent_id] if parent_id is not None else self.root
             _verify_attenuation(parent.intent.scope, scope)
 
             sub_id = "ses_" + secrets.token_hex(4)
@@ -272,9 +271,7 @@ class SessionTree:
         node = self._all_nodes.get(agent_id)
         while node is not None:
             node.spend_usd += dollars
-            node = (
-                self._all_nodes.get(node.parent_id) if node.parent_id else None
-            )
+            node = self._all_nodes.get(node.parent_id) if node.parent_id else None
         # check budget
         budget = self.root.intent.budget_usd
         if budget is not None and self.root.spend_usd > budget:

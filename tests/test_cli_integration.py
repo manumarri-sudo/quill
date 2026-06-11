@@ -9,6 +9,7 @@ Each test isolates HOME / config / audit-log via monkeypatch.setenv
 so the test suite can't see or mutate the developer's live Quill
 state.
 """
+
 from __future__ import annotations
 
 import json
@@ -160,17 +161,22 @@ def test_scan_secrets_skips_gitignored_files_by_default(
 ) -> None:
     """Inside a git repo, files matching .gitignore should NOT be scanned."""
     import subprocess
+
     _isolate(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init"], cwd=repo, capture_output=True, check=True)
     subprocess.run(
         ["git", "config", "user.email", "t@t"],
-        cwd=repo, capture_output=True, check=True,
+        cwd=repo,
+        capture_output=True,
+        check=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "t"],
-        cwd=repo, capture_output=True, check=True,
+        cwd=repo,
+        capture_output=True,
+        check=True,
     )
     # Set up: clean tracked file, .gitignore'd dir with a fake secret
     (repo / ".gitignore").write_text("ignored/\n")
@@ -181,7 +187,9 @@ def test_scan_secrets_skips_gitignored_files_by_default(
     )
     subprocess.run(
         ["git", "add", ".gitignore", "clean.py"],
-        cwd=repo, capture_output=True, check=True,
+        cwd=repo,
+        capture_output=True,
+        check=True,
     )
     result = runner.invoke(app, ["scan-secrets", str(repo)])
     # The ignored secret should NOT be reported by default
@@ -196,6 +204,7 @@ def test_scan_secrets_no_gitignore_flag_includes_ignored(
 ) -> None:
     """With --no-gitignore, .gitignore'd files SHOULD be scanned."""
     import subprocess
+
     _isolate(monkeypatch, tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -206,7 +215,8 @@ def test_scan_secrets_no_gitignore_flag_includes_ignored(
         "TOKEN = 'ghp_" + "A" * 36 + "'\n",
     )
     result = runner.invoke(
-        app, ["scan-secrets", str(repo), "--no-gitignore"],
+        app,
+        ["scan-secrets", str(repo), "--no-gitignore"],
     )
     assert result.exit_code == 1
     assert "ignored/leak.py" in result.output or "ignored" in result.output
@@ -220,6 +230,7 @@ def test_scan_secrets_no_gitignore_flag_includes_ignored(
 def _seed_audit_log(path: Path) -> None:
     """Write a small audit log with one tool attempt + one allowed verdict."""
     from quill import events as ev
+
     path.parent.mkdir(parents=True, exist_ok=True)
     events = [
         {
@@ -267,8 +278,7 @@ def test_audit_export_md_only(
     out_dir = tmp_path / "pack-md"
     result = runner.invoke(
         app,
-        ["audit", "export", "--log", str(log), "--out", str(out_dir),
-         "--format", "md"],
+        ["audit", "export", "--log", str(log), "--out", str(out_dir), "--format", "md"],
     )
     assert result.exit_code == 0
     assert (out_dir / "audit-evidence.md").exists()
@@ -285,8 +295,7 @@ def test_audit_export_no_standards_selected_fails(
     _seed_audit_log(log)
     result = runner.invoke(
         app,
-        ["audit", "export", "--log", str(log), "--no-aiuc-1",
-         "--no-eu-ai-act-art-14"],
+        ["audit", "export", "--log", str(log), "--no-aiuc-1", "--no-eu-ai-act-art-14"],
     )
     assert result.exit_code == 1
     assert "no standards" in result.output.lower()
@@ -319,12 +328,17 @@ def test_audit_export_iso_42001_only(
     result = runner.invoke(
         app,
         [
-            "audit", "export",
-            "--log", str(log),
-            "--out", str(out_dir),
-            "--no-aiuc-1", "--no-eu-ai-act-art-14",
+            "audit",
+            "export",
+            "--log",
+            str(log),
+            "--out",
+            str(out_dir),
+            "--no-aiuc-1",
+            "--no-eu-ai-act-art-14",
             "--iso-42001",
-            "--format", "md",
+            "--format",
+            "md",
         ],
     )
     assert result.exit_code == 0
@@ -347,7 +361,8 @@ def test_commit_hook_install_in_temp_repo(
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     result = runner.invoke(
-        app, ["commit-hook-install", "--repo", str(repo)],
+        app,
+        ["commit-hook-install", "--repo", str(repo)],
     )
     assert result.exit_code == 0
     hook = repo / ".git" / "hooks" / "prepare-commit-msg"
@@ -366,7 +381,8 @@ def test_commit_hook_install_refuses_non_repo(
     not_a_repo = tmp_path / "plain"
     not_a_repo.mkdir()
     result = runner.invoke(
-        app, ["commit-hook-install", "--repo", str(not_a_repo)],
+        app,
+        ["commit-hook-install", "--repo", str(not_a_repo)],
     )
     assert result.exit_code == 1
     assert "not a git repo" in result.output.lower()

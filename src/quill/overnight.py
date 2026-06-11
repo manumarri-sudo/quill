@@ -16,6 +16,7 @@ cannot leave the gate degraded indefinitely.
 
 State file: $QUILL_HOME/overnight.json (mode 0o600).
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -30,6 +31,7 @@ DEFAULT_AUTO_EXPIRE_HOURS: float = 12.0
 
 def _state_path() -> Path:
     from quill.paths import default_path
+
     return default_path("overnight.json", env_override="QUILL_OVERNIGHT_FILE")
 
 
@@ -230,6 +232,7 @@ def is_active_from_config(*, now: datetime | None = None) -> tuple[bool, str]:
     we: str | None = None
     try:
         from quill.config import load_config
+
         cfg = load_config()
         ovn = getattr(cfg, "overnight", None)
         if ovn is not None:

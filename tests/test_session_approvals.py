@@ -4,6 +4,7 @@ The bright line: critical/secret/trifecta events never qualify for session
 memory. Adapter integration tests assert that; this file tests the storage
 layer in isolation.
 """
+
 from __future__ import annotations
 
 import time

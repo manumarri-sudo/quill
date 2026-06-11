@@ -20,6 +20,7 @@ Cooldowns are per-hint, tracked in `~/.quill/hints_seen.json`, default
 
 No LLM. Pure data file + selector. ~140 lines.
 """
+
 from __future__ import annotations
 
 import json
@@ -55,10 +56,10 @@ class HintContext:
     Populated by the adapter at block time, then passed to `select`.
     """
 
-    pattern: str = ""                # canonical pattern, from saves.canonicalize_pattern
-    reason: str = ""                 # raw block reason text
-    risk: str = ""                   # critical / high / medium / low
-    is_first_block: bool = False     # has the user ever been blocked before?
+    pattern: str = ""  # canonical pattern, from saves.canonicalize_pattern
+    reason: str = ""  # raw block reason text
+    risk: str = ""  # critical / high / medium / low
+    is_first_block: bool = False  # has the user ever been blocked before?
 
 
 def _load_hints(path: Path = _HINTS_TOML) -> list[Hint]:

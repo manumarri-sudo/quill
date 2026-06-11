@@ -5,6 +5,7 @@ when the on-disk Claude Code transcript schema diverged from what
 `summarize_transcript` expected. These tests cover both shapes so the
 regression cannot recur unnoticed.
 """
+
 from __future__ import annotations
 
 from quill.journal import (

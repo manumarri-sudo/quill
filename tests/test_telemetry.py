@@ -4,6 +4,7 @@ These tests pin: (1) the only fields that *can* leave the machine, (2)
 that no scope strings, tool args, paths, or intent text ever enter the
 event payload, and (3) that opt-out actually opts out.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,8 +27,9 @@ from quill.telemetry import (
 # ---- state load/save -----------------------------------------------------
 
 
-def test_load_creates_install_id_when_no_state(tmp_path: Path,
-                                                monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_creates_install_id_when_no_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("QUILL_TELEMETRY_PATH", str(tmp_path / "tel.json"))
     s = TelemetryState.load()
     assert s.install_id  # uuid4 string
@@ -52,12 +54,12 @@ def test_opt_out_persists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     assert TelemetryState.load().opted_in is False
 
 
-def test_state_file_is_chmod_600(tmp_path: Path,
-                                   monkeypatch: pytest.MonkeyPatch) -> None:
+def test_state_file_is_chmod_600(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     p = tmp_path / "tel.json"
     monkeypatch.setenv("QUILL_TELEMETRY_PATH", str(p))
     opt_in()
     import stat
+
     mode = stat.S_IMODE(p.stat().st_mode)
     assert mode & 0o077 == 0
 
@@ -83,8 +85,12 @@ def test_aggregate_counts_basic_session() -> None:
         _evt("tool.attempted", tool_name="filesystem.read_file", risk="low"),
         _evt("verdict.allowed", tool_name="filesystem.read_file"),
         _evt("tool.attempted", tool_name="github.create_pull_request", risk="critical"),
-        _evt("verdict.blocked", tool_name="github.create_pull_request",
-             reason="human_declined", risk="critical"),
+        _evt(
+            "verdict.blocked",
+            tool_name="github.create_pull_request",
+            reason="human_declined",
+            risk="critical",
+        ),
         _evt("tool.attempted", tool_name="filesystem.delete_file", risk="critical"),
         _evt("verdict.scope_violation", tool_name="filesystem.delete_file"),
         _evt("session.end"),
@@ -110,11 +116,14 @@ def test_aggregate_never_includes_tool_args_or_paths() -> None:
     assert they never end up in the aggregate output.
     """
     events = [
-        _evt("session.start", intent="DELETE PROD DATABASE NOW",
-             scope=["secrets:read:c_8e4f"]),
-        _evt("tool.attempted", tool_name="banking.send_money",
-             arg_keys=["recipient", "amount"], arg_count=2,
-             args_preview={"recipient": "US133...", "amount": 50000}),
+        _evt("session.start", intent="DELETE PROD DATABASE NOW", scope=["secrets:read:c_8e4f"]),
+        _evt(
+            "tool.attempted",
+            tool_name="banking.send_money",
+            arg_keys=["recipient", "amount"],
+            arg_count=2,
+            args_preview={"recipient": "US133...", "amount": 50000},
+        ),
         _evt("verdict.allowed", tool_name="banking.send_money"),
     ]
     a = aggregate_events(events)
@@ -165,16 +174,14 @@ def test_preview_is_pretty_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 # ---- emit -----------------------------------------------------------------
 
 
-def test_emit_skipped_when_opted_out(tmp_path: Path,
-                                       monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_skipped_when_opted_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUILL_TELEMETRY_PATH", str(tmp_path / "tel.json"))
     s = TelemetryState.load()
     assert s.opted_in is False
     assert emit_session_summary({"n_attempts": 1}, state=s) is False
 
 
-def test_emit_swallows_network_errors(tmp_path: Path,
-                                        monkeypatch: pytest.MonkeyPatch) -> None:
+def test_emit_swallows_network_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Telemetry must NEVER raise. We point it at an unreachable host and
     assert it returns False rather than blowing up."""
     monkeypatch.setenv("QUILL_TELEMETRY_PATH", str(tmp_path / "tel.json"))

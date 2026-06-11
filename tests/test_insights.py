@@ -1,4 +1,5 @@
 """Tests for `quill insights` — per-pattern analysis + recommendations."""
+
 from __future__ import annotations
 
 import json
@@ -89,11 +90,15 @@ def test_blocked_events_aggregated_by_canonical_pattern(tmp_path: Path) -> None:
     events = [
         _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="rm -rf"),
         _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="force-push detected"),
-        _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="git push --force origin"),
+        _evt(
+            ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="git push --force origin"
+        ),
         _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="rm -rf"),
     ]
     _write(events, p)
-    insights = compute_insights(p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1))
+    insights = compute_insights(
+        p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1)
+    )
     assert insights.pattern_stats["rm -rf"].blocked_count == 2
     assert insights.pattern_stats["git push --force"].blocked_count == 2
 
@@ -107,7 +112,9 @@ def test_ask_events_aggregated_by_tool_name(tmp_path: Path) -> None:
         _evt(ev.VERDICT_ASK, now.isoformat(), tool_name="Write"),
     ]
     _write(events, p)
-    insights = compute_insights(p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1))
+    insights = compute_insights(
+        p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1)
+    )
     assert insights.pattern_stats["Edit (default)"].asked_count == 2
     assert insights.pattern_stats["Write (default)"].asked_count == 1
 
@@ -122,7 +129,9 @@ def test_trust_paths_aggregated_from_verdict_allowed_reasons(tmp_path: Path) -> 
         _evt(ev.VERDICT_ALLOWED, now.isoformat(), reason="user policy override"),
     ]
     _write(events, p)
-    insights = compute_insights(p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1))
+    insights = compute_insights(
+        p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1)
+    )
     paths = {tp.path: tp.auto_allows for tp in insights.trust_paths}
     assert paths["/tmp/repo-a"] == 2
     assert paths["/tmp/repo-b"] == 1
@@ -134,19 +143,28 @@ def test_trifecta_sessions_flagged_for_review(tmp_path: Path) -> None:
     p = tmp_path / "audit.log.jsonl"
     now = datetime.now(UTC)
     events = [
-        _evt(ev.VERDICT_BLOCKED, now.isoformat(), sid="ses_trifecta", risk="critical",
-             reason="trifecta close · session has seen untrusted + accessed private + exfil"),
-        _evt(ev.VERDICT_BLOCKED, now.isoformat(), sid="ses_normal", risk="critical",
-             reason="rm -rf"),
+        _evt(
+            ev.VERDICT_BLOCKED,
+            now.isoformat(),
+            sid="ses_trifecta",
+            risk="critical",
+            reason="trifecta close · session has seen untrusted + accessed private + exfil",
+        ),
+        _evt(
+            ev.VERDICT_BLOCKED, now.isoformat(), sid="ses_normal", risk="critical", reason="rm -rf"
+        ),
     ]
     _write(events, p)
-    insights = compute_insights(p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1))
+    insights = compute_insights(
+        p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1)
+    )
     flagged_ids = {rs.session_id for rs in insights.reviewable_sessions}
     assert "ses_trifecta" in flagged_ids
     # ses_normal is NOT flagged for trifecta (no trifecta keyword) — only flagged
     # if it had a critical block at 2-4am, which our test data didn't
-    trifecta_session = next(rs for rs in insights.reviewable_sessions
-                            if rs.session_id == "ses_trifecta")
+    trifecta_session = next(
+        rs for rs in insights.reviewable_sessions if rs.session_id == "ses_trifecta"
+    )
     assert "trifecta" in trifecta_session.reason
 
 
@@ -157,7 +175,9 @@ def test_chain_repair_sessions_flagged(tmp_path: Path) -> None:
         _evt(ev.CHAIN_REPAIRED, now.isoformat(), sid="ses_repair"),
     ]
     _write(events, p)
-    insights = compute_insights(p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1))
+    insights = compute_insights(
+        p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1)
+    )
     flagged = {rs.session_id: rs.reason for rs in insights.reviewable_sessions}
     assert "ses_repair" in flagged
     assert "chain repaired" in flagged["ses_repair"]
@@ -167,8 +187,13 @@ def test_late_night_critical_block_flagged(tmp_path: Path) -> None:
     p = tmp_path / "audit.log.jsonl"
     late_night = datetime(2026, 6, 5, 2, 30, tzinfo=UTC)
     events = [
-        _evt(ev.VERDICT_BLOCKED, late_night.isoformat(), sid="ses_late",
-             risk="critical", reason="rm -rf"),
+        _evt(
+            ev.VERDICT_BLOCKED,
+            late_night.isoformat(),
+            sid="ses_late",
+            risk="critical",
+            reason="rm -rf",
+        ),
     ]
     _write(events, p)
     insights = compute_insights(p)  # unbounded window
@@ -189,9 +214,13 @@ def test_top_patterns_sorted_by_total_fires(tmp_path: Path) -> None:
         events.append(_evt(ev.VERDICT_ASK, now.isoformat(), tool_name="Edit"))
     # vercel --prod: 2 blocks
     for _ in range(2):
-        events.append(_evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="vercel --prod"))
+        events.append(
+            _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="vercel --prod")
+        )
     _write(events, p)
-    insights = compute_insights(p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1))
+    insights = compute_insights(
+        p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1)
+    )
     top = insights.top_patterns
     # Edit (default) has 8 fires, more than rm -rf's 5 -> Edit comes first
     assert top[0].pattern == "Edit (default)"
@@ -209,7 +238,9 @@ def test_downgrade_candidates_filtered(tmp_path: Path) -> None:
     for _ in range(5):
         events.append(_evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="rm -rf"))
     _write(events, p)
-    insights = compute_insights(p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1))
+    insights = compute_insights(
+        p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1)
+    )
     candidates = {s.pattern for s in insights.downgrade_candidates}
     assert "Edit (default)" in candidates
     assert "rm -rf" not in candidates
@@ -241,11 +272,18 @@ def test_format_insights_includes_all_sections(tmp_path: Path) -> None:
         _evt(ev.VERDICT_ASK, now.isoformat(), tool_name="Edit"),
         _evt(ev.VERDICT_ASK, now.isoformat(), tool_name="Edit"),
         _evt(ev.VERDICT_ALLOWED, now.isoformat(), reason="trusted scope: Edit in /tmp/x"),
-        _evt(ev.VERDICT_BLOCKED, now.isoformat(), sid="ses_trifecta", risk="critical",
-             reason="trifecta close · session has seen untrusted"),
+        _evt(
+            ev.VERDICT_BLOCKED,
+            now.isoformat(),
+            sid="ses_trifecta",
+            risk="critical",
+            reason="trifecta close · session has seen untrusted",
+        ),
     ]
     _write(events, p)
-    insights = compute_insights(p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1))
+    insights = compute_insights(
+        p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1)
+    )
     out = format_insights(insights, plain=True)
     assert "top patterns by fire frequency" in out
     assert "trust-path effectiveness" in out

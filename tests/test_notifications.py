@@ -5,6 +5,7 @@ never escape, the forwarder receives correct calls, the pin-cache invalidator
 fires only on tools/list_changed, missing/unknown notifications still get
 audit-logged.
 """
+
 from __future__ import annotations
 
 import json
@@ -47,7 +48,11 @@ class _RecordingForwarder(DownstreamForwarder):
         self.calls.append(("log", {"level": level, "data": data, "logger": logger}))
 
     async def forward_progress(
-        self, *, progress_token: Any, progress: float, total: float | None,
+        self,
+        *,
+        progress_token: Any,
+        progress: float,
+        total: float | None,
     ) -> None:
         self.calls.append(
             ("progress", {"token": progress_token, "progress": progress, "total": total}),
@@ -81,7 +86,11 @@ def _fake_notif(class_name: str, **params: Any) -> Any:
                 setattr(self, k, v)
 
         def model_dump(self) -> dict[str, Any]:
-            return {k: getattr(self, k) for k in dir(self) if not k.startswith("_") and k != "model_dump"}
+            return {
+                k: getattr(self, k)
+                for k in dir(self)
+                if not k.startswith("_") and k != "model_dump"
+            }
 
     root = NotifClass()
     if params:
@@ -95,14 +104,14 @@ def _fake_notif(class_name: str, **params: Any) -> Any:
 
 def test_classify_handles_each_known_kind() -> None:
     cases = {
-        "ToolListChangedNotification":     "upstream.tools.list_changed",
-        "ToolsListChangedNotification":    "upstream.tools.list_changed",
+        "ToolListChangedNotification": "upstream.tools.list_changed",
+        "ToolsListChangedNotification": "upstream.tools.list_changed",
         "ResourceListChangedNotification": "upstream.resources.list_changed",
-        "PromptListChangedNotification":   "upstream.prompts.list_changed",
-        "ResourceUpdatedNotification":     "upstream.resource.updated",
-        "LoggingMessageNotification":      "upstream.log",
-        "ProgressNotification":            "upstream.progress",
-        "CancelledNotification":           "upstream.cancelled",
+        "PromptListChangedNotification": "upstream.prompts.list_changed",
+        "ResourceUpdatedNotification": "upstream.resource.updated",
+        "LoggingMessageNotification": "upstream.log",
+        "ProgressNotification": "upstream.progress",
+        "CancelledNotification": "upstream.cancelled",
     }
     for name, expected in cases.items():
         cls = type(name, (), {})
@@ -147,13 +156,19 @@ async def test_handler_logs_progress_and_forwards(tmp_path: Path) -> None:
     forwarder = _RecordingForwarder()
     with AuditLog(path=tmp_path / "a.jsonl", hmac_key=b"k" * 32) as audit:
         h = make_message_handler(
-            upstream_name="github", audit=audit,
-            session_id="ses-1", forwarder=forwarder,
+            upstream_name="github",
+            audit=audit,
+            session_id="ses-1",
+            forwarder=forwarder,
         )
-        await h(_fake_notif(
-            "ProgressNotification",
-            progressToken="t-1", progress=0.5, total=1.0,
-        ))
+        await h(
+            _fake_notif(
+                "ProgressNotification",
+                progressToken="t-1",
+                progress=0.5,
+                total=1.0,
+            )
+        )
 
     assert forwarder.calls == [
         ("progress", {"token": "t-1", "progress": 0.5, "total": 1.0}),
@@ -165,13 +180,19 @@ async def test_handler_logs_log_message_and_forwards(tmp_path: Path) -> None:
     forwarder = _RecordingForwarder()
     with AuditLog(path=tmp_path / "a.jsonl", hmac_key=b"k" * 32) as audit:
         h = make_message_handler(
-            upstream_name="postgres", audit=audit,
-            session_id="ses-1", forwarder=forwarder,
+            upstream_name="postgres",
+            audit=audit,
+            session_id="ses-1",
+            forwarder=forwarder,
         )
-        await h(_fake_notif(
-            "LoggingMessageNotification",
-            level="warning", data="slow query", logger="postgres",
-        ))
+        await h(
+            _fake_notif(
+                "LoggingMessageNotification",
+                level="warning",
+                data="slow query",
+                logger="postgres",
+            )
+        )
 
     kinds = [c[0] for c in forwarder.calls]
     assert "log" in kinds
@@ -182,7 +203,9 @@ async def test_handler_resource_changes_forward_separately(tmp_path: Path) -> No
     forwarder = _RecordingForwarder()
     with AuditLog(path=tmp_path / "a.jsonl", hmac_key=b"k" * 32) as audit:
         h = make_message_handler(
-            upstream_name="fs", audit=audit, session_id="s",
+            upstream_name="fs",
+            audit=audit,
+            session_id="s",
             forwarder=forwarder,
         )
         await h(_fake_notif("ResourceListChangedNotification"))
@@ -198,7 +221,9 @@ async def test_handler_logs_transport_exception_force_fsync(tmp_path: Path) -> N
     audit_path = tmp_path / "a.jsonl"
     with AuditLog(path=audit_path, hmac_key=b"k" * 32) as audit:
         h = make_message_handler(
-            upstream_name="x", audit=audit, session_id="s",
+            upstream_name="x",
+            audit=audit,
+            session_id="s",
             forwarder=DownstreamForwarder(),
         )
         await h(ConnectionResetError("upstream pipe broken"))
@@ -214,7 +239,9 @@ async def test_handler_never_raises_on_garbage(tmp_path: Path) -> None:
     Random bad input must NOT propagate out."""
     with AuditLog(path=tmp_path / "a.jsonl", hmac_key=b"k" * 32) as audit:
         h = make_message_handler(
-            upstream_name="x", audit=audit, session_id="s",
+            upstream_name="x",
+            audit=audit,
+            session_id="s",
             forwarder=DownstreamForwarder(),
         )
         # None, empty, raw dict, object without .root - all must be no-op.
@@ -232,7 +259,9 @@ async def test_handler_only_invalidates_on_tools_list_changed(tmp_path: Path) ->
     invalidator = _RecordingInvalidator()
     with AuditLog(path=tmp_path / "a.jsonl", hmac_key=b"k" * 32) as audit:
         h = make_message_handler(
-            upstream_name="x", audit=audit, session_id="s",
+            upstream_name="x",
+            audit=audit,
+            session_id="s",
             forwarder=_RecordingForwarder(),
             invalidator=invalidator,
         )
@@ -253,7 +282,9 @@ async def test_forwarder_no_session_is_silent_noop(tmp_path: Path) -> None:
     assert forwarder.has_session is False
     with AuditLog(path=audit_path, hmac_key=b"k" * 32) as audit:
         h = make_message_handler(
-            upstream_name="x", audit=audit, session_id="s",
+            upstream_name="x",
+            audit=audit,
+            session_id="s",
             forwarder=forwarder,
         )
         await h(_fake_notif("ToolListChangedNotification"))

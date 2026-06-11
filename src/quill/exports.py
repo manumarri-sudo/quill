@@ -22,6 +22,7 @@ a parallel Markdown the customer can paste into Notion / Google Docs.
 Zero new dependencies. PDF-as-binary is deferred to v0.3 with optional
 [pdf] extra.
 """
+
 from __future__ import annotations
 
 import html as _html
@@ -61,8 +62,8 @@ else:  # pragma: no cover
 class Control:
     """One row in a compliance evidence table."""
 
-    standard: str        # "EU AI Act Art. 14", "AIUC-1 Security", etc.
-    code: str            # "ART-14-IN-LOOP", "AIUC-SEC-01"
+    standard: str  # "EU AI Act Art. 14", "AIUC-1 Security", etc.
+    code: str  # "ART-14-IN-LOOP", "AIUC-SEC-01"
     title: str
     description: str
     quill_event_types: tuple[str, ...]  # which audit events satisfy this
@@ -122,7 +123,7 @@ class ExportReport:
     window_start: str
     window_end: str
     total_events: int
-    chain_status: str            # "intact" | "broken: N of M" | "empty"
+    chain_status: str  # "intact" | "broken: N of M" | "empty"
     chain_failures: list[int]
     by_control: list[ControlEvidence]
     kpis: dict[str, Any]
@@ -260,9 +261,20 @@ def _redact_for_export(evt: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(p, Mapping):
         p = {}
     safe_payload: dict[str, Any] = {}
-    for k in ("tool_name", "by", "reason", "permission", "risk",
-              "approve_token", "what", "why", "try_instead",
-              "to_agent_id", "from_session_id", "kind"):
+    for k in (
+        "tool_name",
+        "by",
+        "reason",
+        "permission",
+        "risk",
+        "approve_token",
+        "what",
+        "why",
+        "try_instead",
+        "to_agent_id",
+        "from_session_id",
+        "kind",
+    ):
         v = p.get(k)
         if isinstance(v, (str, int, float, bool)) and v != "":
             safe_payload[k] = v
@@ -300,8 +312,7 @@ def render_markdown(r: ExportReport) -> str:
     add(f"- Total events: {k['total_events']}")
     add(f"- Tool attempts: {k['tool_attempts']}")
     add(f"- Allowed: {k['verdict_allowed']}")
-    add(f"- Blocked: {k['verdict_blocked']}  ·  Scope-violation: "
-        f"{k['verdict_scope_violation']}")
+    add(f"- Blocked: {k['verdict_blocked']}  ·  Scope-violation: {k['verdict_scope_violation']}")
     add(f"- Asked human: {k['verdict_asked']}")
     add(f"- **Trust Delivery Rate (TDR)**: {k['TDR']}")
     add(f"- **Intervention rate**: {k['intervention_rate']}")
@@ -323,8 +334,7 @@ def render_markdown(r: ExportReport) -> str:
     for ce in r.by_control:
         c = ce.control
         status_md = "✓ satisfied" if ce.status == "satisfied" else "- no evidence"
-        add(f"| {c.standard} | `{c.code}` | {c.title} | {status_md} | "
-            f"{ce.matching_events} |")
+        add(f"| {c.standard} | `{c.code}` | {c.title} | {status_md} | {ce.matching_events} |")
     add("")
 
     # Per-control detail
@@ -334,8 +344,7 @@ def render_markdown(r: ExportReport) -> str:
         c = ce.control
         add(f"### {c.code} - {c.title}")
         add("")
-        add(f"**Standard**: {c.standard}  ·  **Matching events**: "
-            f"{ce.matching_events}")
+        add(f"**Standard**: {c.standard}  ·  **Matching events**: {ce.matching_events}")
         add("")
         add(c.description)
         add("")
@@ -352,15 +361,17 @@ def render_markdown(r: ExportReport) -> str:
 
     add("## Tamper-evidence")
     add("")
-    add(f"Quill's audit log is HMAC-SHA256-chained per entry. Verification "
-        f"status at export time: **{r.chain_status}**.")
+    add(
+        f"Quill's audit log is HMAC-SHA256-chained per entry. Verification "
+        f"status at export time: **{r.chain_status}**."
+    )
     if r.chain_failures:
         add("")
         add(f"Failed line numbers (first 20): {r.chain_failures[:20]}")
     add("")
     add(
-        "EU AI Act Article 12 requires logs to be \"automatically generated "
-        "throughout the lifetime\" of high-risk AI systems and retained for "
+        'EU AI Act Article 12 requires logs to be "automatically generated '
+        'throughout the lifetime" of high-risk AI systems and retained for '
         "≥6 months. Quill's append-only JSONL with HMAC chaining and "
         "fcntl.flock cross-process serialization satisfies the tamper-"
         "resistance and automatic-generation requirements; retention is the "
@@ -442,10 +453,8 @@ def render_html(r: ExportReport) -> str:
     add(f"<strong>Source log:</strong> <code>{e(r.log_path)}</code> &middot; ")
     add(f"<strong>Standards:</strong> {e(', '.join(r.standards))}<br>")
     if r.window_start:
-        add(f"<strong>Window:</strong> {e(r.window_start[:19])} → "
-            f"{e(r.window_end[:19])} &middot; ")
-    add(f"<strong>Chain:</strong> "
-        f"<span class='{chain_class()}'>{e(r.chain_status)}</span>")
+        add(f"<strong>Window:</strong> {e(r.window_start[:19])} → {e(r.window_end[:19])} &middot; ")
+    add(f"<strong>Chain:</strong> <span class='{chain_class()}'>{e(r.chain_status)}</span>")
     add("</p>")
 
     add("<h2>Executive summary</h2>")
@@ -469,8 +478,7 @@ def render_html(r: ExportReport) -> str:
 
     add("<h2>Control mapping</h2>")
     add("<table><thead><tr>")
-    add("<th>Standard</th><th>Control</th><th>Title</th>"
-        "<th>Status</th><th>Events</th>")
+    add("<th>Standard</th><th>Control</th><th>Title</th><th>Status</th><th>Events</th>")
     add("</tr></thead><tbody>")
     for ce in r.by_control:
         c = ce.control
@@ -488,11 +496,15 @@ def render_html(r: ExportReport) -> str:
     for ce in r.by_control:
         c = ce.control
         add(f"<h3>{e(c.code)} - {e(c.title)}</h3>")
-        add(f"<p class='meta'><strong>Standard:</strong> {e(c.standard)} "
-            f"&middot; <strong>Matching events:</strong> {ce.matching_events}</p>")
+        add(
+            f"<p class='meta'><strong>Standard:</strong> {e(c.standard)} "
+            f"&middot; <strong>Matching events:</strong> {ce.matching_events}</p>"
+        )
         add(f"<p>{e(c.description)}</p>")
-        add("<p><strong>Quill event types:</strong> "
-            f"<code>{e(', '.join(c.quill_event_types))}</code></p>")
+        add(
+            "<p><strong>Quill event types:</strong> "
+            f"<code>{e(', '.join(c.quill_event_types))}</code></p>"
+        )
         if ce.sample_events:
             add("<p>Sample evidence (redacted):</p>")
             add("<pre>")
@@ -501,15 +513,16 @@ def render_html(r: ExportReport) -> str:
             add("</pre>")
 
     add("<h2>Tamper-evidence</h2>")
-    add(f"<p>Quill's audit log is HMAC-SHA256-chained per entry. "
-        f"Verification status at export time: <span class='{chain_class()}'>"
-        f"{e(r.chain_status)}</span>.</p>")
-    if r.chain_failures:
-        add(f"<p>Failed line numbers (first 20): "
-            f"<code>{e(str(r.chain_failures[:20]))}</code></p>")
     add(
-        "<p>EU AI Act Article 12 requires logs to be \"automatically generated "
-        "throughout the lifetime\" of high-risk AI systems and retained ≥6 "
+        f"<p>Quill's audit log is HMAC-SHA256-chained per entry. "
+        f"Verification status at export time: <span class='{chain_class()}'>"
+        f"{e(r.chain_status)}</span>.</p>"
+    )
+    if r.chain_failures:
+        add(f"<p>Failed line numbers (first 20): <code>{e(str(r.chain_failures[:20]))}</code></p>")
+    add(
+        '<p>EU AI Act Article 12 requires logs to be "automatically generated '
+        'throughout the lifetime" of high-risk AI systems and retained ≥6 '
         "months. Quill's append-only JSONL with HMAC chaining and "
         "<code>fcntl.flock</code> cross-process serialization satisfies the "
         "tamper-resistance and automatic-generation requirements; retention is "
@@ -517,7 +530,9 @@ def render_html(r: ExportReport) -> str:
         "mode <code>0o600</code>).</p>",
     )
 
-    add("<footer>Generated by Quill - the pause button between AI agents and "
-        "the things you can't undo. <code>github.com/manumarri-sudo/quill</code></footer>")
+    add(
+        "<footer>Generated by Quill - the pause button between AI agents and "
+        "the things you can't undo. <code>github.com/manumarri-sudo/quill</code></footer>"
+    )
     add("</body></html>")
     return "\n".join(out)

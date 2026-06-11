@@ -70,6 +70,7 @@ Per [the Cursor forum](https://forum.cursor.com/t/beforeshellexecution-hook-perm
 the user has enabled Auto-Run mode. Quill returns `"deny"` (not `"ask"`)
 on HIGH-risk calls when running under Cursor so the gate isn't bypassed.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -99,7 +100,7 @@ from quill.policy import Risk
 _EVENT_TOOL_NAME: dict[str, str] = {
     "beforeShellExecution": "Bash",
     "beforeReadFile": "Read",
-    "beforeMCPExecution": "",   # use payload's tool_name verbatim
+    "beforeMCPExecution": "",  # use payload's tool_name verbatim
     # Cursor's other events (afterFileEdit, beforeSubmitPrompt, etc.) are
     # observability hooks, not gate hooks - Quill ignores them by passing
     # through `allow`.
@@ -158,7 +159,9 @@ def decide(tool_name: str, tool_input: Mapping[str, Any]) -> HookDecision:
             reason=body + " · approve via `quill approve <token>` to release",
             risk=risk,
             audit_event_type="verdict.blocked",
-            what=base.what, why=base.why, try_instead=base.try_instead,
+            what=base.what,
+            why=base.why,
+            try_instead=base.try_instead,
         )
     return base
 
@@ -196,6 +199,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     if session_id and session_id != "cursor":
         with contextlib.suppress(Exception):
             from quill.adapters.claude_code import _track_session
+
             _, _is_new_sub, is_first_seen = _track_session(
                 transcript_path=session_id,  # cursor has 1:1 conv:session
                 session_id=session_id,
@@ -227,6 +231,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     ):
         with contextlib.suppress(Exception):
             from quill.paths import is_trusted_cwd
+
             if is_trusted_cwd(cwd):
                 decision = HookDecision(
                     permission="allow",
@@ -243,6 +248,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     if decision.permission != "allow":
         with contextlib.suppress(Exception):
             from quill.approvals import ApprovalStore
+
             store = ApprovalStore.load()
             consumed = store.consume(tool_name, dict(tool_input))
             if consumed is not None:
@@ -261,14 +267,11 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     # lethal trifecta (untrusted input + private data + exfil vector)
     # gets escalated to DENY. Skip if the user already approved this
     # exact call out-of-band. Mirrors `claude_code.py` lines 511-537.
-    if (
-        decision.permission == "allow"
-        and not approval_token_used
-        and session_id
-    ):
+    if decision.permission == "allow" and not approval_token_used and session_id:
         with contextlib.suppress(Exception):
             from quill.adapters.claude_code import _taint_state_for
             from quill.taint import would_close_trifecta
+
             current = _taint_state_for(session_id)
             if would_close_trifecta(current, tool_name, tool_input):
                 why = (
@@ -311,9 +314,11 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
             if not issued_token and decision.permission != "allow":
                 with contextlib.suppress(Exception):
                     from quill.approvals import ApprovalStore
+
                     store = ApprovalStore.load()
                     ap = store.issue(
-                        tool_name, dict(tool_input),
+                        tool_name,
+                        dict(tool_input),
                         reason=decision.why or decision.reason,
                     )
                     issued_token = ap.token
@@ -371,6 +376,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     _taint_state_for,
                 )
                 from quill.taint import update_for_call
+
                 taint_state = _taint_state_for(session_id)
                 _, flipped = update_for_call(taint_state, tool_name, tool_input)
                 if flipped:
@@ -397,6 +403,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
         with contextlib.suppress(Exception):
             from quill import learning
             from quill.learn import _normalize_block_reason
+
             head = _normalize_block_reason(original_decision_reason) or original_decision_reason
             pattern_id = f"{tool_name}:{head}"[:80]
             verdict_label = "approve" if approval_token_used else "deny"
@@ -410,8 +417,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
         response["agent_message"] = decision.reason
         if decision.try_instead:
             response["user_message"] = (
-                f"Quill blocked: {decision.what or tool_name}. "
-                f"Try: {decision.try_instead}"
+                f"Quill blocked: {decision.what or tool_name}. Try: {decision.try_instead}"
             )
         else:
             response["user_message"] = f"Quill blocked: {decision.reason}"
@@ -493,6 +499,7 @@ def main() -> int:
     if project_cfg_path is not None:
         with contextlib.suppress(ConfigError, OSError, ValueError):
             from quill.config import load_config
+
             load_config(project_cfg_path)
 
     log_path = log_path or default_audit_path()
@@ -500,9 +507,11 @@ def main() -> int:
     # Lazily ensure the dashboard daemon is alive (parity with Claude Code
     # adapter). Skippable via QUILL_NO_AUTO_WATCH for power users / CI.
     import os
+
     if not os.environ.get("QUILL_NO_AUTO_WATCH"):
         with contextlib.suppress(Exception):
             from quill import watch as _watch
+
             _watch.ensure_daemon(log_path, open_browser=False)
 
     try:

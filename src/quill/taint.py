@@ -17,6 +17,7 @@ close) is the 1-month scope.
 Heuristic: the classification of a tool call is mechanical, not LLM-driven.
 Falsy tool names get classified as nothing.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -67,34 +68,62 @@ class TaintState:
 #   - gmail.read / slack.read                - inbox content (anyone can send)
 # What was removed:
 #   - filesystem.read_file                   - local FS, not adversary-controlled
-_UNTRUSTED_TOOLS = frozenset({
-    "WebFetch", "WebSearch", "fetch",
-    "browser.read", "browser.navigate",
-    "gmail.read_message", "slack.read_channel",
-})
+_UNTRUSTED_TOOLS = frozenset(
+    {
+        "WebFetch",
+        "WebSearch",
+        "fetch",
+        "browser.read",
+        "browser.navigate",
+        "gmail.read_message",
+        "slack.read_channel",
+    }
+)
 
 _UNTRUSTED_BASH_PATTERNS = (
-    "curl ", "wget ", "git clone ",
-    "cat http", "less http",
+    "curl ",
+    "wget ",
+    "git clone ",
+    "cat http",
+    "less http",
 )
 
 _PRIVATE_PATH_PATTERNS = (
-    ".env", "secrets", "credentials", "private_key", "id_rsa", "id_ed25519",
-    ".aws/", ".ssh/", ".gnupg/",
-    "/etc/passwd", "/etc/shadow",
+    ".env",
+    "secrets",
+    "credentials",
+    "private_key",
+    "id_rsa",
+    "id_ed25519",
+    ".aws/",
+    ".ssh/",
+    ".gnupg/",
+    "/etc/passwd",
+    "/etc/shadow",
 )
 
-_EXFIL_TOOLS = frozenset({
-    "WebFetch",                # outbound HTTP
-    "gmail.send", "slack.send_message", "discord.send",
-    "github.create_pr", "github.create_issue",
-    "stripe.create_charge", "stripe.create_refund",
-})
+_EXFIL_TOOLS = frozenset(
+    {
+        "WebFetch",  # outbound HTTP
+        "gmail.send",
+        "slack.send_message",
+        "discord.send",
+        "github.create_pr",
+        "github.create_issue",
+        "stripe.create_charge",
+        "stripe.create_refund",
+    }
+)
 
 _EXFIL_BASH_PATTERNS = (
-    "curl -X POST", "curl --data", "curl -d ",
-    "git push", "scp ", "rsync ",
-    "aws s3 cp", "gsutil cp",
+    "curl -X POST",
+    "curl --data",
+    "curl -d ",
+    "git push",
+    "scp ",
+    "rsync ",
+    "aws s3 cp",
+    "gsutil cp",
 )
 
 
@@ -184,11 +213,13 @@ def update_for_call(
         flipped.append("can_exfiltrate")
 
     if flipped:
-        state.provenance.append({
-            "tool_name": tool_name,
-            "flipped": flipped,
-            "caused_by_event_mac": event_mac,
-        })
+        state.provenance.append(
+            {
+                "tool_name": tool_name,
+                "flipped": flipped,
+                "caused_by_event_mac": event_mac,
+            }
+        )
     return state, flipped
 
 

@@ -9,6 +9,7 @@ The audit log is the single source of truth: we never need to share memory
 with the running quill serve process. Whoever has read access to the log
 can render the tree.
 """
+
 from __future__ import annotations
 
 import json
@@ -176,7 +177,9 @@ def _render(state: _State) -> Panel:
         Text(""),
         rich_tree,
     )
-    title = f"[bold]quill[/bold]    [dim]session {root.id}[/dim]    [dim]@ {state.last_ts[11:19]}[/dim]"
+    title = (
+        f"[bold]quill[/bold]    [dim]session {root.id}[/dim]    [dim]@ {state.last_ts[11:19]}[/dim]"
+    )
     return Panel(body, title=title, border_style="blue")
 
 

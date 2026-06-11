@@ -14,6 +14,7 @@ the gate, you can breathe.
 
 License: MIT
 """
+
 from quill._version import __version__
 from quill.audit import AuditLog
 from quill.errors import (

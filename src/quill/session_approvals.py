@@ -15,6 +15,7 @@ tmp-rename writes, mode 0o600. Per-file 24h hard TTL so an interrupted
 session can't leave a forever-live approval; the session_id rotates
 anyway when Claude Code restarts.
 """
+
 from __future__ import annotations
 
 import contextlib

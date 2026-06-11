@@ -4,6 +4,7 @@ When the user explicitly opts out of friction via Claude Code's bypass flag,
 Quill should respect that intent: silently log high-risk events instead of
 asking, but never soften the critical class. The bright line never moves.
 """
+
 from __future__ import annotations
 
 from quill.adapters.claude_code import _detect_bypass_mode, classify_event
@@ -49,7 +50,9 @@ def test_critical_still_blocks_in_bypass_mode():
     """The bright line never softens. rm -rf, force-push, DROP TABLE, etc.
     all still gate even when the user has explicitly opted out of friction."""
     risk, reason, _ = classify_event(
-        "Bash", {"command": "rm -rf /"}, bypass_mode=True,
+        "Bash",
+        {"command": "rm -rf /"},
+        bypass_mode=True,
     )
     assert risk is Risk.CRITICAL
     assert "rm -rf" in reason or "critical" in reason.lower()
@@ -57,14 +60,18 @@ def test_critical_still_blocks_in_bypass_mode():
 
 def test_critical_force_push_still_blocks(monkeypatch):
     risk, _, _ = classify_event(
-        "Bash", {"command": "git push --force origin main"}, bypass_mode=True,
+        "Bash",
+        {"command": "git push --force origin main"},
+        bypass_mode=True,
     )
     assert risk is Risk.CRITICAL
 
 
 def test_critical_sudo_rm_still_blocks():
     risk, _, _ = classify_event(
-        "Bash", {"command": "sudo rm -rf /etc"}, bypass_mode=True,
+        "Bash",
+        {"command": "sudo rm -rf /etc"},
+        bypass_mode=True,
     )
     assert risk is Risk.CRITICAL
 
@@ -111,10 +118,14 @@ def test_secret_in_write_still_blocks_under_bypass():
 def test_low_risk_unchanged_under_bypass():
     """Read tools are low-risk in both modes; bypass shouldn't alter behavior."""
     risk_normal, _, _ = classify_event(
-        "Bash", {"command": "ls"}, bypass_mode=False,
+        "Bash",
+        {"command": "ls"},
+        bypass_mode=False,
     )
     risk_bypass, _, _ = classify_event(
-        "Bash", {"command": "ls"}, bypass_mode=True,
+        "Bash",
+        {"command": "ls"},
+        bypass_mode=True,
     )
     assert risk_normal == risk_bypass
     assert risk_normal is Risk.LOW

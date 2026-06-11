@@ -18,6 +18,7 @@ Four invariants:
      AND tails recent suggestions; with `--no-suggestions` it omits
      the suggestion stream; gracefully prints when no log exists.
 """
+
 from __future__ import annotations
 
 import json
@@ -57,30 +58,53 @@ def _seed_suggestions(tmp_path: Path, items: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 # Test 1: list shows newest-first, deduplicated.
 
+
 def test_suggestions_list_shows_newest_first_and_dedups(
-    runner: CliRunner, tmp_path: Path, monkeypatch,
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     # Same loosening_candidate fired three times across the week. The
     # `list` view must show it once (dedup by type+pattern_id) and
     # newest first.
     base_ts = time.time()
-    _seed_suggestions(tmp_path, [
-        {"type": "loosening_candidate", "pattern_id": "Bash:curl-sh",
-         "evidence": "approval 70% n=20", "proposal": "Review for override; "
-         "never auto-applied", "ts": base_ts - 86400 * 2},
-        {"type": "tightening_auto_applied", "pattern_id": "Bash:rm -rf",
-         "evidence": "5 consecutive denies", "applied_change": "X",
-         "ts": base_ts - 86400},
-        {"type": "loosening_candidate", "pattern_id": "Bash:curl-sh",
-         "evidence": "approval 75% n=25", "proposal": "Review for override; "
-         "never auto-applied", "ts": base_ts - 3600},
-        {"type": "loosening_candidate", "pattern_id": "Bash:curl-sh",
-         "evidence": "approval 80% n=30", "proposal": "Review for override; "
-         "never auto-applied", "ts": base_ts},
-    ])
+    _seed_suggestions(
+        tmp_path,
+        [
+            {
+                "type": "loosening_candidate",
+                "pattern_id": "Bash:curl-sh",
+                "evidence": "approval 70% n=20",
+                "proposal": "Review for override; never auto-applied",
+                "ts": base_ts - 86400 * 2,
+            },
+            {
+                "type": "tightening_auto_applied",
+                "pattern_id": "Bash:rm -rf",
+                "evidence": "5 consecutive denies",
+                "applied_change": "X",
+                "ts": base_ts - 86400,
+            },
+            {
+                "type": "loosening_candidate",
+                "pattern_id": "Bash:curl-sh",
+                "evidence": "approval 75% n=25",
+                "proposal": "Review for override; never auto-applied",
+                "ts": base_ts - 3600,
+            },
+            {
+                "type": "loosening_candidate",
+                "pattern_id": "Bash:curl-sh",
+                "evidence": "approval 80% n=30",
+                "proposal": "Review for override; never auto-applied",
+                "ts": base_ts,
+            },
+        ],
+    )
 
     from quill.cli import app
+
     result = runner.invoke(app, ["suggestions", "list"])
     assert result.exit_code == 0, result.stderr
     out = result.output
@@ -99,24 +123,33 @@ def test_suggestions_list_shows_newest_first_and_dedups(
 # ---------------------------------------------------------------------------
 # Test 2: promote writes a TTL'd override block + audits the promotion.
 
+
 def test_suggestions_promote_writes_override_block_with_ttl(
-    runner: CliRunner, tmp_path: Path, monkeypatch,
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     base_ts = time.time()
-    _seed_suggestions(tmp_path, [
-        {"type": "loosening_candidate", "pattern_id": "Bash:curl-sh",
-         "evidence": "approval 75% (Wilson 95% lower 0.65, n=22)",
-         "proposal": "Review; promote with quill suggestions promote",
-         "ts": base_ts},
-    ])
+    _seed_suggestions(
+        tmp_path,
+        [
+            {
+                "type": "loosening_candidate",
+                "pattern_id": "Bash:curl-sh",
+                "evidence": "approval 75% (Wilson 95% lower 0.65, n=22)",
+                "proposal": "Review; promote with quill suggestions promote",
+                "ts": base_ts,
+            },
+        ],
+    )
 
     from quill.cli import app
+
     # Promote with explicit TTL.
     result = runner.invoke(
         app,
-        ["suggestions", "promote",
-         "loosening_candidate:Bash:curl-sh", "--ttl-days", "14"],
+        ["suggestions", "promote", "loosening_candidate:Bash:curl-sh", "--ttl-days", "14"],
     )
     assert result.exit_code == 0, (result.output, result.stderr)
 
@@ -144,20 +177,31 @@ def test_suggestions_promote_writes_override_block_with_ttl(
 # ---------------------------------------------------------------------------
 # Test 3: dismiss appends an audit entry and hides the suggestion.
 
+
 def test_suggestions_dismiss_is_append_only_and_hides_the_suggestion(
-    runner: CliRunner, tmp_path: Path, monkeypatch,
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     base_ts = time.time()
-    _seed_suggestions(tmp_path, [
-        {"type": "loosening_candidate", "pattern_id": "Bash:noisy",
-         "evidence": "approval 90% n=50", "proposal": "Review",
-         "ts": base_ts},
-    ])
+    _seed_suggestions(
+        tmp_path,
+        [
+            {
+                "type": "loosening_candidate",
+                "pattern_id": "Bash:noisy",
+                "evidence": "approval 90% n=50",
+                "proposal": "Review",
+                "ts": base_ts,
+            },
+        ],
+    )
     sug_path = tmp_path / "suggestions.jsonl"
     original = sug_path.read_text()
 
     from quill.cli import app
+
     key = "loosening_candidate:Bash:noisy"
     result = runner.invoke(app, ["suggestions", "dismiss", key])
     assert result.exit_code == 0
@@ -165,22 +209,25 @@ def test_suggestions_dismiss_is_append_only_and_hides_the_suggestion(
     # Original entries untouched (append-only invariant).
     new_body = sug_path.read_text()
     assert new_body.startswith(original), (
-        "dismiss must NOT rewrite suggestions.jsonl in place; "
-        "it must append a `dismissed` row"
+        "dismiss must NOT rewrite suggestions.jsonl in place; it must append a `dismissed` row"
     )
     # New tail entry is a dismissal audit.
-    extra_lines = new_body[len(original):].splitlines()
+    extra_lines = new_body[len(original) :].splitlines()
     extra = [json.loads(line) for line in extra_lines if line.strip()]
-    assert any(e.get("type") == "dismissed" and e.get("dismissed_key") == key
-               for e in extra), f"extra entries: {extra}"
+    assert any(e.get("type") == "dismissed" and e.get("dismissed_key") == key for e in extra), (
+        f"extra entries: {extra}"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Test 4: log shows recent learning + suggestions; --no-suggestions
 # omits suggestion stream; empty state prints a friendly message.
 
+
 def test_log_streams_recent_activity_and_handles_empty_state(
-    runner: CliRunner, tmp_path: Path, monkeypatch,
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     from quill.cli import app

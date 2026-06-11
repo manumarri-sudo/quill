@@ -4,6 +4,7 @@ The classifier is the most security-load-bearing piece: if a dangerous
 action escapes classification, the gate doesn't fire. These tests pin the
 defaults.
 """
+
 from __future__ import annotations
 
 import pytest

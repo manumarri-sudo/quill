@@ -6,6 +6,7 @@ so the same Python interpreter that installed the package runs the
 detached dashboard process. This module just delegates to the typer
 app defined in cli.py.
 """
+
 from quill.cli import app
 
 if __name__ == "__main__":

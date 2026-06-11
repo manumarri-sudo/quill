@@ -42,6 +42,7 @@ This is the framework end-to-end - actively-used permissions stay
 healthy, dormant ones lose force, and the audit log records every
 decay-driven downgrade.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -54,20 +55,21 @@ from typing import Any, Final
 # Default decay windows, tunable via config. HIGH/CRITICAL overrides
 # decay faster because they're more dangerous to leave loose.
 DEFAULT_WINDOWS: Final[dict[str, int]] = {
-    "policy.critical_to_low":     14,   # downgrading critical to low: 2 weeks
-    "policy.critical_to_medium":  30,
-    "policy.critical_to_high":    60,
-    "policy.high_to_low":         30,
-    "policy.high_to_medium":      60,
-    "policy.medium_to_low":       90,
-    "policy.default":             60,   # any other override
-    "scope.default":              90,   # scope grants
-    "session_ack.default":        1,    # one-day trust after a y/N
+    "policy.critical_to_low": 14,  # downgrading critical to low: 2 weeks
+    "policy.critical_to_medium": 30,
+    "policy.critical_to_high": 60,
+    "policy.high_to_low": 30,
+    "policy.high_to_medium": 60,
+    "policy.medium_to_low": 90,
+    "policy.default": 60,  # any other override
+    "scope.default": 90,  # scope grants
+    "session_ack.default": 1,  # one-day trust after a y/N
 }
 
 
 def _path() -> Path:
     from quill.paths import default_path
+
     return default_path("permissions.json", env_override="QUILL_DECAY_FILE")
 
 
@@ -130,6 +132,7 @@ class Permission:
         # Ceil the remaining fractional days so a permission with 0.4 days
         # left still displays as "1 day left" (not "0", which reads as "decayed").
         from math import ceil
+
         remaining = self.decay_after_days - (self.age_seconds / 86400.0)
         return max(0, ceil(remaining))
 
@@ -222,11 +225,16 @@ class DecayStore:
         if existing is None:
             window = decay_after_days if decay_after_days is not None else _default_window(kind)
             existing = Permission(
-                kind=kind, pattern=pattern,
-                granted_at=now, last_reaffirmed=now,
+                kind=kind,
+                pattern=pattern,
+                granted_at=now,
+                last_reaffirmed=now,
                 decay_after_days=window,
-                decay_action="reaffirm", decay_owner="user",
-                use_count=1, last_use=now, notes=notes,
+                decay_action="reaffirm",
+                decay_owner="user",
+                use_count=1,
+                last_use=now,
+                notes=notes,
             )
             self.permissions[key] = existing
             self.save()

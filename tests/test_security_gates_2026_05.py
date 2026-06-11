@@ -12,6 +12,7 @@ late-April / early-May 2026:
   5. Quote-aware shell classifier (so commit messages and echo literals
      don't trip CRITICAL on `TRUNCATE`/`sudo`/`rm -rf` inside strings)
 """
+
 from __future__ import annotations
 
 from quill.policy import (
@@ -81,7 +82,7 @@ def test_truncate_in_commit_message_is_not_critical() -> None:
     c = classify_command(
         "git commit -m 'fix: removed TRUNCATE TABLE from migration'",
     )
-    assert c.risk is Risk.HIGH        # git commit itself is HIGH
+    assert c.risk is Risk.HIGH  # git commit itself is HIGH
     assert "TRUNCATE" not in c.reason
 
 
@@ -132,7 +133,7 @@ def test_delete_from_with_where_on_newline_not_critical() -> None:
     because the regex was not DOTALL. We keep this test to document the
     expected behaviour: it's MEDIUM (uncategorised) at minimum, never
     CRITICAL just because the WHERE is on the next line."""
-    c = classify_command("DELETE FROM users\nWHERE id=1")
+    classify_command("DELETE FROM users\nWHERE id=1")
     # The pattern still doesn't use DOTALL - the audit fix is separate. The
     # test pins that as long as quote-masking is in play, an INTENTIONAL
     # heredoc form is recognised:
@@ -165,7 +166,8 @@ def test_scope_matches_full_resource() -> None:
     """The legitimate path: arg contains the FULL resource id."""
     s = Scope.parse("payments:refund:customer:c_8e4f")
     assert s.matches_tool(
-        "payments.refund", args={"customer_id": "c_8e4f"},
+        "payments.refund",
+        args={"customer_id": "c_8e4f"},
     )
 
 
@@ -219,8 +221,7 @@ def test_zero_width_chars_flagged_high_not_critical() -> None:
     # present at HIGH.
     r = scan(tool)
     assert r.safe is not False or any(
-        f.category == "invisible_unicode" and f.severity == "high"
-        for f in r.findings
+        f.category == "invisible_unicode" and f.severity == "high" for f in r.findings
     )
 
 
@@ -262,11 +263,8 @@ def test_single_imperative_is_high_not_critical() -> None:
     r = scan(tool)
     # Single phrase → HIGH severity, still considered safe (not blocked)
     # by `safe = no critical`. Caller surfaces as warning.
-    assert r.safe   # safe=True because no critical-severity finding
-    assert any(
-        f.category == "injection_phrase" and f.severity == "high"
-        for f in r.findings
-    )
+    assert r.safe  # safe=True because no critical-severity finding
+    assert any(f.category == "injection_phrase" and f.severity == "high" for f in r.findings)
 
 
 def test_system_prompt_tags_flagged() -> None:

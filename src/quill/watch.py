@@ -17,6 +17,7 @@ contained HTML page. Cross-platform.
 Privacy: the dashboard never leaves localhost. The HTML page is served
 from the same process; nothing is fetched from the public internet.
 """
+
 from __future__ import annotations
 
 import http.server
@@ -41,6 +42,7 @@ DEFAULT_PORT = 9099
 
 def _pid_file() -> Path:
     from quill.paths import default_path
+
     return default_path("watch.pid", env_override="QUILL_WATCH_PID")
 
 
@@ -168,7 +170,8 @@ def reap_orphans() -> list[tuple[int, str]]:
     try:
         out = subprocess.check_output(
             ["pgrep", "-fl", r"quill (watch|tree)"],
-            text=True, stderr=subprocess.DEVNULL,
+            text=True,
+            stderr=subprocess.DEVNULL,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return killed
@@ -212,9 +215,8 @@ def reap_orphans() -> list[tuple[int, str]]:
             if _terminate_then_kill(pid):
                 killed.append((pid, f"duplicate daemon (tracked is {keep_pid})"))
         elif "tree --live" in cmd:
-            if log_missing:
-                if _terminate_then_kill(pid):
-                    killed.append((pid, f"stale tree (log gone: {log_arg})"))
+            if log_missing and _terminate_then_kill(pid):
+                killed.append((pid, f"stale tree (log gone: {log_arg})"))
 
     # Sweep stale pid file if its target died via this reap.
     pid_in_file, _ = (lambda: (None, None))()
@@ -250,10 +252,15 @@ def ensure_daemon(
 
     # Spawn a detached child running `quill watch --daemon-child`.
     cmd = [
-        sys.executable, "-m", "quill", "watch",
+        sys.executable,
+        "-m",
+        "quill",
+        "watch",
         "--daemon-child",
-        "--port", str(port),
-        "--log", str(log_path),
+        "--port",
+        str(port),
+        "--log",
+        str(log_path),
     ]
     if not open_browser:
         cmd.append("--no-browser")
@@ -527,9 +534,9 @@ def _free_port(prefer: int) -> int:
 _BACKLOG_REPLAY = 50
 
 
-def _tail_events(log: Path, q: list[dict[str, Any]],
-                 lock: threading.Lock,
-                 stop: threading.Event) -> None:
+def _tail_events(
+    log: Path, q: list[dict[str, Any]], lock: threading.Lock, stop: threading.Event
+) -> None:
     """Append-only tail: yield each new line of the log as a parsed event.
 
     On startup, seeds `q` with the last `_BACKLOG_REPLAY` events so the SSE

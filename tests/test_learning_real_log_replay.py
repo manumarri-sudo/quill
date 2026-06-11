@@ -11,6 +11,7 @@ state-derivation is sound against the real distribution.
 
 The test is gated on the real log being present; skipped otherwise.
 """
+
 from __future__ import annotations
 
 import json
@@ -67,7 +68,8 @@ def _classify_event_to_learning_signal(evt: dict) -> tuple[str | None, str | Non
     reason="no real audit log to replay (run on the operator's machine)",
 )
 def test_replay_against_real_audit_log_matches_hand_derived_counts(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """The acid test: replay every learning signal from the real log,
     verify the resulting pattern_stats matches what a hand-derived
@@ -116,6 +118,7 @@ def test_replay_against_real_audit_log_matches_hand_derived_counts(
 
     # 3. Replay every event through post_decision_update.
     from quill.learning import load_stats, post_decision_update
+
     for evt in events:
         pattern_id, decision = _classify_event_to_learning_signal(evt)
         if pattern_id is None:
@@ -139,7 +142,9 @@ def test_replay_against_real_audit_log_matches_hand_derived_counts(
         exp_fires = exp_approves + exp_denies
         got = produced[pid]
         if (got.approvals, got.denies, got.fires) != (
-            exp_approves, exp_denies, exp_fires,
+            exp_approves,
+            exp_denies,
+            exp_fires,
         ):
             mismatches.append(
                 f"  {pid[:60]:60s} "
@@ -154,8 +159,7 @@ def test_replay_against_real_audit_log_matches_hand_derived_counts(
     # 5. Sanity: total fires count == total signal events.
     total_fires = sum(p.fires for p in produced.values())
     assert total_fires == n_signal_events, (
-        f"total fires recorded ({total_fires}) != signal events processed "
-        f"({n_signal_events})"
+        f"total fires recorded ({total_fires}) != signal events processed ({n_signal_events})"
     )
 
     # 6. The replay produced a healthy distribution (more than one

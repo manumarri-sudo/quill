@@ -5,6 +5,7 @@ real gate state: an agent running `quill off` must clear Touch ID when it's
 available, but the operator is never locked out of their own recovery hatch
 when biometry is unavailable.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -43,7 +44,8 @@ def test_blocks_when_touchid_fails(monkeypatch) -> None:
     monkeypatch.delenv("QUILL_SKIP_DISABLE_AUTH", raising=False)
     monkeypatch.setattr(touchid, "is_available", lambda: True)
     monkeypatch.setattr(
-        touchid, "authenticate",
+        touchid,
+        "authenticate",
         lambda **_k: touchid.TouchIDResult(False, "user_canceled"),
     )
     with pytest.raises(typer.Exit):
@@ -54,7 +56,8 @@ def test_passes_on_touchid_success(monkeypatch) -> None:
     monkeypatch.delenv("QUILL_SKIP_DISABLE_AUTH", raising=False)
     monkeypatch.setattr(touchid, "is_available", lambda: True)
     monkeypatch.setattr(
-        touchid, "authenticate",
+        touchid,
+        "authenticate",
         lambda **_k: touchid.TouchIDResult(True, "ok"),
     )
     _require_disable_auth(_Console())  # must not raise
@@ -63,10 +66,12 @@ def test_passes_on_touchid_success(monkeypatch) -> None:
 def test_pause_json_is_protected_in_sandbox() -> None:
     """The gate-off state file must be in the kernel-floor protected set."""
     from quill import sandbox
+
     files, _trees = sandbox.default_protected()
     assert any("pause.json" in f for f in files)
 
 
 def test_pause_json_is_in_adapter_gate_surface() -> None:
     from quill.adapters.claude_code import _GATE_CONFIG_SUFFIXES
+
     assert any("pause.json" in s for s in _GATE_CONFIG_SUFFIXES)

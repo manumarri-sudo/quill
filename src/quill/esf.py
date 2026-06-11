@@ -19,6 +19,7 @@ The protected paths are the SAME source of truth the Seatbelt floor uses
 (quill.sandbox.default_protected), so the two enforcement layers never
 drift apart.
 """
+
 from __future__ import annotations
 
 import json
@@ -52,6 +53,7 @@ def compile_ruleset() -> dict:
 
 def ruleset_path() -> Path:
     from quill.paths import default_path
+
     return default_path("esf-rules.json", env_override="QUILL_ESF_RULES")
 
 

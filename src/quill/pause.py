@@ -29,6 +29,7 @@ on the record.
 
 State file: $QUILL_HOME/pause.json (mode 0o600).
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -44,6 +45,7 @@ MAX_PAUSE_HOURS: float = 24.0
 
 def _state_path() -> Path:
     from quill.paths import default_path
+
     return default_path("pause.json", env_override="QUILL_PAUSE_FILE")
 
 

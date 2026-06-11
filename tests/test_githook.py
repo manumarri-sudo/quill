@@ -1,4 +1,5 @@
 """Tests for the prepare-commit-msg git hook integration."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -157,20 +158,25 @@ def test_prepare_commit_msg_appends_block_when_template_marker_absent(tmp_path):
     import json
 
     from quill import events as ev
+
     now = datetime.now(UTC).isoformat()
-    audit.write_text("\n".join(
-        json.dumps(e) for e in [
-            {"type": ev.SESSION_OPEN, "session_id": "ses_x", "ts": now, "payload": {}},
-            {
-                "type": ev.TOOL_ATTEMPTED,
-                "session_id": "ses_x",
-                "ts": now,
-                "payload": {"tool_name": "Edit", "args_preview": {"file_path": "src/x.py"}},
-            },
-            {"type": ev.VERDICT_ALLOWED, "session_id": "ses_x", "ts": now, "payload": {}},
-            {"type": ev.SESSION_CLOSE, "session_id": "ses_x", "ts": now, "payload": {}},
-        ]
-    ) + "\n")
+    audit.write_text(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                {"type": ev.SESSION_OPEN, "session_id": "ses_x", "ts": now, "payload": {}},
+                {
+                    "type": ev.TOOL_ATTEMPTED,
+                    "session_id": "ses_x",
+                    "ts": now,
+                    "payload": {"tool_name": "Edit", "args_preview": {"file_path": "src/x.py"}},
+                },
+                {"type": ev.VERDICT_ALLOWED, "session_id": "ses_x", "ts": now, "payload": {}},
+                {"type": ev.SESSION_CLOSE, "session_id": "ses_x", "ts": now, "payload": {}},
+            ]
+        )
+        + "\n"
+    )
     msg = tmp_path / "COMMIT_EDITMSG"
     msg.write_text("user wrote this commit message\n")
     rc = prepare_commit_msg(msg, log_path=audit)
@@ -204,6 +210,7 @@ def test_install_hook_creates_executable(tmp_path):
     assert "quill git-hook" in p.read_text()
     # Should be executable
     import os
+
     assert os.access(p, os.X_OK)
 
 
@@ -215,6 +222,7 @@ def test_install_hook_bakes_absolute_quill_binary_path(tmp_path):
     contents = p.read_text()
     # Look for an absolute path before `git-hook`. Match `/...quill git-hook`.
     import re
+
     m = re.search(r"exec\s+(\S+)\s+git-hook", contents)
     assert m is not None, f"no exec line found:\n{contents}"
     binary = m.group(1)

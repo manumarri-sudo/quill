@@ -14,6 +14,7 @@ full file paths from edits, never logs shell command bodies, never logs
 intent text verbatim. The journal is a record of *what was attempted
 and how it was gated*, not what was edited.
 """
+
 from __future__ import annotations
 
 import json
@@ -66,13 +67,23 @@ def _safe_str(x: Any) -> str:
 # journal (we still record that SOMETHING in that area was touched but
 # never name the filename). Match is exact for fixed names, prefix for
 # .env (covers .env, .env.local, .env.production, etc.).
-_SENSITIVE_SEGMENT_EXACT: frozenset[str] = frozenset({
-    ".aws", ".ssh", ".gnupg", ".gpg", ".password-store",
-    ".kube", ".docker", ".netrc",
-    ".config",  # too broad? often holds creds (gh, sentry, etc.) - be safe
-    ".credentials", "credentials",
-    ".secrets", "secrets",
-})
+_SENSITIVE_SEGMENT_EXACT: frozenset[str] = frozenset(
+    {
+        ".aws",
+        ".ssh",
+        ".gnupg",
+        ".gpg",
+        ".password-store",
+        ".kube",
+        ".docker",
+        ".netrc",
+        ".config",  # too broad? often holds creds (gh, sentry, etc.) - be safe
+        ".credentials",
+        "credentials",
+        ".secrets",
+        "secrets",
+    }
+)
 
 
 def _is_sensitive_segment(seg: str) -> bool:
@@ -148,7 +159,7 @@ def summarize_transcript(events: Iterable[Mapping[str, Any]]) -> JournalSummary:
                         # collapse to the same "/Users/<name>" prefix.
                         home = str(Path.home())
                         if p.startswith(home):
-                            p = p[len(home):].lstrip("/")
+                            p = p[len(home) :].lstrip("/")
                         parts = [seg for seg in Path(p).parts if seg not in ("/", "")]
                         # Privacy denylist: certain top-level segments name
                         # credentials directories. Logging "agentbrain/vault"
@@ -371,6 +382,7 @@ def _check_session_drift(session_id: str, cwd: str) -> None:
         return
     try:
         from quill.adapters.claude_code import _resolve_project_paths
+
         log_path, _ = _resolve_project_paths(cwd)
         if not log_path.exists():
             return
@@ -384,6 +396,7 @@ def _check_session_drift(session_id: str, cwd: str) -> None:
                 except json.JSONDecodeError:
                     continue
         from quill.learning import check_drift_for_session
+
         check_drift_for_session(events, session_id)
     except Exception:
         # Drift check is observational only; never block journal write.

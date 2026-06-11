@@ -8,6 +8,7 @@ Each check is independent, fast, and produces a one-line summary. No
 external network calls; the doctor never decides for the user, only
 shows the state and points at the fix.
 """
+
 from __future__ import annotations
 
 import json
@@ -39,9 +40,9 @@ class CheckResult:
     """One row of doctor output."""
 
     name: str
-    status: str         # PASS | WARN | FAIL (rich tags above)
+    status: str  # PASS | WARN | FAIL (rich tags above)
     detail: str
-    fix: str = ""       # one-line remediation hint shown on WARN/FAIL
+    fix: str = ""  # one-line remediation hint shown on WARN/FAIL
 
 
 @dataclass(slots=True)
@@ -69,19 +70,22 @@ def check_python_version() -> CheckResult:
     v = sys.version_info
     if (v.major, v.minor) < (3, 11):
         return CheckResult(
-            "python", FAIL,
+            "python",
+            FAIL,
             f"Python {v.major}.{v.minor}.{v.micro} (need >= 3.11)",
             fix="Upgrade Python to 3.11+ (recommended: 3.12 or 3.13).",
         )
     return CheckResult(
-        "python", PASS,
+        "python",
+        PASS,
         f"Python {v.major}.{v.minor}.{v.micro}",
     )
 
 
 def check_quill_version() -> CheckResult:
     return CheckResult(
-        "quill", PASS,
+        "quill",
+        PASS,
         f"quill {__version__} (installed at {Path(__file__).resolve().parent})",
     )
 
@@ -91,7 +95,8 @@ def check_config(config_path: Path | None = None) -> tuple[CheckResult, QuillCon
     if not p.exists():
         return (
             CheckResult(
-                "config", WARN,
+                "config",
+                WARN,
                 f"no config at {p}",
                 fix="Run `quill init` to write a starter config.",
             ),
@@ -102,7 +107,8 @@ def check_config(config_path: Path | None = None) -> tuple[CheckResult, QuillCon
     except ConfigError as e:
         return (
             CheckResult(
-                "config", FAIL,
+                "config",
+                FAIL,
                 f"{p}: {e}",
                 fix="Fix the TOML errors above. Run `quill init --force` to reset.",
             ),
@@ -122,13 +128,15 @@ def check_audit_log(audit_path: Path | None = None) -> CheckResult:
     parent = p.parent
     if not parent.exists():
         return CheckResult(
-            "audit log", WARN,
+            "audit log",
+            WARN,
             f"directory does not exist yet: {parent}",
             fix=f"Will be created on first emit. To pre-create: mkdir -p {parent}",
         )
     if not os.access(parent, os.W_OK):
         return CheckResult(
-            "audit log", FAIL,
+            "audit log",
+            FAIL,
             f"directory not writable: {parent}",
             fix="chmod the directory or use QUILL_LOG=path/to/your/audit.log.jsonl",
         )
@@ -136,7 +144,8 @@ def check_audit_log(audit_path: Path | None = None) -> CheckResult:
         mode = stat.S_IMODE(p.stat().st_mode)
         if mode & 0o077:
             return CheckResult(
-                "audit log", FAIL,
+                "audit log",
+                FAIL,
                 f"{p} is world/group readable (mode {oct(mode)})",
                 fix=f"chmod 600 {p}",
             )
@@ -147,23 +156,27 @@ def check_audit_log(audit_path: Path | None = None) -> CheckResult:
 
 def check_hmac_key() -> CheckResult:
     from quill.paths import default_path
+
     p = default_path("key", env_override="QUILL_KEY")
     if not p.exists():
         return CheckResult(
-            "hmac key", WARN,
+            "hmac key",
+            WARN,
             f"no key yet at {p}",
             fix="Will be auto-generated on first quill start / claude-hook invocation.",
         )
     mode = stat.S_IMODE(p.stat().st_mode)
     if mode & 0o077:
         return CheckResult(
-            "hmac key", FAIL,
+            "hmac key",
+            FAIL,
             f"{p} is too permissive (mode {oct(mode)})",
             fix=f"chmod 600 {p}  -- the signing key must not be world-readable.",
         )
     if p.stat().st_size != 32:
         return CheckResult(
-            "hmac key", WARN,
+            "hmac key",
+            WARN,
             f"{p} is {p.stat().st_size} bytes (expected 32)",
             fix="Rotate the key: rm the file and let quill regenerate it.",
         )
@@ -189,7 +202,7 @@ def _hook_command_from_settings(
         return None
     pre_list = (data.get("hooks") or {}).get("PreToolUse") or []
     for block in pre_list:
-        for h in (block.get("hooks") or []):
+        for h in block.get("hooks") or []:
             cmd = h.get("command", "")
             if cmd.endswith("quill claude-hook"):
                 return cmd
@@ -202,7 +215,8 @@ def check_claude_hook_installed(
     p = settings_path or Path("~/.claude/settings.json").expanduser()
     if not p.exists():
         return CheckResult(
-            "claude code hook", WARN,
+            "claude code hook",
+            WARN,
             f"no Claude Code settings at {p}",
             fix="Run `quill claude-hook-install` once Claude Code is installed.",
         )
@@ -210,20 +224,22 @@ def check_claude_hook_installed(
         json.loads(p.read_text() or "{}")
     except json.JSONDecodeError as e:
         return CheckResult(
-            "claude code hook", FAIL,
+            "claude code hook",
+            FAIL,
             f"{p} is not valid JSON: {e}",
             fix="Fix the JSON, then re-run quill claude-hook-install.",
         )
     cmd = _hook_command_from_settings(p)
     if cmd is None:
         return CheckResult(
-            "claude code hook", WARN,
+            "claude code hook",
+            WARN,
             f"hook not installed in {p}",
-            fix="Run `quill claude-hook-install` to enable gating Claude Code's "
-                "built-in tools.",
+            fix="Run `quill claude-hook-install` to enable gating Claude Code's built-in tools.",
         )
     return CheckResult(
-        "claude code hook", PASS,
+        "claude code hook",
+        PASS,
         f"installed in {p} (command: {cmd})",
     )
 
@@ -247,10 +263,11 @@ def check_quill_on_path(
         found = shutil.which("quill")
         if not found:
             return CheckResult(
-                "quill on PATH", WARN,
+                "quill on PATH",
+                WARN,
                 "the `quill` command is not on PATH and no hook is installed yet",
                 fix="Install with `pipx install quillx` or activate the venv, "
-                    "then run `quill onboard` or `quill claude-hook-install`.",
+                "then run `quill onboard` or `quill claude-hook-install`.",
             )
         return CheckResult("quill on PATH", PASS, found)
 
@@ -260,25 +277,28 @@ def check_quill_on_path(
     if binary_path.is_absolute():
         if binary_path.exists() and os.access(binary_path, os.X_OK):
             return CheckResult(
-                "quill binary", PASS,
+                "quill binary",
+                PASS,
                 f"hook resolves to {binary_path} (executable)",
             )
         return CheckResult(
-            "quill binary", FAIL,
+            "quill binary",
+            FAIL,
             f"hook points at {binary_path} which is missing or not executable",
             fix="Re-run `quill claude-hook-install` from the correct venv, "
-                "or edit the absolute path in ~/.claude/settings.json.",
+            "or edit the absolute path in ~/.claude/settings.json.",
         )
 
     # Bare command (e.g. "quill"). Falls back to PATH lookup.
     found = shutil.which(binary_token)
     if not found:
         return CheckResult(
-            "quill on PATH", FAIL,
+            "quill on PATH",
+            FAIL,
             f"hook uses bare `{binary_token}` but it is not on PATH",
             fix="Either install quill on PATH (`pipx install quillx`) OR "
-                "re-run `quill claude-hook-install` from your venv to bake "
-                "the absolute path into settings.json.",
+            "re-run `quill claude-hook-install` from your venv to bake "
+            "the absolute path into settings.json.",
         )
     return CheckResult("quill on PATH", PASS, f"hook resolves to {found}")
 
@@ -294,7 +314,8 @@ def check_upstream_executables(cfg: QuillConfig | None) -> list[CheckResult]:
             ok = Path(token).exists()
             out.append(
                 CheckResult(
-                    f"upstream/{up.name}", PASS if ok else FAIL,
+                    f"upstream/{up.name}",
+                    PASS if ok else FAIL,
                     f"command[0]: {token}" if ok else f"command[0] does not exist: {token}",
                     fix="" if ok else "Fix the path or install the executable.",
                 ),
@@ -303,8 +324,10 @@ def check_upstream_executables(cfg: QuillConfig | None) -> list[CheckResult]:
             found = shutil.which(token)
             out.append(
                 CheckResult(
-                    f"upstream/{up.name}", PASS if found else WARN,
-                    f"command[0]: {token} -> {found}" if found
+                    f"upstream/{up.name}",
+                    PASS if found else WARN,
+                    f"command[0]: {token} -> {found}"
+                    if found
                     else f"command[0] not on PATH: {token}",
                     fix="" if found else f"Install {token} or use an absolute path.",
                 ),
@@ -322,25 +345,31 @@ def check_audit_chain_intact(audit_path: Path | None = None) -> CheckResult:
         return CheckResult("audit chain", PASS, f"{p} is empty")
 
     from quill.paths import default_path
+
     key_path = default_path("key", env_override="QUILL_KEY")
     if not key_path.exists():
         return CheckResult(
-            "audit chain", WARN,
+            "audit chain",
+            WARN,
             "log exists but no HMAC key at default path; can't verify",
             fix="Set QUILL_KEY to the key that wrote this log, or check ~/.quill/key.",
         )
     try:
         key = key_path.read_bytes()
         from quill.audit import verify_chain  # local import
+
         total, failures = verify_chain(p, key)
     except (OSError, ValueError) as e:
         return CheckResult(
-            "audit chain", FAIL, f"{p}: {e}",
+            "audit chain",
+            FAIL,
+            f"{p}: {e}",
             fix="The log may be corrupted. Stop quill and investigate.",
         )
     if failures:
         return CheckResult(
-            "audit chain", FAIL,
+            "audit chain",
+            FAIL,
             f"chain BROKEN: {len(failures)} of {total} entries fail",
             fix=f"Inspect: quill audit verify --log {p}. Possible tampering.",
         )
@@ -357,16 +386,19 @@ def check_stale_pattern_stats() -> CheckResult:
     operator can run `quill suggestions cleanup` to remove them."""
     try:
         from quill.learning import find_stale_patterns
+
         stale = find_stale_patterns()
     except Exception as e:
         return CheckResult(
-            "stale pattern rows", PASS,
+            "stale pattern rows",
+            PASS,
             f"learning module not loaded ({type(e).__name__})",
         )
     if not stale:
         return CheckResult("stale pattern rows", PASS, "none")
     return CheckResult(
-        "stale pattern rows", WARN,
+        "stale pattern rows",
+        WARN,
         f"{len(stale)} per-token row(s) from a pre-rc5 bug",
         fix="quill suggestions cleanup",
     )
@@ -380,26 +412,29 @@ def check_self_improvement_signals() -> CheckResult:
     """
     try:
         from quill.learn import analyze
+
         suggestions, _ = analyze(since_days=7)
     except Exception as e:
         return CheckResult(
-            "self-improvement", PASS,
+            "self-improvement",
+            PASS,
             f"learn module not loaded ({type(e).__name__})",
         )
     if not suggestions:
-        return CheckResult("self-improvement", PASS,
-                           "no actionable signals in the last 7d")
+        return CheckResult("self-improvement", PASS, "no actionable signals in the last 7d")
     high = [s for s in suggestions if s.severity == "high"]
     if high:
         top = high[0]
         return CheckResult(
-            "self-improvement", WARN,
+            "self-improvement",
+            WARN,
             f"{len(suggestions)} suggestion(s); top: {top.title}",
             fix=f"see all: quill learn  ·  top action: {top.paste_command}",
         )
     top = suggestions[0]
     return CheckResult(
-        "self-improvement", PASS,
+        "self-improvement",
+        PASS,
         f"{len(suggestions)} medium/low suggestion(s); top: {top.title}",
         fix="see all: quill learn",
     )
@@ -415,16 +450,18 @@ def check_otel_dual_write() -> CheckResult:
     """
     try:
         from quill import otel as _otel
+
         n = getattr(_otel, "_dual_write_failed_count", 0)
     except Exception:
         return CheckResult("otel dual-write", PASS, "module not loaded")
     if n == 0:
         return CheckResult("otel dual-write", PASS, "no failures recorded")
     return CheckResult(
-        "otel dual-write", WARN,
+        "otel dual-write",
+        WARN,
         f"{n} dual-write failure(s) since process start",
         fix="Check OTEL_EXPORTER_OTLP_ENDPOINT / collector connectivity. "
-            "Audit chain is unaffected; only OTel spans are dropping.",
+        "Audit chain is unaffected; only OTel spans are dropping.",
     )
 
 
@@ -432,10 +469,12 @@ def check_permission_decay() -> CheckResult:
     """Surface decayed Quill permissions if any exist."""
     try:
         from quill import decay as _decay  # local import; optional path
+
         store = _decay.DecayStore.load()
     except Exception as e:
         return CheckResult(
-            "permission decay", WARN,
+            "permission decay",
+            WARN,
             f"could not read decay store: {e}",
             fix="Inspect ~/.quill/permissions.json manually.",
         )
@@ -445,21 +484,24 @@ def check_permission_decay() -> CheckResult:
         names = ", ".join(p.pattern for p in decayed[:5])
         more = "" if len(decayed) <= 5 else f", +{len(decayed) - 5} more"
         return CheckResult(
-            "permission decay", WARN,
+            "permission decay",
+            WARN,
             f"{len(decayed)} decayed: {names}{more}",
             fix="Run `quill decay show` for the full list, "
-                "`quill decay reaffirm <pattern>` to refresh, or "
-                "`quill decay forget <pattern>` to retire.",
+            "`quill decay reaffirm <pattern>` to refresh, or "
+            "`quill decay forget <pattern>` to retire.",
         )
     if approaching:
         return CheckResult(
-            "permission decay", PASS,
+            "permission decay",
+            PASS,
             f"healthy · {len(approaching)} approaching window",
         )
     total = len(store.all())
     if total == 0:
         return CheckResult(
-            "permission decay", PASS,
+            "permission decay",
+            PASS,
             "no tracked permissions yet (auto-registered on first override)",
         )
     return CheckResult("permission decay", PASS, f"{total} healthy")

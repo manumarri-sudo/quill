@@ -4,6 +4,7 @@ Every public-API failure raises a subclass of QuillError. The proxy never lets
 a stdlib exception leak across the trust boundary; everything is wrapped here
 so audit-log entries always carry structured context.
 """
+
 from __future__ import annotations
 
 

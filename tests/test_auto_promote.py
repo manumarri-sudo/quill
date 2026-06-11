@@ -5,6 +5,7 @@ The detector fires when a pattern has accumulated >= 5 approvals within a
 patterns are never candidates. Suggestion type is `policy.promotion_suggested`
 with `in_flow: True`.
 """
+
 from __future__ import annotations
 
 import time
@@ -17,8 +18,9 @@ from quill.learning import (
 )
 
 
-def _stats_with_approvals(pattern_id: str, n_approvals: int, n_denies: int = 0,
-                          span_sec: float = 86400.0) -> PatternStats:
+def _stats_with_approvals(
+    pattern_id: str, n_approvals: int, n_denies: int = 0, span_sec: float = 86400.0
+) -> PatternStats:
     """Synthesize a PatternStats with the given approval/deny counts and
     a fire-span (last_fire_ts - first_fire_ts) matching span_sec."""
     p = PatternStats(pattern_id=pattern_id)

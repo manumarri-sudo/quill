@@ -38,6 +38,7 @@ The intentional scope is: high-precision, low false-positive patterns
 that match the classic published attack templates. Hits emit a
 `taint.web_fetch.suspicious` audit event; operators investigate.
 """
+
 from __future__ import annotations
 
 import re
@@ -50,10 +51,10 @@ from typing import Final
 class InjectionPattern:
     """One prompt-injection pattern Quill detects, with provenance."""
 
-    name: str               # short label
-    category: str           # one of the five taxonomy categories
+    name: str  # short label
+    category: str  # one of the five taxonomy categories
     regex: re.Pattern[str]
-    source: str             # the paper / benchmark / blog the pattern is drawn from
+    source: str  # the paper / benchmark / blog the pattern is drawn from
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +99,6 @@ _PATTERNS: Final[tuple[InjectionPattern, ...]] = (
         ),
         source="Liu et al. 2023 Open-Prompt-Injection §3.1 Ignore Attack",
     ),
-
     # ---- Role-token spoofing ----
     # Source: AWS Prescriptive Guidance — Common attacks; ChatML format
     # used by GPT-3.5/4 turbo; Llama-2 / Llama-3 INST format; Anthropic
@@ -133,7 +133,6 @@ _PATTERNS: Final[tuple[InjectionPattern, ...]] = (
         ),
         source="Common markdown-flavored prompt template role headers",
     ),
-
     # ---- Context Manipulation (Escape + Fake Completion) ----
     # Source: Liu et al. §3.2 Escape Attack, §3.3 Fake Completion Attack.
     InjectionPattern(
@@ -171,7 +170,6 @@ _PATTERNS: Final[tuple[InjectionPattern, ...]] = (
         ),
         source="Composite of Securiti LLM01 Prompt Injection (2024) + Maxim AI 2026 Defense Guide",
     ),
-
     # ---- Instruction Override (assertive new-role) ----
     # Source: AWS Prescriptive Guidance — Common attacks. Also documented
     # widely in the Anthropic / OpenAI security blogs.
@@ -206,7 +204,6 @@ _PATTERNS: Final[tuple[InjectionPattern, ...]] = (
         ),
         source="Shen et al. 2023 (USENIX) — DAN jailbreak family; widely cited",
     ),
-
     # ---- Data Exfiltration markers ----
     # Source: Willison "Lethal Trifecta" + Open-Prompt-Injection §
     # Data Exfiltration category.

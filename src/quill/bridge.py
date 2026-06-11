@@ -9,6 +9,7 @@ the handoff edge so orphans and cascades become tractable downstream.
 
 Schema source: docs/research/agent-trust-infra-2026-05.md §6.1 + §6.4.
 """
+
 from __future__ import annotations
 
 import hashlib

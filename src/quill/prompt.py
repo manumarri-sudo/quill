@@ -21,6 +21,7 @@ approval token, fires out-of-band notifications, prints a paste-able
 retry of the same call within the TTL will be allowed automatically by the
 approval-consumption path in `quill.adapters.claude_code.run_hook`.
 """
+
 from __future__ import annotations
 
 import os
@@ -144,7 +145,8 @@ class Prompter:
         try:
             store = ApprovalStore.load()
             ap = store.issue(
-                action, dict(args),
+                action,
+                dict(args),
                 reason=plain_summary or f"{risk.value} risk: {action}",
             )
             token = ap.token
@@ -156,6 +158,7 @@ class Prompter:
             import tomllib
 
             from quill.config import default_config_path
+
             cfg_path = default_config_path()
             raw_notify: Mapping[str, Any] | None = None
             if cfg_path.exists():
@@ -197,14 +200,15 @@ class Prompter:
         # without notifications wired - sees the path forward in their
         # terminal output of `quill serve`.
         self.console.print(
-            f"  [yellow]non-interactive · approve with:[/yellow] "
-            f"[bold]quill approve {token}[/bold]" if token else
-            "  [yellow]non-interactive · could not issue approval token[/yellow]",
+            f"  [yellow]non-interactive · approve with:[/yellow] [bold]quill approve {token}[/bold]"
+            if token
+            else "  [yellow]non-interactive · could not issue approval token[/yellow]",
         )
         msg = (
             f"non-interactive prompter - agent retry will succeed after "
-            f"`quill approve {token}` (TTL 10m)" if token else
-            f"non-interactive prompter declined {action!r}"
+            f"`quill approve {token}` (TTL 10m)"
+            if token
+            else f"non-interactive prompter declined {action!r}"
         )
         raise HumanDeclined(msg)
 
@@ -265,8 +269,11 @@ class Prompter:
         # Non-TTY stdin: take the out-of-band path.
         if not self._stdin_is_interactive():
             self._confirm_out_of_band(
-                action=action, risk=risk, args=args,
-                plain_summary=plain_summary, audit=audit,
+                action=action,
+                risk=risk,
+                args=args,
+                plain_summary=plain_summary,
+                audit=audit,
             )
 
         t0 = time.time()

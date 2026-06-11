@@ -9,6 +9,7 @@ The mapping is the security-critical part: if a future refactor breaks
 `gen_ai.tool.name` or `gen_ai.conversation.id`, every observability
 platform's filtering breaks. Pinning the schema here.
 """
+
 from __future__ import annotations
 
 import sys
@@ -26,7 +27,9 @@ def _reset_otel_cache() -> None:
 def test_emit_span_noop_when_opentelemetry_not_installed() -> None:
     """The 95th-percentile case: quill[otel] not installed."""
     _reset_otel_cache()
-    real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+    real_import = (
+        __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+    )
 
     def _no_otel(name: str, *args: object, **kwargs: object) -> object:
         if name == "opentelemetry" or name.startswith("opentelemetry."):
@@ -40,7 +43,9 @@ def test_emit_span_noop_when_opentelemetry_not_installed() -> None:
         # emit_span must be a no-op without raising.
         otel.emit_span(
             event_type="tool.attempted",
-            session_id="ses_x", agent_id="root", risk="low",
+            session_id="ses_x",
+            agent_id="root",
+            risk="low",
             payload={"tool_name": "Bash"},
         )
 
@@ -99,11 +104,13 @@ def test_span_attributes_redact_raw_args() -> None:
     the audit log. Only schema-shape strings (reason, by, etc.) flow."""
     attrs = otel._span_attributes(
         event_type="tool.attempted",
-        session_id="s", agent_id="root", risk="low",
+        session_id="s",
+        agent_id="root",
+        risk="low",
         payload={
             "tool_name": "Bash",
             "args_preview": {"command": "rm -rf /etc/passwd"},  # MUST NOT appear
-            "arg_keys": ["command"],                            # MUST NOT appear
+            "arg_keys": ["command"],  # MUST NOT appear
         },
     )
     serialized = "|".join(f"{k}={v}" for k, v in attrs.items())
@@ -129,7 +136,9 @@ def test_audit_emit_does_not_raise_when_otel_emit_throws() -> None:
             # Must not raise even though OTel emit "fails."
             a.emit(
                 event_type="tool.attempted",
-                session_id="s", agent_id="root", risk="low",
+                session_id="s",
+                agent_id="root",
+                risk="low",
                 payload={"tool_name": "Bash"},
             )
         # And the audit chain still wrote a row.

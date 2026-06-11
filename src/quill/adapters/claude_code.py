@@ -52,6 +52,7 @@ so you can review what the agent attempted even when Claude Code's UI moved
 on. The audit log path defaults to ~/.quill/audit.log.jsonl; override with
 QUILL_LOG.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -76,7 +77,7 @@ from quill.policy import Risk, classify, classify_command
 # carry enough info to classify by content*. Bash uses classify_command on
 # args["command"]; everything else falls back to this table.
 DEFAULT_BUILTIN_RISK: Final[Mapping[str, Risk]] = {
-    "Bash": Risk.MEDIUM,        # superseded by classify_command on args["command"]
+    "Bash": Risk.MEDIUM,  # superseded by classify_command on args["command"]
     "BashOutput": Risk.LOW,
     "KillShell": Risk.MEDIUM,
     "Edit": Risk.HIGH,
@@ -87,7 +88,7 @@ DEFAULT_BUILTIN_RISK: Final[Mapping[str, Risk]] = {
     "Grep": Risk.LOW,
     "WebFetch": Risk.MEDIUM,
     "WebSearch": Risk.LOW,
-    "Task": Risk.MEDIUM,         # spawns a sub-agent; logged as such
+    "Task": Risk.MEDIUM,  # spawns a sub-agent; logged as such
     "TodoWrite": Risk.LOW,
 }
 
@@ -105,18 +106,19 @@ class HookDecision:
     fields are passed to the notification dispatcher.
     """
 
-    permission: str        # "allow" | "deny" | "ask"
+    permission: str  # "allow" | "deny" | "ask"
     reason: str
     risk: Risk
     audit_event_type: str  # written to the audit log
-    what: str = ""         # human-readable: "rm -rf node_modules"
-    why: str = ""          # human-readable: "matches `rm -rf` rule"
+    what: str = ""  # human-readable: "rm -rf node_modules"
+    why: str = ""  # human-readable: "matches `rm -rf` rule"
     try_instead: str = ""  # paste-able alternative
 
 
 def _default_load_hmac_key() -> bytes:
     """Mirror cli._hmac_key() but importable from the adapter without a circular import."""
     from quill.paths import default_path
+
     p = default_path("key", env_override="QUILL_KEY")
     if p.exists():
         return p.read_bytes()
@@ -144,6 +146,7 @@ def _detect_bypass_mode(hook_payload: Mapping[str, Any] | None = None) -> bool:
     bright line never softens. Audit log grows fully in both modes.
     """
     import os
+
     if hook_payload:
         for key in ("permission_mode", "bypass_mode", "dangerously_skip_permissions"):
             v = hook_payload.get(key)
@@ -184,6 +187,7 @@ def classify_event(
     # the GitHub-PAT-leak failure mode (Anthropic Nov 2025 incident class).
     # If hits found, escalate to CRITICAL regardless of any policy override.
     from quill.secrets import hit_summary, scan_args
+
     secret_hits = scan_args(tool_name, tool_input)
     if secret_hits:
         summary = hit_summary(secret_hits)
@@ -225,6 +229,7 @@ def classify_event(
         # its decay window, ignore the override and let the default fire,
         # AND emit an audit signal so the user sees the fall-back.
         from quill import decay as _decay  # local import to avoid cycles
+
         store = _decay.DecayStore.load()
         # determine the natural risk of the tool BEFORE the override so
         # we can pick the right decay window (downgrades from critical
@@ -275,7 +280,7 @@ _GATE_CONFIG_SUFFIXES: Final[tuple[str, ...]] = (
     ".quill/config.toml",
     ".quill/overrides.toml",
     ".quill/key",
-    ".quill/pause.json",   # the gate-off state; agent must not flip it directly
+    ".quill/pause.json",  # the gate-off state; agent must not flip it directly
 )
 
 
@@ -345,6 +350,7 @@ def decide(
         # / vercel-prod / sudo / force-push class is load-bearing.
         with contextlib.suppress(Exception):
             from quill import overnight as _ovn
+
             ovn_active, _ = _ovn.is_active_from_config()
             if ovn_active:
                 _ovn.record_event("critical")
@@ -353,7 +359,9 @@ def decide(
             reason=body,
             risk=risk,
             audit_event_type="verdict.blocked",
-            what=what, why=reason, try_instead=suggestion,
+            what=what,
+            why=reason,
+            try_instead=suggestion,
         )
     if risk is Risk.HIGH:
         body = f"high risk: {reason}"
@@ -366,12 +374,14 @@ def decide(
         # context is lost, only the prompt is skipped.
         try:
             from quill import overnight as _ovn
+
             ovn_active, ovn_reason = _ovn.is_active_from_config()
         except Exception:
             ovn_active, ovn_reason = False, ""
         if ovn_active:
             with contextlib.suppress(Exception):
                 from quill import overnight as _ovn2
+
                 _ovn2.record_event("high")
             audit_body = f"{reason} [overnight: {ovn_reason}]"
             return HookDecision(
@@ -388,14 +398,18 @@ def decide(
             reason=body,
             risk=risk,
             audit_event_type="verdict.ask",
-            what=what, why=f"high risk: {reason}", try_instead=suggestion,
+            what=what,
+            why=f"high risk: {reason}",
+            try_instead=suggestion,
         )
     return HookDecision(
         permission="allow",
         reason=reason,
         risk=risk,
         audit_event_type="verdict.allowed",
-        what=what, why=reason, try_instead=suggestion,
+        what=what,
+        why=reason,
+        try_instead=suggestion,
     )
 
 
@@ -428,16 +442,19 @@ def _redacted_input(tool_input: Mapping[str, Any]) -> dict[str, Any]:
 
 def _session_index_path() -> Path:
     from quill.paths import default_path
+
     return default_path("sessions.json", env_override="QUILL_SESSIONS")
 
 
 def _taint_path() -> Path:
     from quill.paths import default_path
+
     return default_path("taint.json", env_override="QUILL_TAINT_FILE")
 
 
 def _cascade_receivers_path() -> Path:
     from quill.paths import default_path
+
     return default_path(
         "cascade_receivers.json",
         env_override="QUILL_CASCADE_RECEIVERS",
@@ -484,6 +501,7 @@ def _record_handoff_receiver(parent_session_id: str, receiver_session_id: str) -
 def _taint_state_for(session_id: str) -> TaintState:
     """Load TaintState for one session_id from the per-session taint store."""
     from quill.taint import TaintState
+
     p = _taint_path()
     if not p.exists():
         return TaintState()
@@ -515,7 +533,10 @@ def _save_taint_state(session_id: str, state: TaintState) -> None:
 
 
 def _track_session(
-    *, transcript_path: str, session_id: str, cwd: str,
+    *,
+    transcript_path: str,
+    session_id: str,
+    cwd: str,
 ) -> tuple[str, bool, bool]:
     """Update the session index, return (parent_session_id, is_new_subagent, is_first_seen).
 
@@ -547,7 +568,7 @@ def _track_session(
         is_first_seen = True
     elif session_id not in seen:
         seen.append(session_id)
-        is_new_sub = (session_id != root)
+        is_new_sub = session_id != root
         is_first_seen = True
 
     index[transcript_path] = {"root": root, "seen": seen, "cwd": cwd}
@@ -585,6 +606,7 @@ def _maybe_notify(
         import tomllib  # py3.11+
 
         from quill.config import default_config_path
+
         cfg_path = default_config_path()
         if cfg_path.exists():
             with cfg_path.open("rb") as f:
@@ -604,6 +626,7 @@ def _maybe_notify(
         from quill import saves as _saves
         from quill.hints import HintContext
         from quill.hints import select as _select_hint
+
         ctx = HintContext(
             pattern=_saves.canonicalize_pattern(decision.reason or decision.why or ""),
             reason=decision.reason or decision.why or "",
@@ -623,6 +646,7 @@ def _maybe_notify(
     with contextlib.suppress(Exception):
         from quill import learning as _learning
         from quill.learn import _normalize_block_reason as _norm
+
         head = _norm(decision.reason or "") or (decision.reason or "")
         target_pid = f"{tool_name}:{head}"[:80]
         for sug in _learning.read_suggestions(limit=200):
@@ -631,7 +655,8 @@ def _maybe_notify(
             if sug.get("pattern_id") != target_pid:
                 continue
             promote = (
-                "Quill noticed you've approved this " + str(sug.get("evidence", ""))
+                "Quill noticed you've approved this "
+                + str(sug.get("evidence", ""))
                 + ". Run `quill suggestions promote` to auto-allow it."
             )
             hint_text = (hint_text + "\n" + promote).strip() if hint_text else promote
@@ -687,7 +712,8 @@ def _resolve_project_paths(cwd: str) -> tuple[Path, Path | None]:
         return (
             cwd_p / ".quill" / "audit.log.jsonl",
             (cwd_p / ".quill" / "config.toml")
-            if (cwd_p / ".quill" / "config.toml").exists() else None,
+            if (cwd_p / ".quill" / "config.toml").exists()
+            else None,
         )
     return default_audit_path(), None
 
@@ -792,6 +818,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     ):
         with contextlib.suppress(Exception):
             from quill.paths import is_trusted_cwd
+
             if is_trusted_cwd(cwd):
                 # Trust scope yields to trifecta enforcement: if the session
                 # is already at 2-of-3 flags and THIS call would close the
@@ -803,6 +830,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                 if session_id:
                     with contextlib.suppress(Exception):
                         from quill.taint import would_close_trifecta
+
                         current = _taint_state_for(session_id)
                         would_close = would_close_trifecta(current, tool_name, tool_input)
                 if not would_close:
@@ -831,6 +859,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
         with contextlib.suppress(Exception):
             from quill.learn import _normalize_block_reason
             from quill.learning import load_active_overrides
+
             head = _normalize_block_reason(original_decision_reason) or original_decision_reason
             pattern_id = f"{tool_name}:{head}"[:80]
             overrides = load_active_overrides()
@@ -839,8 +868,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                 decision = HookDecision(
                     permission="allow",
                     reason=(
-                        f"operator-promoted override "
-                        f"({ov['remaining_days']:.1f} days remaining)"
+                        f"operator-promoted override ({ov['remaining_days']:.1f} days remaining)"
                     ),
                     risk=Risk.LOW,
                     audit_event_type="verdict.allowed",
@@ -887,6 +915,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     ):
         with contextlib.suppress(Exception):
             from quill import session_approvals as _sa
+
             if _sa.recall(session_id, tool_name, tool_input):
                 decision = HookDecision(
                     permission="allow",
@@ -906,6 +935,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     if decision.permission != "allow":
         with contextlib.suppress(Exception):
             from quill.approvals import ApprovalStore
+
             store = ApprovalStore.load()
             consumed = store.consume(tool_name, dict(tool_input))
             if consumed is not None:
@@ -930,20 +960,18 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                 ):
                     with contextlib.suppress(Exception):
                         from quill import session_approvals as _sa
+
                         _sa.remember(session_id, tool_name, tool_input)
 
     # Trifecta enforcement: if THIS call would close the lethal trifecta
     # (untrusted input + private data + exfil) for the first time, escalate
     # an otherwise-allow decision to a deny so the user can decide. Skip
     # if the user already approved this exact call out-of-band.
-    if (
-        decision.permission == "allow"
-        and not approval_token_used
-        and session_id
-    ):
+    if decision.permission == "allow" and not approval_token_used and session_id:
         with contextlib.suppress(Exception):
             from quill.taint import TaintState as _TaintState
             from quill.taint import would_close_trifecta
+
             current = _taint_state_for(session_id) if session_id else _TaintState()
             if would_close_trifecta(current, tool_name, tool_input):
                 why = (
@@ -1044,7 +1072,8 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                 # log gets one cascade event, not one per subsequent sub.
                 with contextlib.suppress(Exception):
                     subagent_count = _record_handoff_receiver(
-                        parent_session_id, session_id,
+                        parent_session_id,
+                        session_id,
                     )
                     if subagent_count == 3:
                         audit.emit(
@@ -1085,9 +1114,11 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
             if not issued_token and decision.permission in ("deny", "ask"):
                 with contextlib.suppress(Exception):
                     from quill.approvals import ApprovalStore
+
                     store = ApprovalStore.load()
                     ap = store.issue(
-                        tool_name, dict(tool_input),
+                        tool_name,
+                        dict(tool_input),
                         reason=decision.why or decision.reason,
                     )
                     issued_token = ap.token
@@ -1155,6 +1186,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
         if os.environ.get("QUILL_LEARNING_STRICT"):
             from quill import learning
             from quill.learn import _normalize_block_reason
+
             head = _normalize_block_reason(original_decision_reason) or original_decision_reason
             pattern_id = f"{tool_name}:{head}"[:80]
             verdict_label = "approve" if approval_token_used else "deny"
@@ -1163,6 +1195,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
             with contextlib.suppress(Exception):
                 from quill import learning
                 from quill.learn import _normalize_block_reason
+
                 head = _normalize_block_reason(original_decision_reason) or original_decision_reason
                 pattern_id = f"{tool_name}:{head}"[:80]
                 verdict_label = "approve" if approval_token_used else "deny"
@@ -1394,6 +1427,7 @@ def main() -> int:
     if not os.environ.get("QUILL_NO_AUTO_WATCH"):
         with contextlib.suppress(Exception):
             from quill import watch as _watch  # local import to avoid cycles
+
             _watch.ensure_daemon(log_path, open_browser=False)
     try:
         with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:
@@ -1419,8 +1453,9 @@ def main() -> int:
 DEFAULT_CC_SETTINGS = Path("~/.claude/settings.json").expanduser()
 
 
-def install_snippet(matcher: str = "Bash|Edit|Write|NotebookEdit",
-                    timeout: int = 10) -> dict[str, Any]:
+def install_snippet(
+    matcher: str = "Bash|Edit|Write|NotebookEdit", timeout: int = 10
+) -> dict[str, Any]:
     """Return the JSON fragment that should be merged into Claude Code settings."""
     return {
         "hooks": {
@@ -1468,12 +1503,8 @@ def install_into_settings(
     new_block = install_snippet(matcher=matcher, timeout=timeout)["hooks"]["PreToolUse"][0]
 
     for block in pre_list:
-        if (
-            block.get("matcher") == matcher
-            and any(
-                h.get("command") == "quill claude-hook"
-                for h in (block.get("hooks") or [])
-            )
+        if block.get("matcher") == matcher and any(
+            h.get("command") == "quill claude-hook" for h in (block.get("hooks") or [])
         ):
             return p, True  # already installed
 

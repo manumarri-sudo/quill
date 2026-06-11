@@ -36,6 +36,7 @@ Quill config lives at ~/.quill/config.toml by default. Format:
 The config is loaded ONCE at process start, validated through Pydantic, and
 then frozen. Hot-path policy code never re-parses TOML.
 """
+
 from __future__ import annotations
 
 import sys
@@ -56,11 +57,13 @@ else:  # pragma: no cover
 
 def default_config_path() -> Path:
     from quill.paths import default_path
+
     return default_path("config.toml", env_override="QUILL_CONFIG")
 
 
 def default_audit_path() -> Path:
     from quill.paths import default_path
+
     return default_path("audit.log.jsonl", env_override="QUILL_LOG")
 
 

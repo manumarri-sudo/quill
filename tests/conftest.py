@@ -10,6 +10,7 @@ every test gets a fresh, empty state dir. Tests that explicitly need to
 touch the user's real `~/.quill/` should bypass this fixture by reading
 the original env vars they want.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -29,9 +30,16 @@ def _isolate_quill_home(
     # Belt-and-suspenders: also clear per-file overrides so nothing the
     # parent shell set leaks into this test.
     for var in (
-        "QUILL_CONFIG", "QUILL_LOG", "QUILL_KEY", "QUILL_DECAY_FILE",
-        "QUILL_TELEMETRY_PATH", "QUILL_WATCH_PID", "QUILL_SESSIONS",
-        "QUILL_TAINT_FILE", "QUILL_PINS_FILE", "QUILL_APPROVALS_FILE",
+        "QUILL_CONFIG",
+        "QUILL_LOG",
+        "QUILL_KEY",
+        "QUILL_DECAY_FILE",
+        "QUILL_TELEMETRY_PATH",
+        "QUILL_WATCH_PID",
+        "QUILL_SESSIONS",
+        "QUILL_TAINT_FILE",
+        "QUILL_PINS_FILE",
+        "QUILL_APPROVALS_FILE",
         "QUILL_OVERNIGHT_FILE",
     ):
         monkeypatch.delenv(var, raising=False)

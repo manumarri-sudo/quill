@@ -22,6 +22,7 @@ Schema lives in docs/research/agent-trust-infra-2026-05.md §6. The split:
     agent.flag.uncertain          agent self-flags an uncertainty
     policy.decayed                permission decayed; override fell back
 """
+
 from __future__ import annotations
 
 from typing import Final
@@ -62,13 +63,27 @@ GATE_RESUMED: Final[str] = "gate.resumed"
 # Set of all known event types - useful for validation / filtering.
 ALL_EVENT_TYPES: Final[frozenset[str]] = frozenset(
     {
-        TOOL_ATTEMPTED, TOOL_EXECUTED,
-        VERDICT_ALLOWED, VERDICT_BLOCKED, VERDICT_ASK, VERDICT_SCOPE_VIOLATION,
-        BUDGET_EXCEEDED, CHAIN_REPAIRED,
-        SESSION_OPEN, SESSION_CLOSE, SESSION_RECEIPT, SESSION_TAINT_UPDATE,
-        AGENT_HANDOFF_OUT, AGENT_HANDOFF_IN, AGENT_CASCADE_AFFECTED,
-        AGENT_FLAG_UNCERTAIN, POLICY_DECAYED,
-        APPROVE_BIOMETRIC_OK, APPROVE_BIOMETRIC_DENY, APPROVE_BIOMETRIC_SKIPPED,
-        GATE_PAUSED, GATE_RESUMED,
+        TOOL_ATTEMPTED,
+        TOOL_EXECUTED,
+        VERDICT_ALLOWED,
+        VERDICT_BLOCKED,
+        VERDICT_ASK,
+        VERDICT_SCOPE_VIOLATION,
+        BUDGET_EXCEEDED,
+        CHAIN_REPAIRED,
+        SESSION_OPEN,
+        SESSION_CLOSE,
+        SESSION_RECEIPT,
+        SESSION_TAINT_UPDATE,
+        AGENT_HANDOFF_OUT,
+        AGENT_HANDOFF_IN,
+        AGENT_CASCADE_AFFECTED,
+        AGENT_FLAG_UNCERTAIN,
+        POLICY_DECAYED,
+        APPROVE_BIOMETRIC_OK,
+        APPROVE_BIOMETRIC_DENY,
+        APPROVE_BIOMETRIC_SKIPPED,
+        GATE_PAUSED,
+        GATE_RESUMED,
     },
 )

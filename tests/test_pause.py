@@ -5,6 +5,7 @@ gate lets calls through but logs them with gate_paused=true, and the pause
 check runs BEFORE self_test so it works as a recovery hatch when the
 classifier is broken).
 """
+
 from __future__ import annotations
 
 import json

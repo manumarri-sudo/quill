@@ -14,6 +14,7 @@ Quill modifications vs. upstream:
      converts the re-raised McpError back into a JSON-RPC error response,
      preserving the upstream error code (-32602, -32601, etc.) for clients.
 """
+
 from __future__ import annotations
 
 import logging
@@ -59,6 +60,7 @@ async def create_proxy_server(
 
     # ----- prompts -----------------------------------------------------------
     if capabilities.prompts:
+
         async def _list_prompts(_: t.Any) -> types.ServerResult:
             return types.ServerResult(await remote_app.list_prompts())
 
@@ -81,6 +83,7 @@ async def create_proxy_server(
 
     # ----- resources ---------------------------------------------------------
     if capabilities.resources:
+
         async def _list_resources(_: t.Any) -> types.ServerResult:
             return types.ServerResult(await remote_app.list_resources())
 
@@ -120,6 +123,7 @@ async def create_proxy_server(
 
     # ----- logging -----------------------------------------------------------
     if capabilities.logging:
+
         async def _set_logging_level(req: types.SetLevelRequest) -> types.ServerResult:
             await remote_app.set_logging_level(req.params.level)
             return types.ServerResult(types.EmptyResult())
@@ -128,6 +132,7 @@ async def create_proxy_server(
 
     # ----- tools -------------------------------------------------------------
     if capabilities.tools:
+
         async def _list_tools(_: t.Any) -> types.ServerResult:
             tools = await remote_app.list_tools()
             return types.ServerResult(tools)
@@ -187,6 +192,7 @@ async def create_proxy_server(
     # CPU/IO upstream until the upstream's own timeout fires.
     async def _send_cancelled(req: types.CancelledNotification) -> None:
         import contextlib as _ctx
+
         with _ctx.suppress(Exception):
             await remote_app.send_notification(types.ClientNotification(req))
 

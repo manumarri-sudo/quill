@@ -7,6 +7,7 @@ connections from the test suite. We verify:
   - should_fire respects on_blocked/on_ask/on_critical_only flags
   - fire() runs channels on a background thread and audit-emits results
 """
+
 from __future__ import annotations
 
 import time
@@ -24,7 +25,8 @@ from quill.notify import (
 
 def _msg(decision: str = "blocked", risk: str = "critical") -> BlockMessage:
     return BlockMessage(
-        risk=risk, decision=decision,
+        risk=risk,
+        decision=decision,
         tool_name="Bash",
         args_preview={"command": "rm -rf x"},
         what="rm -rf node_modules",
@@ -66,18 +68,20 @@ def test_config_from_dict_disabled_when_empty() -> None:
 
 
 def test_config_from_dict_enabled_with_section() -> None:
-    cfg = NotifyConfig.from_dict({
-        "macos": True,
-        "slack_webhook_url": "https://hooks.slack.com/x",
-        "on_blocked": True,
-        "on_ask": True,
-        "email": {
-            "smtp_host": "smtp.example.com",
-            "smtp_port": 25,
-            "smtp_user": "x@example.com",
-            "smtp_password_env": "SMTP_PASS",
-        },
-    })
+    cfg = NotifyConfig.from_dict(
+        {
+            "macos": True,
+            "slack_webhook_url": "https://hooks.slack.com/x",
+            "on_blocked": True,
+            "on_ask": True,
+            "email": {
+                "smtp_host": "smtp.example.com",
+                "smtp_port": 25,
+                "smtp_user": "x@example.com",
+                "smtp_password_env": "SMTP_PASS",
+            },
+        }
+    )
     assert cfg.enabled is True
     assert cfg.macos is True
     assert cfg.slack_webhook_url == "https://hooks.slack.com/x"
@@ -169,8 +173,12 @@ def test_fire_silent_when_should_fire_false() -> None:
 
 def test_short_body_omits_try_when_no_suggestion() -> None:
     msg = BlockMessage(
-        risk="critical", decision="blocked", tool_name="Bash",
-        args_preview={}, what="x", why="y",
+        risk="critical",
+        decision="blocked",
+        tool_name="Bash",
+        args_preview={},
+        what="x",
+        why="y",
     )
     body = msg.short_body()
     assert "try:" not in body

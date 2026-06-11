@@ -5,6 +5,7 @@ stdio. That's integration territory. These tests instead inject a fake
 ClientSession into QuillProxy so we can assert the gate fires correctly
 on each layer (scope, risk, audit) without the subprocess machinery.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -46,7 +47,9 @@ class _MockSession:
         return ListToolsResult(tools=list(self.tools))
 
     async def call_tool(
-        self, name: str, arguments: dict[str, Any] | None = None,
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
     ) -> CallToolResult:
         self.calls.append((name, dict(arguments or {})))
         if name in self.raise_on_call:
@@ -101,7 +104,10 @@ def _make_proxy(
         canned_results=canned_results or {},
     )
     proxy = QuillProxy(
-        config=cfg, audit=audit, prompter=prompter, intent=intent,
+        config=cfg,
+        audit=audit,
+        prompter=prompter,
+        intent=intent,
     )
     # Skip _connect_all_upstreams + _discover_tools; inject the fake directly.
     conn = _UpstreamConn(name=upstream_name, session=sess)  # type: ignore[arg-type]
@@ -126,6 +132,7 @@ async def test_low_risk_call_is_allowed_and_routed(tmp_path: Path) -> None:
     )
     # rebuild with proper scope
     from quill.policy import Scope
+
     intent = SessionIntent(
         session_id="ses_test",
         intent="explore the safe sandbox",
@@ -135,8 +142,11 @@ async def test_low_risk_call_is_allowed_and_routed(tmp_path: Path) -> None:
         tmp_path / "audit.jsonl",
         intent=intent,
         upstream_tools=[
-            Tool(name="read_file", description="Read a file",
-                 inputSchema={"type": "object", "properties": {"path": {"type": "string"}}}),
+            Tool(
+                name="read_file",
+                description="Read a file",
+                inputSchema={"type": "object", "properties": {"path": {"type": "string"}}},
+            ),
         ],
         prompter=_AutoApprovePrompter(),
         canned_results={"read_file": "hello world"},
@@ -150,6 +160,7 @@ async def test_low_risk_call_is_allowed_and_routed(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_out_of_scope_call_is_blocked_before_upstream(tmp_path: Path) -> None:
     from quill.policy import Scope
+
     intent = SessionIntent(
         session_id="ses_test",
         intent="read-only",
@@ -159,9 +170,11 @@ async def test_out_of_scope_call_is_blocked_before_upstream(tmp_path: Path) -> N
         tmp_path / "audit.jsonl",
         intent=intent,
         upstream_tools=[
-            Tool(name="delete_file", description="Delete a file",
-                 inputSchema={"type": "object",
-                              "properties": {"path": {"type": "string"}}}),
+            Tool(
+                name="delete_file",
+                description="Delete a file",
+                inputSchema={"type": "object", "properties": {"path": {"type": "string"}}},
+            ),
         ],
         prompter=_AutoApprovePrompter(),
     )
@@ -185,6 +198,7 @@ async def test_out_of_scope_call_is_blocked_before_upstream(tmp_path: Path) -> N
 async def test_critical_risk_routes_through_prompter(tmp_path: Path) -> None:
     """A critical-risk call goes through the prompter; if approved, routes."""
     from quill.policy import Scope
+
     intent = SessionIntent(
         session_id="ses_test",
         intent="manage secrets",
@@ -195,9 +209,11 @@ async def test_critical_risk_routes_through_prompter(tmp_path: Path) -> None:
         tmp_path / "audit.jsonl",
         intent=intent,
         upstream_tools=[
-            Tool(name="rotate", description="Rotate a key",
-                 inputSchema={"type": "object",
-                              "properties": {"key": {"type": "string"}}}),
+            Tool(
+                name="rotate",
+                description="Rotate a key",
+                inputSchema={"type": "object", "properties": {"key": {"type": "string"}}},
+            ),
         ],
         prompter=prompter,
         upstream_name="secrets",
@@ -216,6 +232,7 @@ async def test_critical_risk_routes_through_prompter(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_critical_risk_declined_blocks_upstream(tmp_path: Path) -> None:
     from quill.policy import Scope
+
     intent = SessionIntent(
         session_id="ses_test",
         intent="touch secrets",
@@ -225,9 +242,11 @@ async def test_critical_risk_declined_blocks_upstream(tmp_path: Path) -> None:
         tmp_path / "audit.jsonl",
         intent=intent,
         upstream_tools=[
-            Tool(name="rotate", description="Rotate a key",
-                 inputSchema={"type": "object",
-                              "properties": {"key": {"type": "string"}}}),
+            Tool(
+                name="rotate",
+                description="Rotate a key",
+                inputSchema={"type": "object", "properties": {"key": {"type": "string"}}},
+            ),
         ],
         prompter=_AutoDeclinePrompter(),
         upstream_name="secrets",
@@ -245,6 +264,7 @@ async def test_critical_risk_declined_blocks_upstream(tmp_path: Path) -> None:
 
 async def test_all_tools_preserves_upstream_schemas(tmp_path: Path) -> None:
     from quill.policy import Scope
+
     intent = SessionIntent(
         session_id="ses_test",
         intent="readonly",
@@ -262,8 +282,7 @@ async def test_all_tools_preserves_upstream_schemas(tmp_path: Path) -> None:
         tmp_path / "audit.jsonl",
         intent=intent,
         upstream_tools=[
-            Tool(name="read_file", description="Read a file",
-                 inputSchema=schema),
+            Tool(name="read_file", description="Read a file", inputSchema=schema),
         ],
         prompter=_AutoApprovePrompter(),
     )

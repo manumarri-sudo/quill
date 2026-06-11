@@ -17,6 +17,7 @@ event back to the chain.
 
 Schema source: docs/research/agent-trust-infra-2026-05.md §6.1.
 """
+
 from __future__ import annotations
 
 import json
@@ -78,7 +79,7 @@ class Receipt:
     trust_delta: float = 0.0
     # Narrative inputs. Populated by derive_from_events; consumed by narrate().
     blocks_summary: list[str] = field(default_factory=list)  # "tool: reason"
-    asks_summary: list[str] = field(default_factory=list)    # "tool: reason"
+    asks_summary: list[str] = field(default_factory=list)  # "tool: reason"
     biometric_approvals: int = 0
     top_changed_dir: str = ""
     # Internal: O(1) dedup membership for `did` / `changed`. Not exported.
@@ -199,6 +200,7 @@ def _top_directory(paths: list[str]) -> str:
     every file. Ties broken by the directory that appears first.
     """
     from collections import Counter
+
     parents: list[str] = []
     for p in paths:
         # Take everything before the last slash; fall back to the path itself
@@ -248,7 +250,9 @@ def narrate(r: Receipt) -> str:
 
     clauses: list[str] = []
     window = _format_window(r.opened_at, r.closed_at)
-    clauses.append(f"{window} the agent ran {r.tool_call_count} tool {_pluralize(r.tool_call_count, 'call')}")
+    clauses.append(
+        f"{window} the agent ran {r.tool_call_count} tool {_pluralize(r.tool_call_count, 'call')}"
+    )
 
     if r.changed:
         n = len(r.changed)
@@ -270,10 +274,7 @@ def narrate(r: Receipt) -> str:
         )
 
     # Stitch with commas + final "and"
-    if len(clauses) > 1:
-        body = ", ".join(clauses[:-1]) + ", and " + clauses[-1]
-    else:
-        body = clauses[0]
+    body = ", ".join(clauses[:-1]) + ", and " + clauses[-1] if len(clauses) > 1 else clauses[0]
     sentence = body + "."
 
     # Footer: trust delivery + flags

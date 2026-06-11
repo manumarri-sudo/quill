@@ -6,11 +6,10 @@ seal allowlist, and the loopback-only egress block. The numeric-IP network
 filter is a regression guard - `sandbox-exec` rejects `(remote ip "127.0.0.1:*")`
 with "host must be * or localhost", which a live run caught.
 """
+
 from __future__ import annotations
 
 import os
-
-import pytest
 
 from quill import sandbox as sb
 
@@ -46,9 +45,9 @@ def test_floor_is_allow_default_with_no_blanket_write_deny() -> None:
 
 def test_seal_confines_writes_and_seals_egress() -> None:
     prof = sb.build_profile(_seal_spec())
-    assert "(deny file-write*)" in prof          # blanket write deny
-    assert "(allow file-write*" in prof          # then the allowlist
-    assert "(deny network*)" in prof             # egress sealed
+    assert "(deny file-write*)" in prof  # blanket write deny
+    assert "(allow file-write*" in prof  # then the allowlist
+    assert "(deny network*)" in prof  # egress sealed
     assert '(remote ip "localhost:*")' in prof
 
 
@@ -97,23 +96,24 @@ def test_default_protected_covers_gate_disable_surface() -> None:
     files, trees = sb.default_protected()
     joined = " ".join(files + trees)
     assert ".claude/settings.json" in joined
-    assert ".claude/hooks" in joined          # the A2 hole
+    assert ".claude/hooks" in joined  # the A2 hole
     assert ".quill/config.toml" in joined
     assert ".quill/key" in joined
-    assert ".zshrc" in joined                 # shell rc persistence vector
+    assert ".zshrc" in joined  # shell rc persistence vector
 
 
 def test_launch_argv_shape() -> None:
     from pathlib import Path
+
     argv = sb.launch_argv(Path("/tmp/p.sb"), ["python3", "x.py"])
     assert argv == ["sandbox-exec", "-f", "/tmp/p.sb", "--", "python3", "x.py"]
 
 
 def test_build_spec_floor_has_empty_writable() -> None:
     spec = sb.build_spec(cwd="/Users/x/proj", confine_writes=False, seal_network=False)
-    assert spec.writable == []          # floor needs no allowlist
+    assert spec.writable == []  # floor needs no allowlist
     assert spec.network == "all"
-    assert spec.protected_files          # but always protects the gate surface
+    assert spec.protected_files  # but always protects the gate surface
 
 
 def test_build_spec_seal_includes_cwd_and_gate_state() -> None:

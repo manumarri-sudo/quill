@@ -17,6 +17,7 @@ this module ships the 18 highest-confidence patterns that cover
 the bulk of agent-leaked credentials seen in the wild, with room
 to grow via the optional `extra_patterns` argument to `scan`.
 """
+
 from __future__ import annotations
 
 import re
@@ -29,7 +30,7 @@ from typing import Any, Final
 class SecretPattern:
     """One credential type Quill detects."""
 
-    name: str               # "AWS Access Key", "OpenAI API Key", ...
+    name: str  # "AWS Access Key", "OpenAI API Key", ...
     regex: re.Pattern[str]  # compiled at module load
     description: str = ""
 
@@ -44,9 +45,9 @@ class SecretHit:
     """
 
     pattern_name: str
-    matched_at: int       # offset in scanned text
-    length: int           # match length (we never persist the value)
-    line: int = 0         # 1-indexed line where the match starts (0 = unknown)
+    matched_at: int  # offset in scanned text
+    length: int  # match length (we never persist the value)
+    line: int = 0  # 1-indexed line where the match starts (0 = unknown)
 
 
 # Vendor-format credential patterns. Each regex is anchored to the

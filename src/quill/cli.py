@@ -9,6 +9,7 @@
 
 The CLI is deliberately thin. Logic lives in the library; this module is wiring.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -51,18 +52,18 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,  # `quill` with no args runs `start`
     help="quill: the pause button between AI agents and the things you can't undo.\n\n"
-         "  quill onboard    first-run interactive setup (detects agents, installs hooks)\n"
-         "  quill start      set up + open the dashboard (this is the only command most users need)\n"
-         "  quill approve    go-ahead a blocked call (run from a notification)\n"
-         "  quill watch      in-terminal live dashboard\n"
-         "  quill audit      review what got blocked / allowed / asked\n"
-         "  quill receipts   per-session did / changed / uncertain / to-verify\n"
-         "  quill bridge     A2A handoff edges between agents\n"
-         "  quill trifecta   exposure tracking (untrusted input + private data + exfil)\n"
-         "  quill pins       tool description pins (anti-poisoning, anti-rug-pull)\n"
-         "  quill approvals  list / revoke pending approval tokens\n"
-         "  quill decay      permissions that erode without reinforcement\n"
-         "  quill doctor     diagnose the install\n",
+    "  quill onboard    first-run interactive setup (detects agents, installs hooks)\n"
+    "  quill start      set up + open the dashboard (this is the only command most users need)\n"
+    "  quill approve    go-ahead a blocked call (run from a notification)\n"
+    "  quill watch      in-terminal live dashboard\n"
+    "  quill audit      review what got blocked / allowed / asked\n"
+    "  quill receipts   per-session did / changed / uncertain / to-verify\n"
+    "  quill bridge     A2A handoff edges between agents\n"
+    "  quill trifecta   exposure tracking (untrusted input + private data + exfil)\n"
+    "  quill pins       tool description pins (anti-poisoning, anti-rug-pull)\n"
+    "  quill approvals  list / revoke pending approval tokens\n"
+    "  quill decay      permissions that erode without reinforcement\n"
+    "  quill doctor     diagnose the install\n",
 )
 
 
@@ -71,6 +72,8 @@ def _root(ctx: typer.Context) -> None:
     """When called with no subcommand, run `start`."""
     if ctx.invoked_subcommand is None:
         ctx.invoke(start)
+
+
 audit_app = typer.Typer(
     no_args_is_help=True,
     help="see what got blocked / allowed / asked.",
@@ -165,6 +168,7 @@ def git_hook_cmd(ctx: typer.Context) -> None:
     these to quill.githook.prepare_commit_msg.
     """
     from quill.githook import prepare_commit_msg
+
     args = list(ctx.args)
     if not args:
         raise typer.Exit(code=0)
@@ -193,6 +197,7 @@ def commit_hook_install(
     Safe to re-run. Refuses to overwrite a non-Quill prepare-commit-msg.
     """
     from quill.githook import install_hook
+
     repo_root = repo or Path.cwd()
     if not (repo_root / ".git").exists():
         console.print(f"[red]not a git repo:[/red] {repo_root}")
@@ -224,6 +229,7 @@ def commit_hook_uninstall(
 ) -> None:
     """Remove the prepare-commit-msg hook from a repo."""
     from quill.githook import uninstall_hook
+
     repo_root = repo or Path.cwd()
     try:
         p, removed = uninstall_hook(repo_root)
@@ -259,8 +265,11 @@ def insights_cmd(
 
     p = log_path or default_audit_path()
     start, end = parse_window(
-        today=window_today, week=window_week, month=window_month,
-        all_time=window_all, since=since,
+        today=window_today,
+        week=window_week,
+        month=window_month,
+        all_time=window_all,
+        since=since,
     )
     insights = compute_insights(p, window_start=start, window_end=end)
     Console().print(format_insights(insights, plain=plain))
@@ -310,6 +319,7 @@ def integrate_cmd(
         install,
         uninstall,
     )
+
     out = Console()
 
     if agent == "list":
@@ -366,23 +376,27 @@ def integrate_cmd(
     if status in ("installed", "refreshed"):
         out.print(
             "\n[dim]your coding agent will now know how to query Quill data when you ask.\n"
-            f"try: open {integ.label} and ask \"what did the agent do this morning?\"[/dim]",
+            f'try: open {integ.label} and ask "what did the agent do this morning?"[/dim]',
         )
 
 
 @app.command("saves")
 def saves_cmd(
     window_today: Annotated[
-        bool, typer.Option("--today", help="window: last calendar day (UTC)"),
+        bool,
+        typer.Option("--today", help="window: last calendar day (UTC)"),
     ] = False,
     window_week: Annotated[
-        bool, typer.Option("--week", help="window: last 7 days (default)"),
+        bool,
+        typer.Option("--week", help="window: last 7 days (default)"),
     ] = False,
     window_month: Annotated[
-        bool, typer.Option("--month", help="window: last 30 days"),
+        bool,
+        typer.Option("--month", help="window: last 30 days"),
     ] = False,
     window_all: Annotated[
-        bool, typer.Option("--all", help="window: every event ever logged"),
+        bool,
+        typer.Option("--all", help="window: every event ever logged"),
     ] = False,
     since: Annotated[
         str | None,
@@ -450,6 +464,7 @@ def scan_prompts_cmd(
     See `quill scan-secrets` for the hard-block secret detector.
     """
     from quill.prompt_injection import scan as pi_scan
+
     out = Console()
     total_hits = 0
     files_scanned = 0
@@ -511,6 +526,7 @@ def scan_secrets_cmd(
     in .gitignore. Use `--no-gitignore` to scan everything regardless.
     """
     from quill.secrets import scan
+
     out = Console()
     total_hits = 0
     files_scanned = 0
@@ -570,10 +586,7 @@ def _is_inside_git_repo(path: Path) -> bool:
     """True if `path` is inside a directory that contains a .git directory
     or has one in any ancestor up to the filesystem root."""
     p = path.resolve()
-    for ancestor in (p, *p.parents):
-        if (ancestor / ".git").exists():
-            return True
-    return False
+    return any((ancestor / ".git").exists() for ancestor in (p, *p.parents))
 
 
 def _git_ls_files(path: Path) -> list[Path] | None:
@@ -584,11 +597,17 @@ def _git_ls_files(path: Path) -> list[Path] | None:
     Returns None if git isn't available or the command fails.
     """
     import subprocess
+
     try:
         result = subprocess.run(
             [
-                "git", "-C", str(path),
-                "ls-files", "--cached", "--others", "--exclude-standard",
+                "git",
+                "-C",
+                str(path),
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
             ],
             capture_output=True,
             text=True,
@@ -631,6 +650,7 @@ def onboard_cmd(
     overwrite (or pass --force).
     """
     from quill.onboard import run as run_onboard
+
     raise typer.Exit(code=run_onboard(force=force))
 
 
@@ -639,7 +659,8 @@ def learn_cmd(
     since_days: Annotated[
         int,
         typer.Option(
-            "--since-days", "-d",
+            "--since-days",
+            "-d",
             help="window to analyse (0 = full history)",
         ),
     ] = 7,
@@ -662,14 +683,18 @@ def learn_cmd(
       - silent_failure (e.g. stub journals from a broken parser)
     """
     from quill.learn import analyze
+
     suggestions, _ = analyze(since_days=since_days)
 
     if json_out:
         import json as _json
+
         out = [
             {
-                "severity": s.severity, "category": s.category,
-                "title": s.title, "rationale": s.rationale,
+                "severity": s.severity,
+                "category": s.category,
+                "title": s.title,
+                "rationale": s.rationale,
                 "paste_command": s.paste_command,
                 "evidence": list(s.evidence),
             }
@@ -736,6 +761,7 @@ def kpis_cmd(
     as count, not ratio, until volume grows).
     """
     from quill.learn import analyze
+
     _, kpis = analyze(since_days=since_days)
 
     if kpis.n_events == 0:
@@ -745,7 +771,9 @@ def kpis_cmd(
         return
 
     health_color = {
-        "healthy": "green", "loud": "yellow", "broken": "red",
+        "healthy": "green",
+        "loud": "yellow",
+        "broken": "red",
     }[kpis.health]
 
     window_label = "full history" if since_days == 0 else f"last {since_days}d"
@@ -789,6 +817,7 @@ def kpis_cmd(
             table.add_row(pat[:60], str(n))
         console.print(table)
 
+
 console = Console(stderr=True)
 
 
@@ -831,6 +860,7 @@ def _hmac_key() -> bytes:
     to read.
     """
     from quill.paths import default_path
+
     p = default_path("key", env_override="QUILL_KEY")
     # Fast path: key already exists.
     if p.exists():
@@ -855,6 +885,7 @@ def _hmac_key() -> bytes:
 # start - the front door. one command, sets up + opens dashboard.
 # --------------------------------------------------------------------------
 
+
 def _wizard_notifications(out: Console) -> None:
     """Interactive prompt: enable + test out-of-band notifications.
 
@@ -878,20 +909,28 @@ def _wizard_notifications(out: Console) -> None:
         return  # non-interactive context (CI, piped input)
 
     if isinstance(raw.get("notify"), dict):
-        out.print("  [green]✓[/green] notifications: configured "
-                  "[dim](edit config.toml + run [bold]quill notify test[/bold] "
-                  "to verify)[/dim]")
+        out.print(
+            "  [green]✓[/green] notifications: configured "
+            "[dim](edit config.toml + run [bold]quill notify test[/bold] "
+            "to verify)[/dim]"
+        )
         return
 
     out.print()
     out.print("  [bold]want a heads-up when something gets blocked?[/bold]")
-    out.print("  [dim]quill can fan a structured WHAT/WHY/TRY/APPROVE message "
-              "out of the terminal.[/dim]")
+    out.print(
+        "  [dim]quill can fan a structured WHAT/WHY/TRY/APPROVE message out of the terminal.[/dim]"
+    )
     try:
-        ans = typer.prompt(
-            "  enable notifications? (Y/n)",
-            default="Y", show_default=False,
-        ).strip().lower()
+        ans = (
+            typer.prompt(
+                "  enable notifications? (Y/n)",
+                default="Y",
+                show_default=False,
+            )
+            .strip()
+            .lower()
+        )
     except (KeyboardInterrupt, EOFError):
         ans = "n"
     if ans == "n":
@@ -901,19 +940,18 @@ def _wizard_notifications(out: Console) -> None:
     enable_macos = is_mac
     notify_block = ["", "[notify]"]
     if is_mac:
-        notify_block.append('macos = true                          # macOS '
-                            "Notification Center")
+        notify_block.append("macos = true                          # macOS Notification Center")
         notify_block.append('sound = "Glass"')
-    notify_block.append("on_blocked = true                     # critical-risk "
-                        "denials fire")
-    notify_block.append("on_ask = false                        # high-risk "
-                        "ask-the-human events stay quiet")
-    notify_block.append("# slack_webhook_url = \"https://hooks.slack.com/...\"")
+    notify_block.append("on_blocked = true                     # critical-risk denials fire")
+    notify_block.append(
+        "on_ask = false                        # high-risk ask-the-human events stay quiet"
+    )
+    notify_block.append('# slack_webhook_url = "https://hooks.slack.com/..."')
     notify_block.append('# webhook_url = "https://your.endpoint/quill"')
     notify_block.append("")
     notify_block.append("# [notify.email]")
     notify_block.append('# smtp_host = "smtp.gmail.com"')
-    notify_block.append('# smtp_port = 587')
+    notify_block.append("# smtp_port = 587")
     notify_block.append('# smtp_user = "you@example.com"')
     notify_block.append('# smtp_password_env = "QUILL_SMTP_PASS"')
 
@@ -925,21 +963,30 @@ def _wizard_notifications(out: Console) -> None:
         return
 
     if enable_macos:
-        out.print("  [green]✓[/green] notifications: macOS Notification Center "
-                  "[dim](Slack / email / webhook stubs commented in config.toml)[/dim]")
+        out.print(
+            "  [green]✓[/green] notifications: macOS Notification Center "
+            "[dim](Slack / email / webhook stubs commented in config.toml)[/dim]"
+        )
     else:
-        out.print("  [green]✓[/green] notification stubs written "
-                  "[dim](edit config.toml to enable Slack / email / webhook)[/dim]")
+        out.print(
+            "  [green]✓[/green] notification stubs written "
+            "[dim](edit config.toml to enable Slack / email / webhook)[/dim]"
+        )
 
     # Step 3 in the researcher's flow: send a test notification immediately
     # so the user closes the "did it actually fire?" loop on first install.
     if not enable_macos:
         return
     try:
-        ans = typer.prompt(
-            "  send a test notification now? (Y/n)",
-            default="Y", show_default=False,
-        ).strip().lower()
+        ans = (
+            typer.prompt(
+                "  send a test notification now? (Y/n)",
+                default="Y",
+                show_default=False,
+            )
+            .strip()
+            .lower()
+        )
     except (KeyboardInterrupt, EOFError):
         ans = "n"
     if ans == "n":
@@ -948,9 +995,11 @@ def _wizard_notifications(out: Console) -> None:
     # Inline-fire the macOS channel synchronously (don't shell out to
     # `quill notify test` - that re-reads config; we're already in-process).
     from quill.notify import BlockMessage, NotifyConfig, _send_macos
+
     test_cfg = NotifyConfig(enabled=True, macos=True, sound="Glass", on_blocked=True)
     test_msg = BlockMessage(
-        risk="critical", decision="blocked",
+        risk="critical",
+        decision="blocked",
         tool_name="quill.start_wizard_test",
         args_preview={},
         what="quill is wired up",
@@ -959,11 +1008,15 @@ def _wizard_notifications(out: Console) -> None:
         approve_token="WIZARD",  # noqa: S106 - synthetic stub, never persisted
     )
     if _send_macos(test_cfg, test_msg):
-        out.print("  [green]✓[/green] test banner fired "
-                  "[dim](check Notification Center; Focus mode can suppress)[/dim]")
+        out.print(
+            "  [green]✓[/green] test banner fired "
+            "[dim](check Notification Center; Focus mode can suppress)[/dim]"
+        )
     else:
-        out.print("  [yellow]⚠[/yellow] osascript reported failure "
-                  "[dim](check System Settings → Notifications → Script Editor)[/dim]")
+        out.print(
+            "  [yellow]⚠[/yellow] osascript reported failure "
+            "[dim](check System Settings → Notifications → Script Editor)[/dim]"
+        )
 
 
 @app.command()
@@ -975,7 +1028,8 @@ def start(
     yes: Annotated[
         bool,
         typer.Option(
-            "--yes", "-y",
+            "--yes",
+            "-y",
             help="don't prompt for the telemetry decision (leaves it as-is)",
         ),
     ] = False,
@@ -999,8 +1053,10 @@ def start(
             out.print(f"  [dim]reaped pid {pid}: {reason}[/dim]")
 
     out.print()
-    out.print("[bold]quill[/bold] [dim]· the pause button between AI agents "
-              "and the things you can't undo[/dim]")
+    out.print(
+        "[bold]quill[/bold] [dim]· the pause button between AI agents "
+        "and the things you can't undo[/dim]"
+    )
     out.print()
 
     # 1. Install the Claude Code PreToolUse hook (idempotent)
@@ -1015,9 +1071,12 @@ def start(
     # floor is ready the first time the operator runs `quill shell`. Best-effort.
     try:
         from quill import esf as _esf
+
         _esf.write_ruleset()
-        out.print("  [green]✓[/green] kernel-layer ruleset compiled "
-                  "[dim](run `quill shell` to confine a session at the kernel)[/dim]")
+        out.print(
+            "  [green]✓[/green] kernel-layer ruleset compiled "
+            "[dim](run `quill shell` to confine a session at the kernel)[/dim]"
+        )
     except Exception:
         pass
 
@@ -1026,21 +1085,23 @@ def start(
     # agent auto-detection, risk presets - lives in `quill onboard`. Telemetry
     # stays OFF unless you explicitly run `quill telemetry on`.
     tel_on = tel.TelemetryState.load().opted_in
-    out.print(f"  [green]✓[/green] telemetry: "
-              f"[{'green' if tel_on else 'dim'}]{'on' if tel_on else 'off (default)'}[/]")
+    out.print(
+        f"  [green]✓[/green] telemetry: "
+        f"[{'green' if tel_on else 'dim'}]{'on' if tel_on else 'off (default)'}[/]"
+    )
     _ = yes  # retained for compatibility; start is now non-interactive
 
     # 3. Doctor sanity-check (silent unless something's wrong)
     report = run_doctor()
     if report.has_failures:
         out.print()
-        out.print("  [red]✗ install has failures. run [bold]quill doctor[/bold] "
-                  "to see them.[/red]")
+        out.print("  [red]✗ install has failures. run [bold]quill doctor[/bold] to see them.[/red]")
         return
     if report.has_warnings:
         warns = [r for r in report.results if r.status == "[yellow]WARN[/yellow]"]
-        out.print(f"  [yellow]⚠[/yellow] {len(warns)} warning(s)  "
-                  f"[dim](quill doctor for details)[/dim]")
+        out.print(
+            f"  [yellow]⚠[/yellow] {len(warns)} warning(s)  [dim](quill doctor for details)[/dim]"
+        )
     else:
         out.print("  [green]✓[/green] install looks clean")
 
@@ -1055,27 +1116,48 @@ def start(
             n_events = sum(1 for _ in f)
 
     pid, bound_port = watch_mod.ensure_daemon(
-        log, port=watch_mod.DEFAULT_PORT, open_browser=False,
+        log,
+        port=watch_mod.DEFAULT_PORT,
+        open_browser=False,
     )
     url = f"http://127.0.0.1:{bound_port}/"
 
-    out.print(f"  [bold cyan]quill is live.[/bold cyan]  "
-              f"dashboard: [bold]{url}[/bold]  [dim](pid {pid})[/dim]")
+    out.print(
+        f"  [bold cyan]quill is live.[/bold cyan]  "
+        f"dashboard: [bold]{url}[/bold]  [dim](pid {pid})[/dim]"
+    )
     out.print(f"  [dim]audit log: {log} · {n_events} entries[/dim]")
     out.print()
-    out.print("  [bold green]you're covered.[/bold green] every agent action now clears quill first:")
-    out.print("    [green]✓[/green] risk gate          [dim]allow, ask, or deny on every Bash / Edit / Write / MCP call[/dim]")
-    out.print("    [green]✓[/green] secret scanning    [dim]credentials caught before they are written[/dim]")
-    out.print("    [green]✓[/green] lethal trifecta    [dim]untrusted input + private data + exfil path = blocked[/dim]")
-    out.print("    [green]✓[/green] self-tamper guard  [dim]edits to the gate's own config, key, and off-switch refused[/dim]")
-    out.print("    [green]✓[/green] tamper-evident log [dim]signed and chained, verify with `quill audit verify`[/dim]")
-    out.print("    [dim]○ kernel floor        run `quill shell` to confine the session at the syscall (`--seal` locks writes + egress)[/dim]")
+    out.print(
+        "  [bold green]you're covered.[/bold green] every agent action now clears quill first:"
+    )
+    out.print(
+        "    [green]✓[/green] risk gate          [dim]allow, ask, or deny on every Bash / Edit / Write / MCP call[/dim]"
+    )
+    out.print(
+        "    [green]✓[/green] secret scanning    [dim]credentials caught before they are written[/dim]"
+    )
+    out.print(
+        "    [green]✓[/green] lethal trifecta    [dim]untrusted input + private data + exfil path = blocked[/dim]"
+    )
+    out.print(
+        "    [green]✓[/green] self-tamper guard  [dim]edits to the gate's own config, key, and off-switch refused[/dim]"
+    )
+    out.print(
+        "    [green]✓[/green] tamper-evident log [dim]signed and chained, verify with `quill audit verify`[/dim]"
+    )
+    out.print(
+        "    [dim]○ kernel floor        run `quill shell` to confine the session at the syscall (`--seal` locks writes + egress)[/dim]"
+    )
     out.print()
-    out.print("  [dim]watch live: quill watch  ·  pause: quill off  ·  review: quill saves  ·  daemon survives close, stop with quill stop[/dim]")
+    out.print(
+        "  [dim]watch live: quill watch  ·  pause: quill off  ·  review: quill saves  ·  daemon survives close, stop with quill stop[/dim]"
+    )
 
     if not no_browser:
         try:
             import webbrowser
+
             webbrowser.open(url)
         except Exception:
             pass
@@ -1084,6 +1166,7 @@ def start(
 # --------------------------------------------------------------------------
 # night / day - overnight auto-approval for unattended agents
 # --------------------------------------------------------------------------
+
 
 @app.command("night")
 def night_cmd(
@@ -1135,7 +1218,9 @@ def night_cmd(
             "CRITICAL actions (rm -rf, DROP TABLE, vercel --prod, sudo, force-push) "
             "still gate. sleep well."
         )
-        console.print("[dim]run `quill day` to flip off sooner, or `quill night status` to check.[/dim]")
+        console.print(
+            "[dim]run `quill day` to flip off sooner, or `quill night status` to check.[/dim]"
+        )
         return
 
     if cmd == "off":
@@ -1157,7 +1242,9 @@ def night_cmd(
                 f"overnight recap: [bold]{state.high_approved}[/bold] HIGH auto-approved, "
                 f"[bold]{state.critical_blocked}[/bold] CRITICAL still blocked."
             )
-            console.print("[dim]run `quill audit show --since 12h` to review what was auto-approved.[/dim]")
+            console.print(
+                "[dim]run `quill audit show --since 12h` to review what was auto-approved.[/dim]"
+            )
         return
 
     if cmd == "status":
@@ -1205,12 +1292,15 @@ def day_cmd() -> None:
             f"overnight recap: [bold]{state.high_approved}[/bold] HIGH auto-approved, "
             f"[bold]{state.critical_blocked}[/bold] CRITICAL still blocked."
         )
-        console.print("[dim]run `quill audit show --since 12h` to review what was auto-approved.[/dim]")
+        console.print(
+            "[dim]run `quill audit show --since 12h` to review what was auto-approved.[/dim]"
+        )
 
 
 # --------------------------------------------------------------------------
 # pause / resume - the bounded, audited off switch
 # --------------------------------------------------------------------------
+
 
 def _parse_duration_hours(s: str) -> float | None:
     """Parse a human duration like '30m', '2h', '90m', '1.5h', '45' (minutes
@@ -1244,7 +1334,7 @@ def _emit_gate_event(event_type: str, payload: dict[str, Any]) -> None:
             )
 
 
-def _require_disable_auth(console) -> None:
+def _require_disable_auth(console: Console) -> None:
     """Require Touch ID before turning the gate OFF, when biometry is available.
 
     Closes the self-disable hole: an agent that runs `quill off` to neuter the
@@ -1341,7 +1431,9 @@ def off_cmd(
             "set_via": "quill off",
         },
     )
-    console.print("[bold yellow]quill gate OFF[/bold yellow] - all tool calls will be allowed and logged.")
+    console.print(
+        "[bold yellow]quill gate OFF[/bold yellow] - all tool calls will be allowed and logged."
+    )
     console.print(f"auto-resumes at [bold]{state.expires_at}[/bold] (in {for_}).")
     if reason:
         console.print(f"reason logged: [dim]{reason}[/dim]")
@@ -1421,11 +1513,15 @@ def shell_cmd(
     ] = False,
     no_network: Annotated[
         bool,
-        typer.Option("--no-network", help="seal egress to localhost without full write confinement."),
+        typer.Option(
+            "--no-network", help="seal egress to localhost without full write confinement."
+        ),
     ] = False,
     dry_run: Annotated[
         bool,
-        typer.Option("--dry-run", help="print the generated profile and the launch command, then exit."),
+        typer.Option(
+            "--dry-run", help="print the generated profile and the launch command, then exit."
+        ),
     ] = False,
 ) -> None:
     """launch a kernel-confined session (macOS Seatbelt floor).
@@ -1458,15 +1554,17 @@ def shell_cmd(
         )
         raise typer.Exit(1)
 
-    cwd = os.getcwd()
+    cwd = str(Path.cwd())
     spec = _sb.build_spec(cwd=cwd, confine_writes=seal, seal_network=seal or no_network)
     profile = _sb.write_profile(spec)
 
     inner = command or [os.environ.get("SHELL", "/bin/zsh")]
     argv = _sb.launch_argv(profile, inner)
 
-    posture = "SEAL (writes confined + egress sealed)" if seal else (
-        "FLOOR + egress sealed" if no_network else "FLOOR (gate-disable surface denied)"
+    posture = (
+        "SEAL (writes confined + egress sealed)"
+        if seal
+        else ("FLOOR + egress sealed" if no_network else "FLOOR (gate-disable surface denied)")
     )
     if dry_run:
         console.print(f"[bold]profile[/bold] -> {profile}\n")
@@ -1488,14 +1586,18 @@ def shell_cmd(
 
 @sandbox_app.command("profile")
 def sandbox_profile_cmd(
-    seal: Annotated[bool, typer.Option("--seal", help="render the high-assurance profile.")] = False,
-    write: Annotated[bool, typer.Option("--write", help="write to <QUILL_HOME>/quill.sb instead of stdout.")] = False,
+    seal: Annotated[
+        bool, typer.Option("--seal", help="render the high-assurance profile.")
+    ] = False,
+    write: Annotated[
+        bool, typer.Option("--write", help="write to <QUILL_HOME>/quill.sb instead of stdout.")
+    ] = False,
 ) -> None:
     """print (or write) the generated Seatbelt profile for the current directory."""
     from quill import sandbox as _sb
 
     console = Console()
-    spec = _sb.build_spec(cwd=os.getcwd(), confine_writes=seal, seal_network=seal)
+    spec = _sb.build_spec(cwd=str(Path.cwd()), confine_writes=seal, seal_network=seal)
     if write:
         p = _sb.write_profile(spec)
         console.print(f"[green]wrote[/green] {p}")
@@ -1505,7 +1607,9 @@ def sandbox_profile_cmd(
 
 @esf_app.command("compile")
 def esf_compile_cmd(
-    show: Annotated[bool, typer.Option("--show", help="print the ruleset instead of writing it.")] = False,
+    show: Annotated[
+        bool, typer.Option("--show", help="print the ruleset instead of writing it.")
+    ] = False,
 ) -> None:
     """compile the protected-path policy into the ES extension's ruleset JSON.
 
@@ -1519,12 +1623,15 @@ def esf_compile_cmd(
     console = Console()
     if show:
         import json as _json
+
         console.print(_json.dumps(_esf.compile_ruleset(), indent=2))
         return
     p = _esf.write_ruleset()
     rs = _esf.compile_ruleset()
     n = len(rs["protected_files"]) + len(rs["protected_prefixes"])
-    console.print(f"[green]wrote[/green] {p}  [dim]({n} protected paths, fail_closed={rs['fail_closed']})[/dim]")
+    console.print(
+        f"[green]wrote[/green] {p}  [dim]({n} protected paths, fail_closed={rs['fail_closed']})[/dim]"
+    )
 
 
 @esf_app.command("status")
@@ -1536,12 +1643,17 @@ def esf_status_cmd() -> None:
     p = _esf.ruleset_path()
     if p.exists():
         import json as _json
+
         rs = _json.loads(p.read_text())
         n = len(rs.get("protected_files", [])) + len(rs.get("protected_prefixes", []))
         console.print(f"ruleset: [green]compiled[/green] at {p} ({n} protected paths)")
     else:
-        console.print(f"ruleset: [yellow]not compiled[/yellow] - run `quill esf compile` (would write {p})")
-    console.print("[dim]extension source: native/quill-esf/ · build/test: native/quill-esf/build.sh test[/dim]")
+        console.print(
+            f"ruleset: [yellow]not compiled[/yellow] - run `quill esf compile` (would write {p})"
+        )
+    console.print(
+        "[dim]extension source: native/quill-esf/ · build/test: native/quill-esf/build.sh test[/dim]"
+    )
 
 
 def _print_pause_status(console: Console) -> None:
@@ -1562,6 +1674,7 @@ def _print_pause_status(console: Console) -> None:
 # --------------------------------------------------------------------------
 # init
 # --------------------------------------------------------------------------
+
 
 @app.command(hidden=True)
 def init(
@@ -1590,6 +1703,7 @@ def init(
 # --------------------------------------------------------------------------
 # serve
 # --------------------------------------------------------------------------
+
 
 @app.command(hidden=True)
 def serve(
@@ -1628,7 +1742,10 @@ def serve(
             )
             prompter = Prompter()
             proxy = QuillProxy(
-                config=cfg, audit=audit, prompter=prompter, intent=intent,
+                config=cfg,
+                audit=audit,
+                prompter=prompter,
+                intent=intent,
             )
             async with proxy:
                 console.print(
@@ -1653,6 +1770,7 @@ def serve(
 # --------------------------------------------------------------------------
 # tail
 # --------------------------------------------------------------------------
+
 
 @app.command(hidden=True)
 def tail(
@@ -1681,17 +1799,17 @@ def tail(
         "critical": "bold red",
     }
     type_glyph = {
-        "session.start": ("cyan",     "▸ session"),
-        "session.end":   ("cyan",     "◂ session"),
-        "agent.spawned": ("magenta",  "▸ spawn"),
-        "agent.closed":  ("magenta",  "◂ close"),
-        "tool.attempted": ("dim",     "· attempt"),
-        "tool.completed": ("green",   "✓ done"),
-        "tool.errored":   ("red",     "✗ error"),
-        "verdict.allowed":         ("green",    "✓ allow"),
-        "verdict.blocked":         ("bold red", "✗ block"),
-        "verdict.scope_violation": ("magenta",  "✗ scope"),
-        "verdict.ask":             ("yellow",   "? ask"),
+        "session.start": ("cyan", "▸ session"),
+        "session.end": ("cyan", "◂ session"),
+        "agent.spawned": ("magenta", "▸ spawn"),
+        "agent.closed": ("magenta", "◂ close"),
+        "tool.attempted": ("dim", "· attempt"),
+        "tool.completed": ("green", "✓ done"),
+        "tool.errored": ("red", "✗ error"),
+        "verdict.allowed": ("green", "✓ allow"),
+        "verdict.blocked": ("bold red", "✗ block"),
+        "verdict.scope_violation": ("magenta", "✗ scope"),
+        "verdict.ask": ("yellow", "? ask"),
     }
 
     def _summarise(evt: dict[str, object]) -> str:
@@ -1786,6 +1904,7 @@ def tail(
 
     # Tail: re-open and seek to end, poll for new lines.
     import time
+
     with p.open() as f:
         f.seek(0, 2)
         while True:
@@ -1799,6 +1918,7 @@ def tail(
 # --------------------------------------------------------------------------
 # audit verify / show
 # --------------------------------------------------------------------------
+
 
 @audit_app.command("verify")
 def audit_verify(
@@ -1875,7 +1995,8 @@ def audit_export(
     fmt: Annotated[
         str,
         typer.Option(
-            "--format", "-f",
+            "--format",
+            "-f",
             help="emit format: html | md | pdf | all (default: both md+html)",
         ),
     ] = "both",
@@ -1927,8 +2048,10 @@ def audit_export(
     if mitre_atlas:
         standards.append("MITRE ATLAS")
     if not standards:
-        console.print("[red]no standards selected - pass --aiuc-1 or "
-                      "--eu-ai-act-art-14, or use --pack for the full set[/red]")
+        console.print(
+            "[red]no standards selected - pass --aiuc-1 or "
+            "--eu-ai-act-art-14, or use --pack for the full set[/red]"
+        )
         raise typer.Exit(code=1)
 
     # Verify the chain so the export reports tamper-evidence status honestly.
@@ -2194,8 +2317,7 @@ def audit_repair(
             },
         )
     console.print(
-        f"[green]repaired[/green] {len(repaired_lines)} entries; "
-        f"chain.repaired event appended.",
+        f"[green]repaired[/green] {len(repaired_lines)} entries; chain.repaired event appended.",
     )
 
 
@@ -2221,7 +2343,7 @@ def audit_show(
         typer.Option(
             "--raw",
             help="show every audit event separately instead of pairing "
-                 "tool.attempted with its verdict",
+            "tool.attempted with its verdict",
         ),
     ] = False,
     full: Annotated[
@@ -2229,21 +2351,23 @@ def audit_show(
         typer.Option(
             "--full",
             help="show full reason text wrapped across multiple lines. "
-                 "Default is one-line-per-row with truncation.",
+            "Default is one-line-per-row with truncation.",
         ),
     ] = False,
     project: Annotated[
         Path | None,
         typer.Option(
-            "--project", "-P",
+            "--project",
+            "-P",
             help="filter to events whose cwd is inside this directory "
-                 "(uses the cwd recorded by the Claude Code hook adapter)",
+            "(uses the cwd recorded by the Claude Code hook adapter)",
         ),
     ] = None,
     sub_only: Annotated[
         bool,
         typer.Option(
-            "--sub", help="show only events from spawned sub-agents",
+            "--sub",
+            help="show only events from spawned sub-agents",
         ),
     ] = False,
 ) -> None:
@@ -2265,16 +2389,20 @@ def audit_show(
     # filters at the event level (applied before pairing)
     if project is not None:
         proj = str(project.expanduser().resolve())
+
         def _in_project(e: dict[str, Any]) -> bool:
             cwd = (e.get("payload") or {}).get("cwd") or ""
             return isinstance(cwd, str) and (
                 cwd == proj or cwd.startswith(proj + "/") or cwd.startswith(proj + "\\")
             )
+
         events = [e for e in events if _in_project(e)]
     if sub_only:
+
         def _is_sub(e: dict[str, Any]) -> bool:
             p_ = (e.get("payload") or {}).get("parent_session_id")
             return bool(p_)
+
         events = [e for e in events if _is_sub(e)]
 
     risk_style = {
@@ -2284,16 +2412,19 @@ def audit_show(
         "critical": "bold red",
     }
     verdict_glyph = {
-        "verdict.allowed":         ("green",    "✓ allow"),
-        "verdict.blocked":         ("bold red", "✗ block"),
-        "verdict.scope_violation": ("magenta",  "✗ scope"),
-        "verdict.ask":             ("yellow",   "? ask "),
+        "verdict.allowed": ("green", "✓ allow"),
+        "verdict.blocked": ("bold red", "✗ block"),
+        "verdict.scope_violation": ("magenta", "✗ scope"),
+        "verdict.ask": ("yellow", "? ask "),
     }
 
     out = Console()
     table = Table(
-        show_header=True, header_style="dim",
-        box=None, pad_edge=False, show_lines=False,
+        show_header=True,
+        header_style="dim",
+        box=None,
+        pad_edge=False,
+        show_lines=False,
     )
 
     if raw:
@@ -2301,13 +2432,13 @@ def audit_show(
         # Same vocabulary as the paired view + tail: ✓ allow / ? ask /
         # ✗ block / ✗ scope / ▸ spawn / ↳ sub.
         type_label = {
-            "session.start":          ("cyan",     "▸ session"),
-            "session.end":            ("cyan",     "◂ session"),
-            "agent.spawned":          ("magenta",  "▸ spawn"),
-            "agent.closed":           ("magenta",  "◂ close"),
-            "tool.attempted":         ("dim",      "· attempt"),
-            "tool.completed":         ("green",    "✓ done"),
-            "tool.errored":           ("red",      "✗ error"),
+            "session.start": ("cyan", "▸ session"),
+            "session.end": ("cyan", "◂ session"),
+            "agent.spawned": ("magenta", "▸ spawn"),
+            "agent.closed": ("magenta", "◂ close"),
+            "tool.attempted": ("dim", "· attempt"),
+            "tool.completed": ("green", "✓ done"),
+            "tool.errored": ("red", "✗ error"),
             **{k: v for k, v in verdict_glyph.items()},
         }
 
@@ -2358,7 +2489,8 @@ def audit_show(
                 str(evt.get("ts", ""))[11:19],
                 f"[{rcolor}]{risk}[/{rcolor}]",
                 f"[{tcolor}]{tlabel}[/{tcolor}]",
-                tool_cell, text,
+                tool_cell,
+                text,
             )
         legend_bits = [
             "[green]✓ allow[/green]",
@@ -2425,8 +2557,10 @@ def audit_show(
         return
 
     has_subs = any(
-        (r["payload_verdict"].get("parent_session_id")
-         or r["payload_attempt"].get("parent_session_id"))
+        (
+            r["payload_verdict"].get("parent_session_id")
+            or r["payload_attempt"].get("parent_session_id")
+        )
         for r in rows
     )
 
@@ -2453,8 +2587,9 @@ def audit_show(
 
         # Split the new "<reason> · try instead: <suggestion>" format so the
         # suggestion can render on its own row underneath, in steel-blue.
-        raw_reason = str(verdict.get("reason") or verdict.get("risk_reason")
-                          or attempt.get("risk_reason") or "")
+        raw_reason = str(
+            verdict.get("reason") or verdict.get("risk_reason") or attempt.get("risk_reason") or ""
+        )
         suggestion = ""
         if " · try instead: " in raw_reason:
             short_reason, suggestion = raw_reason.split(" · try instead: ", 1)
@@ -2464,8 +2599,7 @@ def audit_show(
             short_reason = short_reason[:60]
 
         # sub-agent decoration - visible by default
-        parent = (verdict.get("parent_session_id")
-                  or attempt.get("parent_session_id") or "")
+        parent = verdict.get("parent_session_id") or attempt.get("parent_session_id") or ""
         sub_label = session_labels.get(str(r["session_id"]), "")
         if parent and sub_label:
             tool_cell = f"[magenta]↳ {sub_label}[/magenta]  [dim]{tool}[/dim]"
@@ -2478,7 +2612,9 @@ def audit_show(
             str(r["ts"])[11:19],
             f"[{vcolor}]{vlabel}[/{vcolor}]",
             f"[{rcolor}]{risk}[/{rcolor}]",
-            tool_cell, what, short_reason,
+            tool_cell,
+            what,
+            short_reason,
         )
         # Conditional hint-lane row underneath. Only renders for blocked /
         # ask events that carry a paste-able suggestion. Steel-blue accent
@@ -2487,7 +2623,10 @@ def audit_show(
         if suggestion:
             sugg_text = suggestion if full else suggestion[:90]
             table.add_row(
-                "", "", "", "",
+                "",
+                "",
+                "",
+                "",
                 f"[#{HINT[1:]}]↪ try[/]",
                 f"[#{HINT[1:]}]{sugg_text}[/]",
             )
@@ -2509,14 +2648,21 @@ def audit_show(
     counts = {"allow": 0, "block": 0, "ask  ": 0, "scope": 0}
     for r in rows:
         v = str(r["verdict"])
-        if v == "verdict.allowed": counts["allow"] += 1
-        elif v == "verdict.blocked": counts["block"] += 1
-        elif v == "verdict.ask": counts["ask  "] += 1
-        elif v == "verdict.scope_violation": counts["scope"] += 1
+        if v == "verdict.allowed":
+            counts["allow"] += 1
+        elif v == "verdict.blocked":
+            counts["block"] += 1
+        elif v == "verdict.ask":
+            counts["ask  "] += 1
+        elif v == "verdict.scope_violation":
+            counts["scope"] += 1
     sub_n = sum(
-        1 for r in rows
-        if (r["payload_verdict"].get("parent_session_id")
-            or r["payload_attempt"].get("parent_session_id"))
+        1
+        for r in rows
+        if (
+            r["payload_verdict"].get("parent_session_id")
+            or r["payload_attempt"].get("parent_session_id")
+        )
     )
     parts = [f"{k.strip()}={v}" for k, v in counts.items() if v]
     if sub_n:
@@ -2530,17 +2676,18 @@ def audit_summary(
     since: Annotated[
         str,
         typer.Option(
-            "--since", "-s",
-            help="window to recap. Examples: 12h, 1d, 7d, 30m, 2h30m. "
-                 "Units: s/m/h/d/w.",
+            "--since",
+            "-s",
+            help="window to recap. Examples: 12h, 1d, 7d, 30m, 2h30m. Units: s/m/h/d/w.",
         ),
     ] = "12h",
     fmt: Annotated[
         str,
         typer.Option(
-            "--format", "-f",
+            "--format",
+            "-f",
             help="output format: markdown (default, Substack-ready), "
-                 "json (raw data), or table (rich terminal).",
+            "json (raw data), or table (rich terminal).",
         ),
     ] = "markdown",
     log_path: Annotated[
@@ -2557,7 +2704,8 @@ def audit_summary(
     output: Annotated[
         Path | None,
         typer.Option(
-            "--out", "-o",
+            "--out",
+            "-o",
             help="write the rendered report to this file instead of stdout.",
         ),
     ] = None,
@@ -2588,8 +2736,7 @@ def audit_summary(
     fmt_norm = (fmt or "markdown").strip().lower()
     if fmt_norm not in ("markdown", "md", "json", "table"):
         console.print(
-            f"[red]unknown --format[/red] {fmt!r}; "
-            "expected one of: markdown, json, table",
+            f"[red]unknown --format[/red] {fmt!r}; expected one of: markdown, json, table",
         )
         raise typer.Exit(code=2)
 
@@ -2632,6 +2779,7 @@ def audit_summary(
             # piping into a file even though markdown is the better choice
             # for files.
             from io import StringIO
+
             buf = StringIO()
             tmp = Console(file=buf, force_terminal=False, width=120)
             tmp.print(table)
@@ -2655,6 +2803,7 @@ def audit_summary(
 # --------------------------------------------------------------------------
 # tree
 # --------------------------------------------------------------------------
+
 
 @app.command(hidden=True)
 def tree(
@@ -2689,6 +2838,7 @@ def tree(
 # --------------------------------------------------------------------------
 # doctor - install diagnostic
 # --------------------------------------------------------------------------
+
 
 @app.command()
 def doctor(
@@ -2738,6 +2888,7 @@ def doctor(
 # claude-hook  (Claude Code PreToolUse adapter)
 # --------------------------------------------------------------------------
 
+
 @app.command("claude-hook", hidden=True)
 def claude_hook() -> None:
     """Run as Claude Code's PreToolUse hook.
@@ -2778,7 +2929,9 @@ def claude_hook_install(
     nothing.
     """
     p, already = cc_adapter.install_into_settings(
-        settings_path, matcher=matcher, timeout=timeout,
+        settings_path,
+        matcher=matcher,
+        timeout=timeout,
     )
     if already:
         console.print(f"[dim]already installed in[/dim] {p}")
@@ -2791,6 +2944,7 @@ def claude_hook_install(
 # cursor-hook  (Cursor 1.7+ pre-tool-call adapter)
 # --------------------------------------------------------------------------
 
+
 @app.command("cursor-hook", hidden=True)
 def cursor_hook() -> None:
     """Run as Cursor's pre-tool-call hook.
@@ -2802,6 +2956,7 @@ def cursor_hook() -> None:
     Install with:  quill cursor-hook-install
     """
     from quill.adapters import cursor as cursor_adapter
+
     raise typer.Exit(code=cursor_adapter.main())
 
 
@@ -2822,6 +2977,7 @@ def cursor_hook_install(
     Requires Cursor 1.7+.
     """
     from quill.adapters import cursor as cursor_adapter
+
     p, already = cursor_adapter.install_into_settings(settings_path)
     if already:
         console.print(f"[dim]already installed in[/dim] {p}")
@@ -2834,14 +2990,14 @@ def cursor_hook_install(
 # telemetry - opt-in anonymous aggregate usage
 # --------------------------------------------------------------------------
 
+
 @telemetry_app.command("status")
 def telemetry_status() -> None:
     """Show whether telemetry is opted-in, and where state lives."""
     s = tel.TelemetryState.load()
     out = Console()
     out.print(f"  install_id : [dim]{s.install_id}[/dim]")
-    out.print(f"  opted_in   : [{'green' if s.opted_in else 'yellow'}]"
-              f"{s.opted_in}[/]")
+    out.print(f"  opted_in   : [{'green' if s.opted_in else 'yellow'}]{s.opted_in}[/]")
     out.print(f"  asked      : {s.asked} {('@ ' + s.asked_at) if s.asked_at else ''}")
     out.print(f"  endpoint   : {s.endpoint}")
     out.print(f"  state file : {tel._state_path()}")
@@ -2897,6 +3053,7 @@ def telemetry_show(
 # journal - write a session log to the AgentOS vault
 # --------------------------------------------------------------------------
 
+
 @journal_app.command("save")
 def journal_save(
     transcript: Annotated[
@@ -2904,14 +3061,15 @@ def journal_save(
         typer.Option(
             "--transcript",
             help="path to the Claude Code transcript JSONL (read from "
-                 "stdin's transcript_path if not given)",
+            "stdin's transcript_path if not given)",
         ),
     ] = None,
     sessions_dir: Annotated[
         Path | None,
         typer.Option(
-            "--out", help="vault Sessions/ directory (default: "
-                          "~/agentbrain/AgentOS-Vault/ClaudeCode/Sessions/)",
+            "--out",
+            help="vault Sessions/ directory (default: "
+            "~/agentbrain/AgentOS-Vault/ClaudeCode/Sessions/)",
         ),
     ] = None,
 ) -> None:
@@ -2941,6 +3099,7 @@ def journal_save(
     reason = str(payload.get("reason") or "transcript_end")
     if session_id:
         from quill.journal import _check_session_drift, _emit_session_close
+
         _emit_session_close(session_id, cwd, reason)
         _check_session_drift(session_id, cwd)
 
@@ -2959,6 +3118,7 @@ def journal_save(
 # watch - live observability dashboard
 # --------------------------------------------------------------------------
 
+
 @app.command("watch")
 def watch(
     log_path: Annotated[
@@ -2976,9 +3136,10 @@ def watch(
     terminal: Annotated[
         bool,
         typer.Option(
-            "--terminal", "-t",
+            "--terminal",
+            "-t",
             help="spawn a Terminal window running `quill tree --live` "
-                 "instead of the browser dashboard (macOS only)",
+            "instead of the browser dashboard (macOS only)",
         ),
     ] = False,
     once: Annotated[
@@ -2986,7 +3147,7 @@ def watch(
         typer.Option(
             "--once",
             help="if a Quill watcher is already running, exit silently. "
-                 "Useful in SessionStart hooks so windows don't stack.",
+            "Useful in SessionStart hooks so windows don't stack.",
         ),
     ] = False,
     daemon: Annotated[
@@ -2994,7 +3155,7 @@ def watch(
         typer.Option(
             "--daemon",
             help="start the BROWSER dashboard as a detached background "
-                 "process and return immediately. Idempotent.",
+            "process and return immediately. Idempotent.",
         ),
     ] = False,
     daemon_child: Annotated[
@@ -3002,7 +3163,7 @@ def watch(
         typer.Option(
             "--daemon-child",
             help="(internal) the actual daemon process - runs the server "
-                 "and writes the PID file. Spawned by --daemon.",
+            "and writes the PID file. Spawned by --daemon.",
             hidden=True,
         ),
     ] = False,
@@ -3011,7 +3172,7 @@ def watch(
         typer.Option(
             "--browser",
             help="use the localhost browser dashboard instead of the "
-                 "in-terminal TUI. Default is now the TUI.",
+            "in-terminal TUI. Default is now the TUI.",
         ),
     ] = False,
 ) -> None:
@@ -3045,7 +3206,9 @@ def watch(
 
     if daemon:
         pid, bound_port = watch_mod.ensure_daemon(
-            p, port=port, open_browser=False,
+            p,
+            port=port,
+            open_browser=False,
         )
         url = f"http://127.0.0.1:{bound_port}/"
         Console().print(
@@ -3056,6 +3219,7 @@ def watch(
         if not no_browser:
             try:
                 import webbrowser
+
                 webbrowser.open(url)
             except Exception:
                 pass
@@ -3069,6 +3233,7 @@ def watch(
 
     # Default: in-terminal TUI. Lives in this terminal until `q`.
     from quill.tui import run_tui
+
     run_tui(p)
 
 
@@ -3083,6 +3248,7 @@ def _watcher_already_running(port: int) -> bool:
     """Cheap probe: bind-check the port. If something is listening, assume
     it's a prior `quill watch` so the SessionStart hook doesn't stack."""
     import socket
+
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(0.2)
     try:
@@ -3108,14 +3274,20 @@ def _spawn_terminal_tree(log_path: Path, *, once: bool) -> None:
         return
 
     import subprocess
+
     sentinel = "QUILL_TREE_LIVE"
     if once:
         # Already-open detection: AppleScript looks for a window with the sentinel.
         check = subprocess.run(
-            ["osascript", "-e",
-             'tell application "Terminal" to '
-             'get count of (windows whose name contains "' + sentinel + '")'],
-            capture_output=True, text=True, check=False,
+            [
+                "osascript",
+                "-e",
+                'tell application "Terminal" to '
+                'get count of (windows whose name contains "' + sentinel + '")',
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if (check.stdout or "").strip().isdigit() and int(check.stdout.strip()) > 0:
             return  # already showing
@@ -3131,22 +3303,24 @@ def _spawn_terminal_tree(log_path: Path, *, once: bool) -> None:
     # error is debuggable instead of silently closing.
     cmd = (
         f'echo \\"[{sentinel}]\\"; export PS1=\\"\\" ; '
-        f'quill tree --live --log {log_path}; '
+        f"quill tree --live --log {log_path}; "
         f'ec=$?; echo \\"\\"; echo \\"quill tree exited (code $ec). '
         f'press enter to close.\\"; read'
     )
     osa = (
         f'tell application "Terminal"\n'
-        f'  activate\n'
+        f"  activate\n"
         f'  set newTab to do script "{cmd}"\n'
         f'  set custom title of newTab to "{sentinel} · quill tree"\n'
-        f'  set frontmost of (first window whose tabs contains newTab) to true\n'
-        f'end tell\n'
+        f"  set frontmost of (first window whose tabs contains newTab) to true\n"
+        f"end tell\n"
     )
     try:
         r = subprocess.run(
             ["osascript", "-e", osa],
-            check=False, capture_output=True, text=True,
+            check=False,
+            capture_output=True,
+            text=True,
         )
         if r.returncode == 0:
             Console().print("  [green]opened[/green] Terminal window: quill tree --live")
@@ -3160,6 +3334,7 @@ def _spawn_terminal_tree(log_path: Path, *, once: bool) -> None:
 # --------------------------------------------------------------------------
 # decay - Permission Decay framework
 # --------------------------------------------------------------------------
+
 
 @decay_app.command("show")
 def decay_show(
@@ -3179,18 +3354,18 @@ def decay_show(
     perms = store.all()
     if not perms:
         out.print("[dim]no tracked permissions yet.[/dim]")
-        out.print("  permissions register the first time a config policy "
-                  "override fires; check back after running Claude Code.")
+        out.print(
+            "  permissions register the first time a config policy "
+            "override fires; check back after running Claude Code."
+        )
         return
 
     decayed = sorted(store.decayed(), key=lambda p: p.age_days, reverse=True)
     approaching = sorted(store.approaching(), key=lambda p: p.days_left)
-    healthy = [p for p in perms if not p.is_decayed
-               and p not in approaching]
+    healthy = [p for p in perms if not p.is_decayed and p not in approaching]
 
     if decayed:
-        out.print(f"[bold red]decayed ({len(decayed)})[/bold red] "
-                  "[dim]- action required[/dim]")
+        out.print(f"[bold red]decayed ({len(decayed)})[/bold red] [dim]- action required[/dim]")
         t = Table(box=None, pad_edge=False, show_header=True, header_style="dim")
         t.add_column("kind", style="dim")
         t.add_column("pattern")
@@ -3199,10 +3374,14 @@ def decay_show(
         t.add_column("uses", justify="right")
         t.add_column("decay_action")
         for p in decayed:
-            t.add_row(p.kind, p.pattern,
-                      f"[red]{p.age_days}[/red]",
-                      str(p.decay_after_days),
-                      str(p.use_count), p.decay_action)
+            t.add_row(
+                p.kind,
+                p.pattern,
+                f"[red]{p.age_days}[/red]",
+                str(p.decay_after_days),
+                str(p.use_count),
+                p.decay_action,
+            )
         out.print(t)
         out.print()
 
@@ -3214,9 +3393,7 @@ def decay_show(
         t.add_column("days left", justify="right")
         t.add_column("uses", justify="right")
         for p in approaching:
-            t.add_row(p.kind, p.pattern,
-                      f"[yellow]{p.days_left}[/yellow]",
-                      str(p.use_count))
+            t.add_row(p.kind, p.pattern, f"[yellow]{p.days_left}[/yellow]", str(p.use_count))
         out.print(t)
         out.print()
 
@@ -3229,14 +3406,18 @@ def decay_show(
         t.add_column("uses", justify="right")
         t.add_column("last use", style="dim")
         for p in healthy:
-            t.add_row(p.kind, p.pattern,
-                      f"[green]{p.days_left}[/green]",
-                      str(p.use_count),
-                      str(p.last_use)[:19])
+            t.add_row(
+                p.kind,
+                p.pattern,
+                f"[green]{p.days_left}[/green]",
+                str(p.use_count),
+                str(p.last_use)[:19],
+            )
         out.print(t)
     elif healthy and not all_:
-        out.print(f"[dim]+ {len(healthy)} healthy permission(s) "
-                  "(quill decay show --all to see)[/dim]")
+        out.print(
+            f"[dim]+ {len(healthy)} healthy permission(s) (quill decay show --all to see)[/dim]"
+        )
 
 
 @decay_app.command("reaffirm")
@@ -3255,8 +3436,9 @@ def decay_reaffirm(
         if p is None:
             out.print(f"[yellow]no permission found at {kind}:{pattern}[/yellow]")
             raise typer.Exit(code=1)
-        out.print(f"[green]reaffirmed[/green] {p.key}  "
-                  f"[dim](age 0d, {p.decay_after_days}d window)[/dim]")
+        out.print(
+            f"[green]reaffirmed[/green] {p.key}  [dim](age 0d, {p.decay_after_days}d window)[/dim]"
+        )
         return
     # best-match: any kind matching the pattern
     matches = [p for p in store.all() if p.pattern == pattern]
@@ -3265,8 +3447,9 @@ def decay_reaffirm(
         raise typer.Exit(code=1)
     for m in matches:
         store.reaffirm(m.kind, m.pattern)
-    out.print(f"[green]reaffirmed[/green] {len(matches)} permission(s) "
-              f"matching pattern '{pattern}'")
+    out.print(
+        f"[green]reaffirmed[/green] {len(matches)} permission(s) matching pattern '{pattern}'"
+    )
 
 
 @decay_app.command("forget")
@@ -3293,6 +3476,7 @@ def decay_forget(
 # --------------------------------------------------------------------------
 # version
 # --------------------------------------------------------------------------
+
 
 @app.command()
 def version() -> None:
@@ -3344,7 +3528,8 @@ def receipts_list(
     receipts = derive_from_events(events)
     ordered = sorted(
         (
-            r for r in receipts.values()
+            r
+            for r in receipts.values()
             if include_test_sessions or not _is_test_session_id(r.session_id)
         ),
         key=lambda r: r.opened_at or r.closed_at or "",
@@ -3405,8 +3590,10 @@ def receipts_show(
     out.print(f"  closed: {r.closed_at or '(open)'}")
     if r.intent:
         out.print(f"  intent: {r.intent}")
-    out.print(f"  TDR={r.tdr_contribution:.2f}  trust_delta={r.trust_delta:+.2f}  "
-              f"calls={r.tool_call_count}  interventions={r.intervention_count}")
+    out.print(
+        f"  TDR={r.tdr_contribution:.2f}  trust_delta={r.trust_delta:+.2f}  "
+        f"calls={r.tool_call_count}  interventions={r.intervention_count}"
+    )
     if r.did:
         out.print(f"\n[bold]did[/bold] ({len(r.did)})")
         for d in r.did:
@@ -3432,7 +3619,9 @@ def receipts_show(
 @bridge_app.command("show")
 def bridge_show(
     log_path: Annotated[Path | None, typer.Option("--log", "-l")] = None,
-    orphans_only: Annotated[bool, typer.Option("--orphans", help="show only unmatched handoffs")] = False,
+    orphans_only: Annotated[
+        bool, typer.Option("--orphans", help="show only unmatched handoffs")
+    ] = False,
     include_test_sessions: Annotated[
         bool,
         typer.Option(
@@ -3482,8 +3671,7 @@ def bridge_show(
         rendered += 1
     if rendered == 0:
         console.print(
-            "[dim]no real handoff events yet "
-            "(use --include-test-sessions to see fixtures)[/dim]",
+            "[dim]no real handoff events yet (use --include-test-sessions to see fixtures)[/dim]",
         )
         return
     Console().print(table)
@@ -3498,7 +3686,9 @@ def bridge_show(
 @trifecta_app.command("show")
 def trifecta_show(
     log_path: Annotated[Path | None, typer.Option("--log", "-l")] = None,
-    closed_only: Annotated[bool, typer.Option("--closed", help="only sessions that crossed all three lines")] = False,
+    closed_only: Annotated[
+        bool, typer.Option("--closed", help="only sessions that crossed all three lines")
+    ] = False,
     include_test_sessions: Annotated[
         bool,
         typer.Option(
@@ -3531,12 +3721,18 @@ def trifecta_show(
             continue
         if not include_test_sessions and _is_test_session_id(sid):
             continue
-        flag_count = sum([
-            state.has_seen_untrusted, state.has_accessed_private, state.can_exfiltrate,
-        ])
+        flag_count = sum(
+            [
+                state.has_seen_untrusted,
+                state.has_accessed_private,
+                state.can_exfiltrate,
+            ]
+        )
         verdict = (
-            "[red]all three[/red]" if state.trifecta_closed
-            else f"[yellow]{flag_count}-of-3[/yellow]" if flag_count == 2
+            "[red]all three[/red]"
+            if state.trifecta_closed
+            else f"[yellow]{flag_count}-of-3[/yellow]"
+            if flag_count == 2
             else "[green]safe[/green]"
         )
         table.add_row(
@@ -3549,8 +3745,7 @@ def trifecta_show(
         rendered += 1
     if rendered == 0:
         console.print(
-            "[dim]no real session exposure yet "
-            "(use --include-test-sessions to see fixtures)[/dim]",
+            "[dim]no real session exposure yet (use --include-test-sessions to see fixtures)[/dim]",
         )
         return
     Console().print(table)
@@ -3585,8 +3780,12 @@ def pins_list(
             continue
         status = "[red]revoked[/red]" if pin.revoked_at else "[green]active[/green]"
         table.add_row(
-            up, name, pin.digest[:12] + "…",
-            pin.first_seen[:19], pin.approved_by, status,
+            up,
+            name,
+            pin.digest[:12] + "…",
+            pin.first_seen[:19],
+            pin.approved_by,
+            status,
         )
     Console().print(table)
 
@@ -3680,6 +3879,7 @@ def approve_token(
     biometric_event: str | None = None
     if not no_biometric:
         from quill import touchid
+
         if touchid.is_available():
             console.print(
                 f"  [dim]Touch ID required to approve "
@@ -3701,7 +3901,10 @@ def approve_token(
                     "  approval REVOKED. agent retry will not be allowed.",
                 )
                 _emit_approve_audit(
-                    biometric_event, token, ap.tool_name, biometric_reason,
+                    biometric_event,
+                    token,
+                    ap.tool_name,
+                    biometric_reason,
                 )
                 raise typer.Exit(code=2)
         elif require_biometric:
@@ -3712,7 +3915,10 @@ def approve_token(
                 "  approval REVOKED.",
             )
             _emit_approve_audit(
-                ev.APPROVE_BIOMETRIC_DENY, token, ap.tool_name, "not_available",
+                ev.APPROVE_BIOMETRIC_DENY,
+                token,
+                ap.tool_name,
+                "not_available",
             )
             raise typer.Exit(code=2)
         else:
@@ -3739,10 +3945,14 @@ def approve_token(
 
 
 def _emit_approve_audit(
-    event_type: str, token: str, tool_name: str, reason: str,
+    event_type: str,
+    token: str,
+    tool_name: str,
+    reason: str,
 ) -> None:
     """Best-effort emit a Touch ID outcome to the chained audit log."""
     from quill.audit import AuditLog
+
     try:
         key = _hmac_key()
         with AuditLog(path=default_audit_path(), hmac_key=key) as audit:
@@ -3782,8 +3992,10 @@ def approvals_list() -> None:
     table.add_column("reason", overflow="fold")
     for ap in active:
         table.add_row(
-            ap.token, ap.tool_name,
-            ap.issued_at[:19], ap.expires_at[:19],
+            ap.token,
+            ap.tool_name,
+            ap.issued_at[:19],
+            ap.expires_at[:19],
             ap.reason[:80],
         )
     Console().print(table)
@@ -3818,6 +4030,7 @@ def _load_or_init_config_toml() -> tuple[Path, dict[str, object]]:
     still pass Pydantic validation - QuillConfig requires SessionConfig.
     """
     import sys as _sys
+
     if _sys.version_info >= (3, 11):
         import tomllib as _tomllib
     else:
@@ -3985,6 +4198,7 @@ def trust_check(
 ) -> None:
     """Test whether a given directory is currently trusted."""
     from quill.paths import is_trusted_cwd
+
     target = cwd or str(Path.cwd())
     resolved = str(Path(target).expanduser().resolve(strict=False))
     if is_trusted_cwd(resolved):
@@ -4006,7 +4220,8 @@ def notify_test(
     channel: Annotated[
         str | None,
         typer.Option(
-            "--channel", "-c",
+            "--channel",
+            "-c",
             help="only fire one channel (macos|email|slack|webhook); default is all",
         ),
     ] = None,
@@ -4068,8 +4283,7 @@ def notify_test(
     if channel:
         if channel not in senders:
             console.print(
-                f"[red]unknown channel[/red] {channel!r} - "
-                f"valid: {', '.join(senders)}",
+                f"[red]unknown channel[/red] {channel!r} - valid: {', '.join(senders)}",
             )
             raise typer.Exit(code=1)
         senders = {channel: senders[channel]}
@@ -4084,24 +4298,27 @@ def notify_test(
     for name, sender in senders.items():
         configured = _channel_configured(notify_cfg, name)
         if not configured:
-            table.add_row(name, "[dim]no[/dim]", "-",
-                          "(not in [notify] section)")
+            table.add_row(name, "[dim]no[/dim]", "-", "(not in [notify] section)")
             results[name] = False
             continue
         try:
             ok = bool(sender(notify_cfg, msg))
         except Exception as e:
-            table.add_row(name, "[green]yes[/green]", "[red]✗ error[/red]",
-                          f"{type(e).__name__}: {e}")
+            table.add_row(
+                name, "[green]yes[/green]", "[red]✗ error[/red]", f"{type(e).__name__}: {e}"
+            )
             results[name] = False
             continue
         results[name] = ok
         if ok:
-            table.add_row(name, "[green]yes[/green]", "[green]✓[/green]",
-                          "channel reports success")
+            table.add_row(name, "[green]yes[/green]", "[green]✓[/green]", "channel reports success")
         else:
-            table.add_row(name, "[green]yes[/green]", "[yellow]✗[/yellow]",
-                          "channel returned False (check creds / focus mode / network)")
+            table.add_row(
+                name,
+                "[green]yes[/green]",
+                "[yellow]✗[/yellow]",
+                "channel returned False (check creds / focus mode / network)",
+            )
 
     Console().print(table)
 
@@ -4131,8 +4348,7 @@ def notify_test(
         )
         raise typer.Exit(code=2)
     console.print(
-        "[dim]audit-logged as[/dim] notify.dispatched "
-        "[dim](tool_name=quill.notify_test)[/dim]",
+        "[dim]audit-logged as[/dim] notify.dispatched [dim](tool_name=quill.notify_test)[/dim]",
     )
 
 
@@ -4167,7 +4383,10 @@ def _suggestion_key(s: dict[str, Any]) -> str:
 def suggestions_list(
     only: Annotated[
         str | None,
-        typer.Option("--only", help="filter by type: tightening_auto_applied | loosening_candidate | operator_anomaly | drift_detected"),
+        typer.Option(
+            "--only",
+            help="filter by type: tightening_auto_applied | loosening_candidate | operator_anomaly | drift_detected",
+        ),
     ] = None,
     limit: Annotated[
         int,
@@ -4177,6 +4396,7 @@ def suggestions_list(
     """List learner-surfaced suggestions, newest first. Dedup by
     (type, pattern_id) so a streak of the same suggestion shows once."""
     from quill.learning import read_suggestions
+
     raw = read_suggestions(limit=limit * 5)
     raw.sort(key=lambda s: s.get("ts", 0), reverse=True)
     seen: set[str] = set()
@@ -4216,8 +4436,7 @@ def suggestions_list(
             console.print(f"          [dim]{ev[:140]}[/dim]")
         if s.get("type") == "loosening_candidate":
             console.print(
-                f"          [bold]apply:[/bold] quill suggestions promote "
-                f"\"{_suggestion_key(s)}\""
+                f'          [bold]apply:[/bold] quill suggestions promote "{_suggestion_key(s)}"'
             )
 
 
@@ -4230,6 +4449,7 @@ def suggestions_show(
 ) -> None:
     """Show full detail for one suggestion."""
     from quill.learning import read_suggestions
+
     raw = read_suggestions(limit=1000)
     matching = [s for s in raw if _suggestion_key(s) == key]
     if not matching:
@@ -4255,27 +4475,27 @@ def suggestions_promote(
     explicit approval lives here - the learner never wrote it itself.
     """
     from quill.learning import read_suggestions
+
     raw = read_suggestions(limit=1000)
-    matching = [s for s in raw if _suggestion_key(s) == key
-                and s.get("type") == "loosening_candidate"]
+    matching = [
+        s for s in raw if _suggestion_key(s) == key and s.get("type") == "loosening_candidate"
+    ]
     if not matching:
-        console.print(
-            f"[yellow]no loosening_candidate matching key:[/yellow] {key}"
-        )
+        console.print(f"[yellow]no loosening_candidate matching key:[/yellow] {key}")
         raise typer.Exit(code=1)
     s = matching[-1]
 
-    overrides_path = Path(os.environ.get(
-        "QUILL_OVERRIDES",
-        str(Path.home() / ".quill" / "overrides.toml"),
-    )).expanduser()
+    overrides_path = Path(
+        os.environ.get(
+            "QUILL_OVERRIDES",
+            str(Path.home() / ".quill" / "overrides.toml"),
+        )
+    ).expanduser()
     overrides_path.parent.mkdir(parents=True, exist_ok=True)
 
     pattern_id = str(s.get("pattern_id") or "")
     # Make a TOML-safe section name
-    section = "".join(
-        c if c.isalnum() or c in "_-" else "_" for c in pattern_id
-    )[:60]
+    section = "".join(c if c.isalnum() or c in "_-" else "_" for c in pattern_id)[:60]
     existing = overrides_path.read_text() if overrides_path.exists() else ""
     block = (
         f"\n[overrides.{section}]\n"
@@ -4290,6 +4510,7 @@ def suggestions_promote(
 
     # Append a tracking entry to suggestions.jsonl
     from quill.learning import append_suggestion, log_event
+
     promo = {
         "ts": time.time(),
         "type": "loosening_promoted",
@@ -4323,6 +4544,7 @@ def suggestions_cleanup(
     Idempotent: a second invocation after the first removes nothing.
     """
     from quill.learning import cleanup_stale_patterns, find_stale_patterns
+
     if dry_run:
         stale = find_stale_patterns()
         if not stale:
@@ -4356,6 +4578,7 @@ def suggestions_dismiss(
     suggestions.jsonl so subsequent `list` calls hide it. Append-only;
     no in-place edits."""
     from quill.learning import append_suggestion, log_event
+
     entry = {
         "ts": time.time(),
         "type": "dismissed",
@@ -4400,10 +4623,7 @@ def log_cmd(
     sug_path = _suggestions_path()
 
     if not log_path.exists() and not sug_path.exists():
-        console.print(
-            "[dim]no learner activity yet. The log lives at "
-            f"{log_path}.[/dim]"
-        )
+        console.print(f"[dim]no learner activity yet. The log lives at {log_path}.[/dim]")
         return
 
     def _print_recent() -> None:

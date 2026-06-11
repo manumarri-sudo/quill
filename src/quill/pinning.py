@@ -18,6 +18,7 @@ let it bypass pinning by being excluded.
 Persisted at $QUILL_HOME/tool_pins.jsonl, mode 0o600. Append-only by design;
 revocation = appending a `revoked` event, not deleting the prior pin.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -75,6 +76,7 @@ class ToolPin:
 
 def _path() -> Path:
     from quill.paths import default_path
+
     return default_path("tool_pins.jsonl", env_override="QUILL_PINS_FILE")
 
 
@@ -129,6 +131,7 @@ class PinStore:
         with self.path.open("a") as f:
             try:
                 import fcntl
+
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 try:
                     f.write(line)
@@ -166,6 +169,7 @@ class PinStore:
         # Hidden-instruction scan runs BEFORE pin lookup so a freshly
         # poisoned tool fails on first sight, not only on rug-pull.
         from quill.tool_scan import scan as _scan
+
         scan_result = _scan(tool)
         if not scan_result.safe:
             details = "; ".join(f.detail for f in scan_result.findings)
@@ -180,10 +184,15 @@ class PinStore:
         existing = self.pins.get((upstream, name))
         now = datetime.now(UTC).isoformat()
         if existing is None:
-            self._append(ToolPin(
-                upstream=upstream, name=name, digest=digest,
-                first_seen=now, approved_by="auto",
-            ))
+            self._append(
+                ToolPin(
+                    upstream=upstream,
+                    name=name,
+                    digest=digest,
+                    first_seen=now,
+                    approved_by="auto",
+                )
+            )
             return True, "first sight; auto-pinned"
         if existing.revoked_at:
             return False, f"pin revoked at {existing.revoked_at}"
@@ -197,22 +206,30 @@ class PinStore:
 
     def approve(self, upstream: str, name: str, digest: str, *, by: str = "user") -> None:
         """Replace a pin with a new digest after user approval."""
-        self._append(ToolPin(
-            upstream=upstream, name=name, digest=digest,
-            first_seen=datetime.now(UTC).isoformat(),
-            approved_by=by,
-        ))
+        self._append(
+            ToolPin(
+                upstream=upstream,
+                name=name,
+                digest=digest,
+                first_seen=datetime.now(UTC).isoformat(),
+                approved_by=by,
+            )
+        )
 
     def revoke(self, upstream: str, name: str) -> None:
         """Mark a pin revoked. Future verify() will refuse."""
         existing = self.pins.get((upstream, name))
         digest = existing.digest if existing else ""
-        self._append(ToolPin(
-            upstream=upstream, name=name, digest=digest,
-            first_seen=existing.first_seen if existing else datetime.now(UTC).isoformat(),
-            approved_by=existing.approved_by if existing else "auto",
-            revoked_at=datetime.now(UTC).isoformat(),
-        ))
+        self._append(
+            ToolPin(
+                upstream=upstream,
+                name=name,
+                digest=digest,
+                first_seen=existing.first_seen if existing else datetime.now(UTC).isoformat(),
+                approved_by=existing.approved_by if existing else "auto",
+                revoked_at=datetime.now(UTC).isoformat(),
+            )
+        )
 
 
 def filter_pinned(

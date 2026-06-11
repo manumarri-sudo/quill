@@ -17,6 +17,7 @@ journal parser bug for ~3 weeks. A broken gate that fails-open is
 worse than no gate; the test must surface the problem at startup
 rather than at first-tool-call.
 """
+
 from __future__ import annotations
 
 import time
@@ -25,17 +26,20 @@ import time
 def _reset_self_test_cache(monkeypatch) -> None:
     """Each test starts with a fresh cache flag."""
     import quill.adapters.claude_code as cc
+
     monkeypatch.setattr(cc, "_SELF_TEST_DONE", False, raising=False)
 
 
 # ---------------------------------------------------------------------------
 # Test 1: Self-test passes under the default classifier.
 
+
 def test_self_test_passes_default_classifier(monkeypatch) -> None:
     _reset_self_test_cache(monkeypatch)
     # Make sure the test isn't sandbagged by env flags.
     monkeypatch.delenv("QUILL_NO_SELF_TEST", raising=False)
     from quill.adapters.claude_code import self_test
+
     ok, reason = self_test()
     assert ok, f"default classifier should pass self-test; got: {reason}"
     assert reason == "ok"
@@ -50,6 +54,7 @@ def test_self_test_passes_default_classifier(monkeypatch) -> None:
 # Test 2: When the critical-payload classifier fails-open, self-test
 # detects + reports it.
 
+
 def test_self_test_detects_misconfigured_classifier_that_fails_open(
     monkeypatch,
 ) -> None:
@@ -63,7 +68,9 @@ def test_self_test_detects_misconfigured_classifier_that_fails_open(
 
     def broken_decide(tool_name, tool_input):
         return HookDecision(
-            permission="allow", reason="STUB", risk=Risk.LOW,
+            permission="allow",
+            reason="STUB",
+            risk=Risk.LOW,
             audit_event_type="verdict.allowed",
         )
 
@@ -78,6 +85,7 @@ def test_self_test_detects_misconfigured_classifier_that_fails_open(
 # Test 3: When the low-payload classifier fails-closed (denies
 # everything), self-test detects + reports it.
 
+
 def test_self_test_detects_classifier_that_denies_everything(
     monkeypatch,
 ) -> None:
@@ -89,8 +97,10 @@ def test_self_test_detects_classifier_that_denies_everything(
 
     def deny_everything(tool_name, tool_input):
         return HookDecision(
-            permission="deny", reason="STUB-DENY",
-            risk=Risk.CRITICAL, audit_event_type="verdict.blocked",
+            permission="deny",
+            reason="STUB-DENY",
+            risk=Risk.CRITICAL,
+            audit_event_type="verdict.blocked",
         )
 
     monkeypatch.setattr(cc, "decide", deny_everything)
@@ -102,6 +112,7 @@ def test_self_test_detects_classifier_that_denies_everything(
 
 # ---------------------------------------------------------------------------
 # Test 4: Self-test is fast + cached.
+
 
 def test_self_test_is_fast_and_cached(monkeypatch) -> None:
     _reset_self_test_cache(monkeypatch)
@@ -126,8 +137,7 @@ def test_self_test_is_fast_and_cached(monkeypatch) -> None:
     t1 = time.perf_counter()
     total_ms = (t1 - t0) * 1000
     assert total_ms < 5.0, (
-        f"100 cached self-tests took {total_ms:.2f}ms; expected <5ms. "
-        f"Cache hit path is too slow."
+        f"100 cached self-tests took {total_ms:.2f}ms; expected <5ms. Cache hit path is too slow."
     )
 
     # QUILL_NO_SELF_TEST env override returns the skip reason without

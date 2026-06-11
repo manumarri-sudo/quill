@@ -32,6 +32,7 @@ Two postures:
     egress to localhost. High assurance, may break tools that write outside
     the allowlist. For running untrusted work.
 """
+
 from __future__ import annotations
 
 import os
@@ -42,8 +43,13 @@ from pathlib import Path
 # Shell rc / login files an agent could write to persist env (e.g. QUILL_*
 # escape-hatch vars) into the next session. Denied as exact literals.
 _SHELL_RC = (
-    ".zshrc", ".zprofile", ".zshenv", ".zlogin",
-    ".bashrc", ".bash_profile", ".profile",
+    ".zshrc",
+    ".zprofile",
+    ".zshenv",
+    ".zlogin",
+    ".bashrc",
+    ".bash_profile",
+    ".profile",
 )
 
 # Gate-disable surface: the files an agent would rewrite to neuter Quill or
@@ -57,11 +63,11 @@ _PROTECTED_FILES = (
     "~/.quill/config.toml",
     "~/.quill/overrides.toml",
     "~/.quill/key",
-    "~/.quill/pause.json",   # the gate-off state; agent must not flip it directly
+    "~/.quill/pause.json",  # the gate-off state; agent must not flip it directly
 )
 _PROTECTED_TREES = (
-    "~/.claude/hooks",          # the firewall / trust-ladder hook scripts
-    "~/Library/LaunchAgents",   # login-item persistence
+    "~/.claude/hooks",  # the firewall / trust-ladder hook scripts
+    "~/Library/LaunchAgents",  # login-item persistence
 )
 
 # Always writable, even under --seal: the gate and host harness must keep
@@ -76,8 +82,15 @@ _ALWAYS_WRITABLE = (
 # Common tool caches a dev toolchain writes outside the project. Included
 # in the --seal allowlist so `pip`, `npm`, `cargo`, etc. keep working.
 _DEV_CACHES = (
-    "~/Library/Caches", "~/.cache", "~/.npm", "~/.cargo", "~/.rustup",
-    "~/.gradle", "~/.m2", "~/.pyenv", "~/.config",
+    "~/Library/Caches",
+    "~/.cache",
+    "~/.npm",
+    "~/.cargo",
+    "~/.rustup",
+    "~/.gradle",
+    "~/.m2",
+    "~/.pyenv",
+    "~/.config",
 )
 
 
@@ -112,8 +125,8 @@ class SandboxSpec:
     writable: list[str] = field(default_factory=list)
     protected_files: list[str] = field(default_factory=list)
     protected_trees: list[str] = field(default_factory=list)
-    confine_writes: bool = False      # True under --seal
-    network: str = "all"              # "all" | "localhost"
+    confine_writes: bool = False  # True under --seal
+    network: str = "all"  # "all" | "localhost"
 
 
 def default_protected() -> tuple[list[str], list[str]]:
@@ -132,6 +145,7 @@ def default_writable(cwd: str | None = None) -> list[str]:
     paths: list[str] = []
     try:
         from quill.config import load_config
+
         cfg = load_config()
         paths += list(getattr(cfg.trust, "paths", []) or [])
     except Exception:
@@ -224,6 +238,7 @@ def build_profile(spec: SandboxSpec) -> str:
 def profile_path() -> Path:
     """Where the generated profile is written (`<QUILL_HOME>/quill.sb`)."""
     from quill.paths import default_path
+
     return default_path("quill.sb", env_override="QUILL_SANDBOX_PROFILE")
 
 

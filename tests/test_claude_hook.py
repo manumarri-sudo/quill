@@ -3,6 +3,7 @@
 Covers: stdin → stdout contract, decision matrix per built-in tool, audit
 log writes for every gate decision, install_into_settings idempotency.
 """
+
 from __future__ import annotations
 
 import json
@@ -69,15 +70,17 @@ def test_decision_matrix(
 
 
 def _stdin_for(tool_name: str, **input_fields: object) -> str:
-    return json.dumps({
-        "session_id": "abc",
-        "transcript_path": "/tmp/x.jsonl",
-        "cwd": "/tmp",
-        "permission_mode": "default",
-        "hook_event_name": "PreToolUse",
-        "tool_name": tool_name,
-        "tool_input": dict(input_fields),
-    })
+    return json.dumps(
+        {
+            "session_id": "abc",
+            "transcript_path": "/tmp/x.jsonl",
+            "cwd": "/tmp",
+            "permission_mode": "default",
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool_name,
+            "tool_input": dict(input_fields),
+        }
+    )
 
 
 def test_run_hook_returns_well_formed_response_for_critical(tmp_path: Path) -> None:
@@ -88,8 +91,10 @@ def test_run_hook_returns_well_formed_response_for_critical(tmp_path: Path) -> N
     assert "hookSpecificOutput" in out
     hso = out["hookSpecificOutput"]
     assert hso["permissionDecision"] == "deny"
-    assert "rm -rf" in hso["permissionDecisionReason"].lower() or \
-           "blocked" in hso["permissionDecisionReason"].lower()
+    assert (
+        "rm -rf" in hso["permissionDecisionReason"].lower()
+        or "blocked" in hso["permissionDecisionReason"].lower()
+    )
 
 
 def test_run_hook_allows_low_risk(tmp_path: Path) -> None:
@@ -121,7 +126,8 @@ def test_run_hook_malformed_input_still_includes_hook_event_name(tmp_path: Path)
 
 
 def test_run_hook_asks_on_high_risk(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Force bypass-mode off; this test pins the DEFAULT-classifier
     # behaviour, not the bypass-mode downshift (which is exercised in
@@ -192,7 +198,8 @@ def test_classify_event_returns_suggestion_for_dangerous_bash() -> None:
     """The whole point of suggestions: a paste-able safer alternative goes
     out with every CRITICAL/HIGH bash decision."""
     risk, reason, suggestion = classify_event(
-        "Bash", {"command": "git push --force origin main"},
+        "Bash",
+        {"command": "git push --force origin main"},
     )
     assert risk is Risk.CRITICAL
     assert suggestion, "git push --force should carry a suggestion"
@@ -221,7 +228,8 @@ def test_install_is_idempotent(tmp_path: Path) -> None:
     parsed = json.loads(p.read_text())
     blocks = parsed["hooks"]["PreToolUse"]
     quill_blocks = [
-        b for b in blocks
+        b
+        for b in blocks
         if any(h.get("command") == "quill claude-hook" for h in (b.get("hooks") or []))
     ]
     assert len(quill_blocks) == 1
@@ -229,16 +237,23 @@ def test_install_is_idempotent(tmp_path: Path) -> None:
 
 def test_install_preserves_existing_unrelated_hooks(tmp_path: Path) -> None:
     p = tmp_path / "settings.json"
-    p.write_text(json.dumps({
-        "hooks": {
-            "PreToolUse": [
-                {"matcher": "MyOtherThing", "hooks": [
-                    {"type": "command", "command": "/path/to/somethingelse"},
-                ]},
-            ],
-        },
-        "theme": "dark",
-    }))
+    p.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "MyOtherThing",
+                            "hooks": [
+                                {"type": "command", "command": "/path/to/somethingelse"},
+                            ],
+                        },
+                    ],
+                },
+                "theme": "dark",
+            }
+        )
+    )
     install_into_settings(p)
     parsed = json.loads(p.read_text())
     matchers = [b["matcher"] for b in parsed["hooks"]["PreToolUse"]]
@@ -259,29 +274,37 @@ def test_install_snippet_shape() -> None:
 
 
 def _payload(
-    *, tool_name: str, session_id: str, transcript: str, cwd: str,
+    *,
+    tool_name: str,
+    session_id: str,
+    transcript: str,
+    cwd: str,
     **input_fields: object,
 ) -> str:
-    return json.dumps({
-        "session_id": session_id,
-        "transcript_path": transcript,
-        "cwd": cwd,
-        "permission_mode": "default",
-        "hook_event_name": "PreToolUse",
-        "tool_name": tool_name,
-        "tool_input": dict(input_fields),
-    })
+    return json.dumps(
+        {
+            "session_id": session_id,
+            "transcript_path": transcript,
+            "cwd": cwd,
+            "permission_mode": "default",
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool_name,
+            "tool_input": dict(input_fields),
+        }
+    )
 
 
 def test_root_session_writes_no_parent_session_id(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
     log = tmp_path / "audit.jsonl"
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         run_hook(
             _payload(
-                tool_name="Bash", session_id="ses-root",
+                tool_name="Bash",
+                session_id="ses-root",
                 transcript=str(tmp_path / "t.jsonl"),
                 cwd=str(tmp_path / "myproject"),
                 command="ls",
@@ -296,7 +319,8 @@ def test_root_session_writes_no_parent_session_id(
 
 
 def test_subagent_spawn_emits_handoff_out(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When a SECOND session_id appears under the same transcript, that's
     a Task-spawned sub-agent. The parent's hook emits agent.handoff.out and
@@ -308,16 +332,20 @@ def test_subagent_spawn_emits_handoff_out(
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         run_hook(
             _payload(
-                tool_name="Bash", session_id="ses-root",
-                transcript=transcript, cwd="/x",
+                tool_name="Bash",
+                session_id="ses-root",
+                transcript=transcript,
+                cwd="/x",
                 command="ls",
             ),
             audit=audit,
         )
         run_hook(
             _payload(
-                tool_name="Bash", session_id="ses-sub",
-                transcript=transcript, cwd="/x",
+                tool_name="Bash",
+                session_id="ses-sub",
+                transcript=transcript,
+                cwd="/x",
                 command="git status",
             ),
             audit=audit,
@@ -332,8 +360,7 @@ def test_subagent_spawn_emits_handoff_out(
     assert "payload_hash" in handoff["payload"]
 
     sub_attempts = [
-        e for e in lines
-        if e["type"] == "tool.attempted" and e["session_id"] == "ses-sub"
+        e for e in lines if e["type"] == "tool.attempted" and e["session_id"] == "ses-sub"
     ]
     assert sub_attempts
     assert sub_attempts[0]["payload"]["parent_session_id"] == "ses-root"
@@ -341,7 +368,8 @@ def test_subagent_spawn_emits_handoff_out(
 
 
 def test_trust_scope_downshifts_default_edit_to_allow(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A default-HIGH-risk Edit inside a [trust] paths directory must
     downshift to LOW + auto-allow. This is the fix for approval
@@ -350,13 +378,7 @@ def test_trust_scope_downshifts_default_edit_to_allow(
     trusted = tmp_path / "trusted_repo"
     trusted.mkdir()
     config = tmp_path / "config.toml"
-    config.write_text(
-        '[session]\n'
-        'intent = "test"\n'
-        'scope = []\n\n'
-        '[trust]\n'
-        f'paths = ["{trusted}"]\n'
-    )
+    config.write_text(f'[session]\nintent = "test"\nscope = []\n\n[trust]\npaths = ["{trusted}"]\n')
     monkeypatch.setenv("QUILL_CONFIG", str(config))
     monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
     monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
@@ -367,9 +389,15 @@ def test_trust_scope_downshifts_default_edit_to_allow(
 
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         out = run_hook(
-            _payload(tool_name="Edit", session_id="s-edit",
-                     transcript=str(transcript), cwd=str(trusted),
-                     file_path="/x.py", old_string="a", new_string="b"),
+            _payload(
+                tool_name="Edit",
+                session_id="s-edit",
+                transcript=str(transcript),
+                cwd=str(trusted),
+                file_path="/x.py",
+                old_string="a",
+                new_string="b",
+            ),
             audit=audit,
         )
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
@@ -377,7 +405,8 @@ def test_trust_scope_downshifts_default_edit_to_allow(
 
 
 def test_trust_scope_does_not_downshift_outside_trusted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Edit outside any trusted path must still gate as ask.
 
@@ -391,10 +420,7 @@ def test_trust_scope_does_not_downshift_outside_trusted(
     untrusted = tmp_path / "untrusted_repo"
     untrusted.mkdir()
     config = tmp_path / "config.toml"
-    config.write_text(
-        '[session]\nintent = "test"\nscope = []\n\n'
-        f'[trust]\npaths = ["{trusted}"]\n'
-    )
+    config.write_text(f'[session]\nintent = "test"\nscope = []\n\n[trust]\npaths = ["{trusted}"]\n')
     monkeypatch.setenv("QUILL_CONFIG", str(config))
     monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
     monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
@@ -406,16 +432,23 @@ def test_trust_scope_does_not_downshift_outside_trusted(
 
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         out = run_hook(
-            _payload(tool_name="Edit", session_id="s-outside",
-                     transcript=str(transcript), cwd=str(untrusted),
-                     file_path="/x.py", old_string="a", new_string="b"),
+            _payload(
+                tool_name="Edit",
+                session_id="s-outside",
+                transcript=str(transcript),
+                cwd=str(untrusted),
+                file_path="/x.py",
+                old_string="a",
+                new_string="b",
+            ),
             audit=audit,
         )
     assert out["hookSpecificOutput"]["permissionDecision"] == "ask"
 
 
 def test_trust_scope_does_not_downshift_critical_commands(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """CRITICAL events MUST still deny even inside a trusted dir.
     Trust scope only downshifts the DEFAULT high-risk classification
@@ -426,10 +459,7 @@ def test_trust_scope_does_not_downshift_critical_commands(
     trusted = tmp_path / "trusted_repo"
     trusted.mkdir()
     config = tmp_path / "config.toml"
-    config.write_text(
-        '[session]\nintent = "test"\nscope = []\n\n'
-        f'[trust]\npaths = ["{trusted}"]\n'
-    )
+    config.write_text(f'[session]\nintent = "test"\nscope = []\n\n[trust]\npaths = ["{trusted}"]\n')
     monkeypatch.setenv("QUILL_CONFIG", str(config))
     monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
     monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
@@ -440,9 +470,13 @@ def test_trust_scope_does_not_downshift_critical_commands(
 
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         out = run_hook(
-            _payload(tool_name="Bash", session_id="s-vercel",
-                     transcript=str(transcript), cwd=str(trusted),
-                     command="vercel deploy --prod --yes"),
+            _payload(
+                tool_name="Bash",
+                session_id="s-vercel",
+                transcript=str(transcript),
+                cwd=str(trusted),
+                command="vercel deploy --prod --yes",
+            ),
             audit=audit,
         )
     # vercel --prod is classified critical/high by pattern; the trust
@@ -451,16 +485,14 @@ def test_trust_scope_does_not_downshift_critical_commands(
 
 
 def test_trust_scope_matches_subdirectories(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`~/repo` should cover `~/repo/src/app/page.tsx` too."""
     trusted = tmp_path / "trusted_repo"
     (trusted / "src" / "app").mkdir(parents=True)
     config = tmp_path / "config.toml"
-    config.write_text(
-        '[session]\nintent = "test"\nscope = []\n\n'
-        f'[trust]\npaths = ["{trusted}"]\n'
-    )
+    config.write_text(f'[session]\nintent = "test"\nscope = []\n\n[trust]\npaths = ["{trusted}"]\n')
     monkeypatch.setenv("QUILL_CONFIG", str(config))
     monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
     monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
@@ -471,10 +503,14 @@ def test_trust_scope_matches_subdirectories(
 
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         out = run_hook(
-            _payload(tool_name="Write", session_id="s-sub",
-                     transcript=str(transcript),
-                     cwd=str(trusted / "src" / "app"),
-                     file_path="/y.py", content="hi"),
+            _payload(
+                tool_name="Write",
+                session_id="s-sub",
+                transcript=str(transcript),
+                cwd=str(trusted / "src" / "app"),
+                file_path="/y.py",
+                content="hi",
+            ),
             audit=audit,
         )
     assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
@@ -482,7 +518,8 @@ def test_trust_scope_matches_subdirectories(
 
 
 def test_session_end_emits_session_close(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """SessionEnd hook must emit a `session.close` audit event so that
     `quill receipts` can derive `closed_at` and `duration_seconds` for
@@ -499,22 +536,34 @@ def test_session_end_emits_session_close(
 
     # Run a session: parent + sub-agent + a couple of calls.
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
-        run_hook(_payload(tool_name="Bash", session_id="ses-A",
-                          transcript=str(transcript), cwd=str(tmp_path),
-                          command="ls"), audit=audit)
-        run_hook(_payload(tool_name="Bash", session_id="ses-A",
-                          transcript=str(transcript), cwd=str(tmp_path),
-                          command="pwd"), audit=audit)
+        run_hook(
+            _payload(
+                tool_name="Bash",
+                session_id="ses-A",
+                transcript=str(transcript),
+                cwd=str(tmp_path),
+                command="ls",
+            ),
+            audit=audit,
+        )
+        run_hook(
+            _payload(
+                tool_name="Bash",
+                session_id="ses-A",
+                transcript=str(transcript),
+                cwd=str(tmp_path),
+                command="pwd",
+            ),
+            audit=audit,
+        )
 
     # Now emit session.close (what the SessionEnd hook does).
     from quill.journal import _emit_session_close
+
     _emit_session_close("ses-A", str(tmp_path), "user_quit")
 
     lines = [json.loads(line) for line in log.read_text().splitlines()]
-    closes = [
-        e for e in lines
-        if e["type"] == "session.close" and e["session_id"] == "ses-A"
-    ]
+    closes = [e for e in lines if e["type"] == "session.close" and e["session_id"] == "ses-A"]
     assert len(closes) == 1, f"expected 1 close, got {len(closes)}"
     close = closes[0]
     assert close["payload"]["reason"] == "user_quit"
@@ -524,7 +573,8 @@ def test_session_end_emits_session_close(
 
 
 def test_session_end_close_is_idempotent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Second SessionEnd for the same session must NOT emit a duplicate
     close event (e.g. Claude Code firing SessionEnd twice on exit).
@@ -538,22 +588,28 @@ def test_session_end_close_is_idempotent(
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
-        run_hook(_payload(tool_name="Bash", session_id="ses-B",
-                          transcript=str(transcript), cwd=str(tmp_path),
-                          command="ls"), audit=audit)
+        run_hook(
+            _payload(
+                tool_name="Bash",
+                session_id="ses-B",
+                transcript=str(transcript),
+                cwd=str(tmp_path),
+                command="ls",
+            ),
+            audit=audit,
+        )
     from quill.journal import _emit_session_close
+
     _emit_session_close("ses-B", str(tmp_path), "user_quit")
     _emit_session_close("ses-B", str(tmp_path), "user_quit")
     lines = [json.loads(line) for line in log.read_text().splitlines()]
-    closes = [
-        e for e in lines
-        if e["type"] == "session.close" and e["session_id"] == "ses-B"
-    ]
+    closes = [e for e in lines if e["type"] == "session.close" and e["session_id"] == "ses-B"]
     assert len(closes) == 1, "duplicate session.close emitted; not idempotent"
 
 
 def test_subagent_spawn_emits_paired_handoff_in(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Regression: every agent.handoff.out must be paired with an
     agent.handoff.in carrying the same payload_hash and referencing
@@ -565,13 +621,23 @@ def test_subagent_spawn_emits_paired_handoff_in(
     transcript = str(tmp_path / "t.jsonl")
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         run_hook(
-            _payload(tool_name="Bash", session_id="ses-root",
-                     transcript=transcript, cwd="/x", command="ls"),
+            _payload(
+                tool_name="Bash",
+                session_id="ses-root",
+                transcript=transcript,
+                cwd="/x",
+                command="ls",
+            ),
             audit=audit,
         )
         run_hook(
-            _payload(tool_name="Bash", session_id="ses-sub",
-                     transcript=transcript, cwd="/x", command="ls"),
+            _payload(
+                tool_name="Bash",
+                session_id="ses-sub",
+                transcript=transcript,
+                cwd="/x",
+                command="ls",
+            ),
             audit=audit,
         )
     lines = [json.loads(line) for line in log.read_text().splitlines()]
@@ -587,13 +653,15 @@ def test_subagent_spawn_emits_paired_handoff_in(
     assert ins[0]["session_id"] == "ses-sub"
     # Bridge fold reports the pair as non-orphan.
     from quill.bridge import fold_handoffs
+
     handoffs = fold_handoffs(lines)
     ph = outs[0]["payload"]["payload_hash"]
     assert not handoffs[ph].is_orphan
 
 
 def test_subagent_handoff_only_fires_once_per_session(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Multiple calls from the same sub-agent should NOT emit repeated
     agent.handoff.out events. Handoff fires once per session_id."""
@@ -603,14 +671,24 @@ def test_subagent_handoff_only_fires_once_per_session(
     transcript = str(tmp_path / "t.jsonl")
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         run_hook(
-            _payload(tool_name="Bash", session_id="ses-root",
-                     transcript=transcript, cwd="/x", command="ls"),
+            _payload(
+                tool_name="Bash",
+                session_id="ses-root",
+                transcript=transcript,
+                cwd="/x",
+                command="ls",
+            ),
             audit=audit,
         )
         for _ in range(3):
             run_hook(
-                _payload(tool_name="Bash", session_id="ses-sub",
-                         transcript=transcript, cwd="/x", command="ls"),
+                _payload(
+                    tool_name="Bash",
+                    session_id="ses-sub",
+                    transcript=transcript,
+                    cwd="/x",
+                    command="ls",
+                ),
                 audit=audit,
             )
     lines = [json.loads(l) for l in log.read_text().splitlines()]
@@ -619,7 +697,8 @@ def test_subagent_handoff_only_fires_once_per_session(
 
 
 def test_per_project_log_routing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If <cwd>/.quill/ exists, the hook routes the log there instead of
     the global ~/.quill/audit.log.jsonl."""
@@ -640,7 +719,8 @@ def test_per_project_log_routing(
 
 
 def test_per_project_config_optional(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from quill.adapters.claude_code import _resolve_project_paths
 
@@ -660,7 +740,8 @@ def test_per_project_config_optional(
 
 
 def test_quill_log_env_overrides_per_project(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from quill.adapters.claude_code import _resolve_project_paths
 

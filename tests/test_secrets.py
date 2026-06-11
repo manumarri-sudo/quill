@@ -4,6 +4,7 @@ Patterns are tested against vendor-shape sample values that are NOT
 real credentials. The strings here look like keys but they're random
 or revoked; they exist to exercise the regex set, not to leak anything.
 """
+
 from __future__ import annotations
 
 from quill.secrets import (
@@ -67,8 +68,7 @@ def test_slack_bot_token_detected():
 
 
 def test_slack_webhook_detected():
-    s = ("hook = https://hooks.slack.com/services/T00000000/"
-         "B11111111/abcdefghijklmnopqrstuvwx")
+    s = "hook = https://hooks.slack.com/services/T00000000/B11111111/abcdefghijklmnopqrstuvwx"
     hits = scan(s)
     assert any(h.pattern_name == "Slack Webhook URL" for h in hits)
 
@@ -80,10 +80,7 @@ def test_google_api_key_detected():
 
 
 def test_jwt_detected():
-    s = (
-        "Authorization: Bearer "
-        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signaturepartABCDEF"
-    )
+    s = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signaturepartABCDEF"
     hits = scan(s)
     assert any(h.pattern_name == "JWT" for h in hits)
 
@@ -195,11 +192,7 @@ def test_scan_args_clean_write_returns_empty():
 
 def test_hit_summary_handles_multiple_pattern_types():
     args = {
-        "content": (
-            "ghp_" + "A" * 36 + "\n"
-            "sk_live_" + "x" * 30 + "\n"
-            "sk_live_" + "y" * 30
-        ),
+        "content": ("ghp_" + "A" * 36 + "\nsk_live_" + "x" * 30 + "\nsk_live_" + "y" * 30),
     }
     hits = scan_args("Write", args)
     summary = hit_summary(hits)
@@ -212,6 +205,7 @@ def test_hit_summary_handles_multiple_pattern_types():
 
 def test_hit_carries_line_number():
     from quill.secrets import scan
+
     text = "first line, clean\nsecond line: ghp_" + "A" * 36 + "\nthird line\n"
     hits = scan(text)
     assert len(hits) == 1
@@ -220,17 +214,15 @@ def test_hit_carries_line_number():
 
 def test_hit_line_one_when_no_newline():
     from quill.secrets import scan
+
     hits = scan("ghp_" + "A" * 36)
     assert hits[0].line == 1
 
 
 def test_hit_summary_groups_lines_when_same_pattern_fires_multiple():
     from quill.secrets import scan
-    text = (
-        "ghp_" + "A" * 36 + "\n"
-        "ghp_" + "B" * 36 + "\n"
-        "ghp_" + "C" * 36 + "\n"
-    )
+
+    text = "ghp_" + "A" * 36 + "\nghp_" + "B" * 36 + "\nghp_" + "C" * 36 + "\n"
     hits = scan(text)
     summary = hit_summary(hits)
     # Three GitHub PATs at lines 1, 2, 3
@@ -280,6 +272,7 @@ def test_notion_integration_secret_detected():
 def test_classify_event_escalates_to_critical_on_secret_write():
     from quill.adapters.claude_code import classify_event
     from quill.policy import Risk
+
     args = {
         "file_path": "/x/config.py",
         "content": "TOKEN = 'ghp_" + "A" * 36 + "'",
@@ -292,6 +285,7 @@ def test_classify_event_escalates_to_critical_on_secret_write():
 
 def test_classify_event_normal_write_unaffected():
     from quill.adapters.claude_code import classify_event
+
     args = {"file_path": "/x/f.py", "content": "def add(a,b): return a+b"}
     risk, reason, suggestion = classify_event("Write", args)
     # Without secrets, Write keeps its default classification

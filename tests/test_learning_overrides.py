@@ -20,6 +20,7 @@ Four invariants under test:
      hook on the next invocation (no caching/staleness bug between
      write and read).
 """
+
 from __future__ import annotations
 
 import json
@@ -53,9 +54,7 @@ def _write_override(
     evidence: str = "manual test",
 ) -> None:
     """Format-compatible with what `quill suggestions promote` writes."""
-    section = "".join(
-        c if c.isalnum() or c in "_-" else "_" for c in pattern_id
-    )[:60]
+    section = "".join(c if c.isalnum() or c in "_-" else "_" for c in pattern_id)[:60]
     block = (
         f"\n[overrides.{section}]\n"
         f'pattern_id = "{pattern_id}"\n'
@@ -67,20 +66,26 @@ def _write_override(
     overrides_path.write_text(existing + block)
 
 
-def _payload(*, tool_name: str, session_id: str, transcript: str,
-             cwd: str, **tool_input) -> str:
-    return json.dumps({
-        "session_id": session_id, "transcript_path": transcript, "cwd": cwd,
-        "hook_event_name": "PreToolUse", "tool_name": tool_name,
-        "tool_input": tool_input,
-    })
+def _payload(*, tool_name: str, session_id: str, transcript: str, cwd: str, **tool_input) -> str:
+    return json.dumps(
+        {
+            "session_id": session_id,
+            "transcript_path": transcript,
+            "cwd": cwd,
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Test A1: A non-expired override downshifts default-HIGH Edit.
 
+
 def test_non_expired_override_downshifts_default_high_edit(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     overrides_path = tmp_path / "overrides.toml"
@@ -95,15 +100,22 @@ def test_non_expired_override_downshifts_default_high_edit(
 
     from quill.adapters.claude_code import run_hook
     from quill.audit import AuditLog
+
     log = tmp_path / "audit.jsonl"
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
 
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         out = run_hook(
-            _payload(tool_name="Edit", session_id="s",
-                     transcript=str(transcript), cwd=str(tmp_path),
-                     file_path="/x.py", old_string="a", new_string="b"),
+            _payload(
+                tool_name="Edit",
+                session_id="s",
+                transcript=str(transcript),
+                cwd=str(tmp_path),
+                file_path="/x.py",
+                old_string="a",
+                new_string="b",
+            ),
             audit=audit,
         )
 
@@ -116,8 +128,10 @@ def test_non_expired_override_downshifts_default_high_edit(
 # ---------------------------------------------------------------------------
 # Test A2: An expired override does NOT apply.
 
+
 def test_expired_override_does_not_apply(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     overrides_path = tmp_path / "overrides.toml"
@@ -131,15 +145,22 @@ def test_expired_override_does_not_apply(
 
     from quill.adapters.claude_code import run_hook
     from quill.audit import AuditLog
+
     log = tmp_path / "audit.jsonl"
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
 
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         out = run_hook(
-            _payload(tool_name="Edit", session_id="s",
-                     transcript=str(transcript), cwd=str(tmp_path),
-                     file_path="/x.py", old_string="a", new_string="b"),
+            _payload(
+                tool_name="Edit",
+                session_id="s",
+                transcript=str(transcript),
+                cwd=str(tmp_path),
+                file_path="/x.py",
+                old_string="a",
+                new_string="b",
+            ),
             audit=audit,
         )
 
@@ -154,8 +175,10 @@ def test_expired_override_does_not_apply(
 # Test A3: CRITICAL events are NOT downshifted, even when an override
 # exists for that pattern.
 
+
 def test_critical_pattern_not_downshifted_by_override(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """Safety invariant: an override only downshifts the DEFAULT-HIGH
     ask path. CRITICAL pattern matches (rm -rf, DROP TABLE, vercel
@@ -174,6 +197,7 @@ def test_critical_pattern_not_downshifted_by_override(
 
     from quill.adapters.claude_code import run_hook
     from quill.audit import AuditLog
+
     log = tmp_path / "audit.jsonl"
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
@@ -182,9 +206,13 @@ def test_critical_pattern_not_downshifted_by_override(
         # Use a CRITICAL command that's NOT in any operator allowlist.
         # DROP TABLE bypasses /tmp/* allowlists entirely.
         out = run_hook(
-            _payload(tool_name="Bash", session_id="s",
-                     transcript=str(transcript), cwd=str(tmp_path),
-                     command="DROP TABLE users"),
+            _payload(
+                tool_name="Bash",
+                session_id="s",
+                transcript=str(transcript),
+                cwd=str(tmp_path),
+                command="DROP TABLE users",
+            ),
             audit=audit,
         )
 
@@ -202,8 +230,10 @@ def test_critical_pattern_not_downshifted_by_override(
 # Test A4: Override persistence - written via the promote CLI format,
 # read by the hook with no stale-cache issue.
 
+
 def test_override_written_via_promote_format_is_read_by_hook(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """The promote CLI writes overrides.toml in a specific format. The
     hook must read that EXACT format (same section names, same field
@@ -215,9 +245,7 @@ def test_override_written_via_promote_format_is_read_by_hook(
 
     # Replicate the exact write the `suggestions_promote` CLI does.
     pattern_id = "Edit:high risk: default risk for Edit"
-    section = "".join(
-        c if c.isalnum() or c in "_-" else "_" for c in pattern_id
-    )[:60]
+    section = "".join(c if c.isalnum() or c in "_-" else "_" for c in pattern_id)[:60]
     promoted_at_iso = datetime.now(UTC).isoformat()
     block = (
         f"\n[overrides.{section}]\n"
@@ -229,6 +257,7 @@ def test_override_written_via_promote_format_is_read_by_hook(
     overrides_path.write_text(block)
     # Same-instant read must surface the override.
     from quill.learning import load_active_overrides
+
     active = load_active_overrides()
     assert pattern_id in active
     assert active[pattern_id]["ttl_days"] == 14
@@ -238,6 +267,7 @@ def test_override_written_via_promote_format_is_read_by_hook(
     # each invocation, no daemon-cached state interferes.
     from quill.adapters.claude_code import run_hook
     from quill.audit import AuditLog
+
     log = tmp_path / "audit.jsonl"
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
@@ -245,15 +275,27 @@ def test_override_written_via_promote_format_is_read_by_hook(
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         # Two back-to-back hook calls.
         out1 = run_hook(
-            _payload(tool_name="Edit", session_id="s1",
-                     transcript=str(transcript), cwd=str(tmp_path),
-                     file_path="/a.py", old_string="x", new_string="y"),
+            _payload(
+                tool_name="Edit",
+                session_id="s1",
+                transcript=str(transcript),
+                cwd=str(tmp_path),
+                file_path="/a.py",
+                old_string="x",
+                new_string="y",
+            ),
             audit=audit,
         )
         out2 = run_hook(
-            _payload(tool_name="Edit", session_id="s1",
-                     transcript=str(transcript), cwd=str(tmp_path),
-                     file_path="/b.py", old_string="x", new_string="y"),
+            _payload(
+                tool_name="Edit",
+                session_id="s1",
+                transcript=str(transcript),
+                cwd=str(tmp_path),
+                file_path="/b.py",
+                old_string="x",
+                new_string="y",
+            ),
             audit=audit,
         )
 
@@ -265,9 +307,7 @@ def test_override_written_via_promote_format_is_read_by_hook(
 
     # Adding a SECOND override mid-test is also seen on the next call.
     new_pattern = "Write:high risk: default risk for Write"
-    new_section = "".join(
-        c if c.isalnum() or c in "_-" else "_" for c in new_pattern
-    )[:60]
+    new_section = "".join(c if c.isalnum() or c in "_-" else "_" for c in new_pattern)[:60]
     overrides_path.write_text(
         block
         + f"\n[overrides.{new_section}]\n"

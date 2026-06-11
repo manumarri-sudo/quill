@@ -15,6 +15,7 @@ Covers:
 Each test runs in the conftest-isolated QUILL_HOME so the live `~/.quill/`
 log is never touched.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -171,10 +172,7 @@ class TestLoadEvents:
             risk="high",
         )
         p.write_text(
-            json.dumps(good) + "\n"
-            + "{not-json}\n"
-            + "\n"
-            + json.dumps(good) + "\n",
+            json.dumps(good) + "\n" + "{not-json}\n" + "\n" + json.dumps(good) + "\n",
         )
         events = load_events(p)
         assert len(events) == 2
@@ -192,7 +190,9 @@ class TestFilterEvents:
             event_type="verdict.allowed",
         )
         kept = filter_events(
-            [old, recent], window=timedelta(hours=12), now=now,
+            [old, recent],
+            window=timedelta(hours=12),
+            now=now,
         )
         assert len(kept) == 1
         assert kept[0]["ts"] == recent["ts"]
@@ -270,26 +270,35 @@ class TestComputeSummary:
         events = []
         # 5 Edit, 3 Write, 2 Bash
         for i in range(5):
-            events.append(_make_event(
-                ts=now - timedelta(minutes=i),
-                event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit",
-                what=f"Edit /tmp/file{i}.py",
-            ))
+            events.append(
+                _make_event(
+                    ts=now - timedelta(minutes=i),
+                    event_type="verdict.allowed.overnight",
+                    risk="high",
+                    tool_name="Edit",
+                    what=f"Edit /tmp/file{i}.py",
+                )
+            )
         for i in range(3):
-            events.append(_make_event(
-                ts=now - timedelta(minutes=i),
-                event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Write",
-                what=f"Write /tmp/new{i}.py",
-            ))
+            events.append(
+                _make_event(
+                    ts=now - timedelta(minutes=i),
+                    event_type="verdict.allowed.overnight",
+                    risk="high",
+                    tool_name="Write",
+                    what=f"Write /tmp/new{i}.py",
+                )
+            )
         for i in range(2):
-            events.append(_make_event(
-                ts=now - timedelta(minutes=i),
-                event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Bash",
-                what=f"git push --force #{i}",
-            ))
+            events.append(
+                _make_event(
+                    ts=now - timedelta(minutes=i),
+                    event_type="verdict.allowed.overnight",
+                    risk="high",
+                    tool_name="Bash",
+                    what=f"git push --force #{i}",
+                )
+            )
         stats = compute_summary(
             events,
             since_label="12h",
@@ -336,17 +345,20 @@ class TestComputeSummary:
             _make_event(
                 ts=now - timedelta(minutes=5),
                 event_type="verdict.allowed.overnight",
-                risk="high", cwd=str(proj),
+                risk="high",
+                cwd=str(proj),
             ),
             _make_event(
                 ts=now - timedelta(minutes=5),
                 event_type="verdict.allowed.overnight",
-                risk="high", cwd=str(other),
+                risk="high",
+                cwd=str(other),
             ),
             _make_event(
                 ts=now - timedelta(minutes=5),
                 event_type="verdict.allowed.overnight",
-                risk="high", cwd=str(other),
+                risk="high",
+                cwd=str(other),
             ),
         ]
         stats = compute_summary(
@@ -431,7 +443,8 @@ class TestRenderMarkdown:
             _make_event(
                 ts=now - timedelta(minutes=10),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit",
+                risk="high",
+                tool_name="Edit",
                 what="Edit /tmp/x.py",
             ),
         ]
@@ -455,7 +468,8 @@ class TestRenderMarkdown:
             _make_event(
                 ts=now - timedelta(minutes=5),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Bash",
+                risk="high",
+                tool_name="Bash",
                 what="cat /etc/passwd | head",
             ),
         ]
@@ -478,7 +492,8 @@ class TestRenderJson:
             _make_event(
                 ts=now - timedelta(minutes=5),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit",
+                risk="high",
+                tool_name="Edit",
             ),
         ]
         stats = compute_summary(
@@ -501,7 +516,8 @@ class TestRenderTable:
             _make_event(
                 ts=now - timedelta(minutes=5),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit",
+                risk="high",
+                tool_name="Edit",
             ),
         ]
         stats = compute_summary(
@@ -516,6 +532,7 @@ class TestRenderTable:
         from io import StringIO
 
         from rich.console import Console
+
         buf = StringIO()
         Console(file=buf, force_terminal=False, width=120).print(table)
         out = buf.getvalue()
@@ -537,7 +554,8 @@ class TestCliSurface:
         # the "no events" markdown header.
         p = _log_path(tmp_path)
         result = self._runner().invoke(
-            app, ["audit", "summary", "--since", "12h", "--log", str(p)],
+            app,
+            ["audit", "summary", "--since", "12h", "--log", str(p)],
         )
         assert result.exit_code == 0, result.output
         assert "Overnight Recap" in result.output
@@ -550,13 +568,15 @@ class TestCliSurface:
             _make_event(
                 ts=now - timedelta(minutes=i),
                 event_type="verdict.allowed",
-                risk="low", tool_name="Read",
+                risk="low",
+                tool_name="Read",
             )
             for i in range(4)
         ]
         _write_log(p, events)
         result = self._runner().invoke(
-            app, ["audit", "summary", "--since", "12h", "--log", str(p)],
+            app,
+            ["audit", "summary", "--since", "12h", "--log", str(p)],
         )
         assert result.exit_code == 0, result.output
         assert "HIGH actions auto-approved: **0**" in result.output
@@ -567,29 +587,39 @@ class TestCliSurface:
         now = datetime.now(UTC)
         events = []
         for _ in range(5):
-            events.append(_make_event(
-                ts=now - timedelta(minutes=1),
-                event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit",
-                what="Edit /tmp/a.py",
-            ))
+            events.append(
+                _make_event(
+                    ts=now - timedelta(minutes=1),
+                    event_type="verdict.allowed.overnight",
+                    risk="high",
+                    tool_name="Edit",
+                    what="Edit /tmp/a.py",
+                )
+            )
         for _ in range(3):
-            events.append(_make_event(
-                ts=now - timedelta(minutes=1),
-                event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Write",
-                what="Write /tmp/b.py",
-            ))
+            events.append(
+                _make_event(
+                    ts=now - timedelta(minutes=1),
+                    event_type="verdict.allowed.overnight",
+                    risk="high",
+                    tool_name="Write",
+                    what="Write /tmp/b.py",
+                )
+            )
         for _ in range(2):
-            events.append(_make_event(
-                ts=now - timedelta(minutes=1),
-                event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Bash",
-                what="git push origin main",
-            ))
+            events.append(
+                _make_event(
+                    ts=now - timedelta(minutes=1),
+                    event_type="verdict.allowed.overnight",
+                    risk="high",
+                    tool_name="Bash",
+                    what="git push origin main",
+                )
+            )
         _write_log(p, events)
         result = self._runner().invoke(
-            app, ["audit", "summary", "--since", "12h", "--log", str(p)],
+            app,
+            ["audit", "summary", "--since", "12h", "--log", str(p)],
         )
         assert result.exit_code == 0, result.output
         assert "HIGH actions auto-approved: **10**" in result.output
@@ -604,17 +634,20 @@ class TestCliSurface:
             _make_event(
                 ts=now - timedelta(hours=4),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit",
+                risk="high",
+                tool_name="Edit",
             ),
             _make_event(
                 ts=now - timedelta(minutes=20),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit",
+                risk="high",
+                tool_name="Edit",
             ),
         ]
         _write_log(p, events)
         result = self._runner().invoke(
-            app, ["audit", "summary", "--since", "1h", "--log", str(p)],
+            app,
+            ["audit", "summary", "--since", "1h", "--log", str(p)],
         )
         assert result.exit_code == 0, result.output
         assert "HIGH actions auto-approved: **1**" in result.output
@@ -626,14 +659,14 @@ class TestCliSurface:
             _make_event(
                 ts=now - timedelta(minutes=2),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit",
+                risk="high",
+                tool_name="Edit",
             ),
         ]
         _write_log(p, events)
         result = self._runner().invoke(
             app,
-            ["audit", "summary", "--since", "12h", "--format", "json",
-             "--log", str(p)],
+            ["audit", "summary", "--since", "12h", "--format", "json", "--log", str(p)],
         )
         assert result.exit_code == 0, result.output
         parsed = json.loads(result.output)
@@ -647,14 +680,14 @@ class TestCliSurface:
             _make_event(
                 ts=now - timedelta(minutes=2),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit",
+                risk="high",
+                tool_name="Edit",
             ),
         ]
         _write_log(p, events)
         result = self._runner().invoke(
             app,
-            ["audit", "summary", "--since", "12h", "--format", "table",
-             "--log", str(p)],
+            ["audit", "summary", "--since", "12h", "--format", "table", "--log", str(p)],
         )
         assert result.exit_code == 0, result.output
         assert "Overnight Recap" in result.output
@@ -670,24 +703,29 @@ class TestCliSurface:
             _make_event(
                 ts=now - timedelta(minutes=2),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit", cwd=str(proj),
+                risk="high",
+                tool_name="Edit",
+                cwd=str(proj),
             ),
             _make_event(
                 ts=now - timedelta(minutes=2),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Write", cwd=str(other),
+                risk="high",
+                tool_name="Write",
+                cwd=str(other),
             ),
             _make_event(
                 ts=now - timedelta(minutes=2),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Bash", cwd=str(other),
+                risk="high",
+                tool_name="Bash",
+                cwd=str(other),
             ),
         ]
         _write_log(p, events)
         result = self._runner().invoke(
             app,
-            ["audit", "summary", "--since", "12h",
-             "--cwd", str(proj), "--log", str(p)],
+            ["audit", "summary", "--since", "12h", "--cwd", str(proj), "--log", str(p)],
         )
         assert result.exit_code == 0, result.output
         assert "HIGH actions auto-approved: **1**" in result.output
@@ -699,7 +737,8 @@ class TestCliSurface:
         p = _log_path(tmp_path)
         p.touch()
         result = self._runner().invoke(
-            app, ["audit", "summary", "--since", "junk", "--log", str(p)],
+            app,
+            ["audit", "summary", "--since", "junk", "--log", str(p)],
         )
         assert result.exit_code == 2
 
@@ -707,8 +746,8 @@ class TestCliSurface:
         p = _log_path(tmp_path)
         p.touch()
         result = self._runner().invoke(
-            app, ["audit", "summary", "--since", "12h",
-                  "--format", "xml", "--log", str(p)],
+            app,
+            ["audit", "summary", "--since", "12h", "--format", "xml", "--log", str(p)],
         )
         assert result.exit_code == 2
 
@@ -719,15 +758,15 @@ class TestCliSurface:
             _make_event(
                 ts=now - timedelta(minutes=2),
                 event_type="verdict.allowed.overnight",
-                risk="high", tool_name="Edit",
+                risk="high",
+                tool_name="Edit",
             ),
         ]
         _write_log(p, events)
         out_file = tmp_path / "recap.md"
         result = self._runner().invoke(
             app,
-            ["audit", "summary", "--since", "12h",
-             "--log", str(p), "--out", str(out_file)],
+            ["audit", "summary", "--since", "12h", "--log", str(p), "--out", str(out_file)],
         )
         assert result.exit_code == 0, result.output
         assert out_file.exists()
@@ -742,14 +781,16 @@ class TestCliSurface:
             _make_event(
                 ts=now - timedelta(minutes=2),
                 event_type="verdict.blocked",
-                risk="critical", tool_name="Bash",
+                risk="critical",
+                tool_name="Bash",
                 what="rm -rf /important",
                 reason="critical command",
             ),
         ]
         _write_log(p, events)
         result = self._runner().invoke(
-            app, ["audit", "summary", "--since", "12h", "--log", str(p)],
+            app,
+            ["audit", "summary", "--since", "12h", "--log", str(p)],
         )
         assert result.exit_code == 0, result.output
         assert "CRITICAL actions still blocked: **1**" in result.output

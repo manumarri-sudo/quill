@@ -24,6 +24,7 @@ Design principles:
 Tested against synthetic fixtures; the live audit-log integration is
 exercised in tests/test_saves_live.py with the actual ~/.quill log.
 """
+
 from __future__ import annotations
 
 import json
@@ -52,7 +53,10 @@ from quill import events as ev
 _PATTERN_NORMALIZERS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\bsecret detected\b", re.IGNORECASE), "secret in write"),
     (re.compile(r"\btrifecta\b", re.IGNORECASE), "trifecta close"),
-    (re.compile(r"\bCVE-2025-59536\b|\bsubcommand[- ]chain\b", re.IGNORECASE), "subcommand-chain bypass"),
+    (
+        re.compile(r"\bCVE-2025-59536\b|\bsubcommand[- ]chain\b", re.IGNORECASE),
+        "subcommand-chain bypass",
+    ),
     (re.compile(r"\btool[- ]?poisoning\b|\bpin[- ]?refused\b", re.IGNORECASE), "tool-pin refused"),
     (re.compile(r"\brm\s+-rf?\b", re.IGNORECASE), "rm -rf"),
     (re.compile(r"\bgit\s+push\s+--force\b", re.IGNORECASE), "git push --force"),
@@ -65,7 +69,10 @@ _PATTERN_NORMALIZERS: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\.env\b", re.IGNORECASE), ".env read"),
     (re.compile(r"\bcurl\s*\|\s*sh\b", re.IGNORECASE), "curl | sh"),
     (re.compile(r"\bdeploy.*\b(prod|production)\b", re.IGNORECASE), "deploy:production"),
-    (re.compile(r"\bstripe\.\w*(refund|charge|transfer|payout)\b", re.IGNORECASE), "stripe payment mutation"),
+    (
+        re.compile(r"\bstripe\.\w*(refund|charge|transfer|payout)\b", re.IGNORECASE),
+        "stripe payment mutation",
+    ),
     (re.compile(r"\bbanking\.\w*send_money\b", re.IGNORECASE), "banking send-money"),
 )
 
@@ -106,24 +113,24 @@ class Saves:
     events_in_window: int = 0
 
     # ✓ verified counts
-    trust_auto_allows: int = 0          # verdict.allowed with reason ~ "trusted scope"
-    critical_blocks: int = 0            # verdict.blocked at risk=critical
-    high_blocks: int = 0                # verdict.blocked at risk=high
-    secrets_caught: int = 0             # verdict.blocked with reason ~ "secret detected"
-    biometric_approvals: int = 0        # approve.biometric.ok
-    biometric_denials: int = 0          # approve.biometric.deny
-    pin_refusals: int = 0               # tool.pin_refused
-    trifecta_enforcements: int = 0      # verdict.blocked with reason ~ "trifecta"
-    scope_violations: int = 0           # verdict.scope_violation
-    ask_prompts: int = 0                # verdict.ask (informational)
-    chain_repairs: int = 0              # chain.repaired
+    trust_auto_allows: int = 0  # verdict.allowed with reason ~ "trusted scope"
+    critical_blocks: int = 0  # verdict.blocked at risk=critical
+    high_blocks: int = 0  # verdict.blocked at risk=high
+    secrets_caught: int = 0  # verdict.blocked with reason ~ "secret detected"
+    biometric_approvals: int = 0  # approve.biometric.ok
+    biometric_denials: int = 0  # approve.biometric.deny
+    pin_refusals: int = 0  # tool.pin_refused
+    trifecta_enforcements: int = 0  # verdict.blocked with reason ~ "trifecta"
+    scope_violations: int = 0  # verdict.scope_violation
+    ask_prompts: int = 0  # verdict.ask (informational)
+    chain_repairs: int = 0  # chain.repaired
 
     # pattern aggregations
     top_patterns: Counter[str] = field(default_factory=Counter)
-    biggest_catch: dict[str, Any] | None = None   # earliest critical block in window
+    biggest_catch: dict[str, Any] | None = None  # earliest critical block in window
 
     # session metrics
-    sessions_seen: int = 0              # distinct session_ids in window
+    sessions_seen: int = 0  # distinct session_ids in window
 
     # ≈ estimated time-saved assumptions (configurable via class methods if needed)
     CLICK_LATENCY_LOWER_S: float = 2.5
@@ -338,6 +345,7 @@ def format_saves(saves: Saves, *, plain: bool = False) -> str:
 
     `plain=True` strips Rich markup for piping or CI output.
     """
+
     def b(text: str) -> str:
         return text if plain else f"[bold]{text}[/bold]"
 
@@ -350,10 +358,12 @@ def format_saves(saves: Saves, *, plain: bool = False) -> str:
     w_start = saves.window_start.strftime("%Y-%m-%d")
     w_end = saves.window_end.strftime("%Y-%m-%d")
     lines.append(b("Quill saves report") + f"  ({w_start} to {w_end})")
-    lines.append(dim(
-        f"scanned {saves.events_scanned} events; {saves.events_in_window} "
-        f"in window; {saves.sessions_seen} session(s)",
-    ))
+    lines.append(
+        dim(
+            f"scanned {saves.events_scanned} events; {saves.events_in_window} "
+            f"in window; {saves.sessions_seen} session(s)",
+        )
+    )
     lines.append("")
 
     # verified counts - ISO 22324 / NIST-aligned color treatment + icons.
@@ -363,26 +373,37 @@ def format_saves(saves: Saves, *, plain: bool = False) -> str:
     # them first; trust-path auto-allows render green because they're
     # the "Quill saved you a click" outcome.
     from quill.severity import stat_line as _sl
+
     lines.append(b("verified from your audit log:"))
-    lines.append(_sl("ok", saves.trust_auto_allows,
-                     "auto-allows inside trusted scope (would have prompted otherwise)",
-                     plain=plain))
-    lines.append(_sl("critical", saves.critical_blocks,
-                     "critical-risk operations blocked", plain=plain))
-    lines.append(_sl("secret", saves.secrets_caught,
-                     "hardcoded secrets caught before write", plain=plain))
-    lines.append(_sl("ok", saves.biometric_approvals,
-                     "Touch ID approvals consumed", plain=plain))
-    lines.append(_sl("high", saves.biometric_denials,
-                     "Touch ID approvals denied", plain=plain))
-    lines.append(_sl("pin_refusal", saves.pin_refusals,
-                     "tool-description rug-pulls refused", plain=plain))
-    lines.append(_sl("trifecta", saves.trifecta_enforcements,
-                     "lethal-trifecta sessions escalated to deny", plain=plain))
-    lines.append(_sl("high", saves.scope_violations,
-                     "out-of-scope calls refused", plain=plain))
-    lines.append(_sl("chain", saves.chain_repairs,
-                     "chain integrity events recorded", plain=plain))
+    lines.append(
+        _sl(
+            "ok",
+            saves.trust_auto_allows,
+            "auto-allows inside trusted scope (would have prompted otherwise)",
+            plain=plain,
+        )
+    )
+    lines.append(
+        _sl("critical", saves.critical_blocks, "critical-risk operations blocked", plain=plain)
+    )
+    lines.append(
+        _sl("secret", saves.secrets_caught, "hardcoded secrets caught before write", plain=plain)
+    )
+    lines.append(_sl("ok", saves.biometric_approvals, "Touch ID approvals consumed", plain=plain))
+    lines.append(_sl("high", saves.biometric_denials, "Touch ID approvals denied", plain=plain))
+    lines.append(
+        _sl("pin_refusal", saves.pin_refusals, "tool-description rug-pulls refused", plain=plain)
+    )
+    lines.append(
+        _sl(
+            "trifecta",
+            saves.trifecta_enforcements,
+            "lethal-trifecta sessions escalated to deny",
+            plain=plain,
+        )
+    )
+    lines.append(_sl("high", saves.scope_violations, "out-of-scope calls refused", plain=plain))
+    lines.append(_sl("chain", saves.chain_repairs, "chain integrity events recorded", plain=plain))
     lines.append("")
 
     # estimated savings
@@ -393,10 +414,12 @@ def format_saves(saves: Saves, *, plain: bool = False) -> str:
         lines.append(
             f"  {lower:.1f} - {upper:.1f} minutes of approval-click latency",
         )
-        lines.append(dim(
-            f"  assumption: {Saves.CLICK_LATENCY_LOWER_S}-{Saves.CLICK_LATENCY_UPPER_S}s per y/N prompt "
-            f"({saves.trust_auto_allows} auto-allows)",
-        ))
+        lines.append(
+            dim(
+                f"  assumption: {Saves.CLICK_LATENCY_LOWER_S}-{Saves.CLICK_LATENCY_UPPER_S}s per y/N prompt "
+                f"({saves.trust_auto_allows} auto-allows)",
+            )
+        )
         lines.append("")
 
     # top patterns

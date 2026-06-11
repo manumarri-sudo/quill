@@ -14,6 +14,7 @@ No mouse required, no spinners, no splash screen.
 Run with `quill watch` (the default) or `quill watch --browser` for
 the old localhost HTTP dashboard.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,59 +36,59 @@ from textual.widgets import DataTable, Footer, Header, Static
 # ---- palette (matches the landing page locked tokens) ---------------------
 
 PALETTE = {
-    "bg":    "#fafaf5",
-    "ink":   "#1e3a5f",
+    "bg": "#fafaf5",
+    "ink": "#1e3a5f",
     "muted": "#6b7a8f",
-    "rule":  "#d8d4c4",
-    "allow": "#3d6b4a",   # slate green, NOT matrix
-    "ask":   "#b8862b",   # mustard, never pure yellow
-    "block": "#c1442f",   # warm coral, brand-aligned
-    "sub":   "#7a4a7a",   # plum for sub-agent decoration
+    "rule": "#d8d4c4",
+    "allow": "#3d6b4a",  # slate green, NOT matrix
+    "ask": "#b8862b",  # mustard, never pure yellow
+    "block": "#c1442f",  # warm coral, brand-aligned
+    "sub": "#7a4a7a",  # plum for sub-agent decoration
     "spawn": "#7a4a7a",
-    "hint":  "#5E81AC",   # steel-blue (delta convention) - the
-                          # "try instead" / informational lane
+    "hint": "#5E81AC",  # steel-blue (delta convention) - the
+    # "try instead" / informational lane
 }
 
 CSS = f"""
 Screen {{
-    background: {PALETTE['bg']};
-    color: {PALETTE['ink']};
+    background: {PALETTE["bg"]};
+    color: {PALETTE["ink"]};
 }}
 
 Header {{
-    background: {PALETTE['ink']};
-    color: {PALETTE['bg']};
+    background: {PALETTE["ink"]};
+    color: {PALETTE["bg"]};
     height: 3;
-    border-bottom: solid {PALETTE['rule']};
+    border-bottom: solid {PALETTE["rule"]};
     text-style: bold;
 }}
 
 Footer {{
-    background: {PALETTE['ink']};
-    color: {PALETTE['bg']};
+    background: {PALETTE["ink"]};
+    color: {PALETTE["bg"]};
 }}
 
 Footer > .footer--key {{
-    background: {PALETTE['ink']};
-    color: {PALETTE['bg']};
+    background: {PALETTE["ink"]};
+    color: {PALETTE["bg"]};
     text-style: bold;
 }}
 
 #sidebar {{
     width: 26;
-    background: {PALETTE['bg']};
-    border-right: solid {PALETTE['rule']};
+    background: {PALETTE["bg"]};
+    border-right: solid {PALETTE["rule"]};
     padding: 1 2;
 }}
 
 #sidebar .heading {{
-    color: {PALETTE['muted']};
+    color: {PALETTE["muted"]};
     text-style: bold;
     padding: 1 0 0 0;
 }}
 
 #sidebar .item {{
-    color: {PALETTE['ink']};
+    color: {PALETTE["ink"]};
     padding: 0 0 0 0;
 }}
 
@@ -100,33 +101,33 @@ Footer > .footer--key {{
 }}
 
 DataTable {{
-    background: {PALETTE['bg']};
-    color: {PALETTE['ink']};
+    background: {PALETTE["bg"]};
+    color: {PALETTE["ink"]};
 }}
 
 DataTable > .datatable--header {{
-    background: {PALETTE['bg']};
-    color: {PALETTE['muted']};
+    background: {PALETTE["bg"]};
+    color: {PALETTE["muted"]};
     text-style: bold;
 }}
 
 DataTable > .datatable--cursor {{
-    background: {PALETTE['ink']};
-    color: {PALETTE['bg']};
+    background: {PALETTE["ink"]};
+    color: {PALETTE["bg"]};
 }}
 
 DataTable > .datatable--hover {{
-    background: {PALETTE['rule']};
+    background: {PALETTE["rule"]};
 }}
 
 #empty {{
-    color: {PALETTE['muted']};
+    color: {PALETTE["muted"]};
     text-align: center;
     padding: 4 0;
 }}
 
 #empty .accent {{
-    color: {PALETTE['block']};
+    color: {PALETTE["block"]};
     text-style: bold;
 }}
 
@@ -135,26 +136,27 @@ PeekModal {{
 }}
 
 #peek-card {{
-    background: {PALETTE['bg']};
-    border: tall {PALETTE['ink']};
+    background: {PALETTE["bg"]};
+    border: tall {PALETTE["ink"]};
     padding: 2 4;
     width: 80%;
     height: 70%;
 }}
 
 #peek-card .title {{
-    color: {PALETTE['ink']};
+    color: {PALETTE["ink"]};
     text-style: bold;
 }}
 
 #peek-card .body {{
-    color: {PALETTE['ink']};
+    color: {PALETTE["ink"]};
     padding-top: 1;
 }}
 """
 
 
 # ---- model ----------------------------------------------------------------
+
 
 @dataclass(slots=True)
 class Event:
@@ -202,9 +204,7 @@ class Event:
     @property
     def reason(self) -> str:
         return str(
-            self.payload.get("reason")
-            or self.payload.get("risk_reason")
-            or "",
+            self.payload.get("reason") or self.payload.get("risk_reason") or "",
         )
 
     @property
@@ -219,7 +219,8 @@ class Event:
 @dataclass(slots=True)
 class FilterState:
     """Active filter over the event list. Updated by hotkeys."""
-    mode: str = "all"   # all | allowed | blocked | asked | scope
+
+    mode: str = "all"  # all | allowed | blocked | asked | scope
 
 
 # ---- main app -------------------------------------------------------------
@@ -228,8 +229,7 @@ class FilterState:
 class PeekModal(ModalScreen[None]):
     """Full-event JSON peek on Enter."""
 
-    BINDINGS = [Binding("escape", "dismiss", "close"),
-                Binding("enter", "dismiss", "close")]
+    BINDINGS = [Binding("escape", "dismiss", "close"), Binding("enter", "dismiss", "close")]
 
     def __init__(self, evt: Event) -> None:
         super().__init__()
@@ -238,8 +238,7 @@ class PeekModal(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         body = json.dumps(self.evt.raw, indent=2)
         with Vertical(id="peek-card"):
-            yield Static(f"[b]{self.evt.type}[/b]   [dim]{self.evt.ts}[/dim]",
-                         classes="title")
+            yield Static(f"[b]{self.evt.type}[/b]   [dim]{self.evt.ts}[/dim]", classes="title")
             yield Static(body, classes="body")
 
     def action_dismiss(self) -> None:  # type: ignore[override]
@@ -273,19 +272,31 @@ class QuillCommands(Provider):
     def _commands(app: App[None]) -> list[tuple[str, Callable[[], None], str]]:
         """The canonical command set. Add new entries here, not in BINDINGS."""
         return [
-            ("filter: all",         app.action_filter_all,     "show every audit event"),
-            ("filter: allowed",     app.action_filter_allowed, "only verdict.allowed events"),
-            ("filter: blocked",     app.action_filter_blocked, "only verdict.blocked events (critical denies)"),
-            ("filter: asked",       app.action_filter_asked,   "only verdict.ask events (waiting on human)"),
-            ("filter: scope",       app.action_filter_scope,   "only verdict.scope_violation events"),
-            ("pause / resume tail", app.action_toggle_pause,   "freeze the live tail to inspect a row"),
-            ("clear screen",        app.action_clear,          "clear the table (keeps the audit log intact)"),
-            ("scroll: top",         app.action_scroll_top,     "jump to oldest event"),
-            ("scroll: bottom",      app.action_scroll_bottom,  "jump to newest event"),
-            ("peek event",          app.action_peek,           "open the JSON peek panel for the selected row"),
-            ("yank command",        app.action_yank,           "copy the selected event's command to clipboard"),
-            ("help",                app.action_help,           "show keyboard shortcuts"),
-            ("quit",                app.action_quit,           "exit the dashboard"),
+            ("filter: all", app.action_filter_all, "show every audit event"),
+            ("filter: allowed", app.action_filter_allowed, "only verdict.allowed events"),
+            (
+                "filter: blocked",
+                app.action_filter_blocked,
+                "only verdict.blocked events (critical denies)",
+            ),
+            (
+                "filter: asked",
+                app.action_filter_asked,
+                "only verdict.ask events (waiting on human)",
+            ),
+            ("filter: scope", app.action_filter_scope, "only verdict.scope_violation events"),
+            (
+                "pause / resume tail",
+                app.action_toggle_pause,
+                "freeze the live tail to inspect a row",
+            ),
+            ("clear screen", app.action_clear, "clear the table (keeps the audit log intact)"),
+            ("scroll: top", app.action_scroll_top, "jump to oldest event"),
+            ("scroll: bottom", app.action_scroll_bottom, "jump to newest event"),
+            ("peek event", app.action_peek, "open the JSON peek panel for the selected row"),
+            ("yank command", app.action_yank, "copy the selected event's command to clipboard"),
+            ("help", app.action_help, "show keyboard shortcuts"),
+            ("quit", app.action_quit, "exit the dashboard"),
         ]
 
 
@@ -324,7 +335,7 @@ class QuillWatchTUI(App[None]):
         self.log_path = log_path
         self.events: list[Event] = []
         self._tail_offset = 0
-        self._sub_labels: dict[str, str] = {}     # session_id -> "sub·N"
+        self._sub_labels: dict[str, str] = {}  # session_id -> "sub·N"
         self._sub_counter = 0
         self.title = "quill watch"
         self.sub_title = str(log_path)
@@ -336,16 +347,11 @@ class QuillWatchTUI(App[None]):
         with Horizontal():
             with Vertical(id="sidebar"):
                 yield Static("[b]filters[/b]", classes="heading")
-                yield Static("a  all       [dim](0)[/dim]", id="filt-all",
-                             classes="item active")
-                yield Static("1  allowed   [dim](0)[/dim]", id="filt-allow",
-                             classes="item")
-                yield Static("2  blocked   [dim](0)[/dim]", id="filt-block",
-                             classes="item")
-                yield Static("3  asked     [dim](0)[/dim]", id="filt-ask",
-                             classes="item")
-                yield Static("4  scope     [dim](0)[/dim]", id="filt-scope",
-                             classes="item")
+                yield Static("a  all       [dim](0)[/dim]", id="filt-all", classes="item active")
+                yield Static("1  allowed   [dim](0)[/dim]", id="filt-allow", classes="item")
+                yield Static("2  blocked   [dim](0)[/dim]", id="filt-block", classes="item")
+                yield Static("3  asked     [dim](0)[/dim]", id="filt-ask", classes="item")
+                yield Static("4  scope     [dim](0)[/dim]", id="filt-scope", classes="item")
                 yield Static("[b]agents[/b]", classes="heading")
                 yield Static("(none yet)", id="agent-list", classes="item")
                 yield Static("[b]projects[/b]", classes="heading")
@@ -362,11 +368,18 @@ class QuillWatchTUI(App[None]):
                 )
             with Vertical(id="main"):
                 table: DataTable[str] = DataTable(
-                    id="events", zebra_stripes=False,
-                    cursor_type="row", header_height=1,
+                    id="events",
+                    zebra_stripes=False,
+                    cursor_type="row",
+                    header_height=1,
                 )
                 table.add_columns(
-                    "time", "verdict", "risk", "tool", "what was tried", "why",
+                    "time",
+                    "verdict",
+                    "risk",
+                    "tool",
+                    "what was tried",
+                    "why",
                 )
                 yield table
                 yield Static(
@@ -452,12 +465,17 @@ class QuillWatchTUI(App[None]):
         m = self.filter_mode
         if m == "all":
             return True
-        if m == "allowed" and e.type == "verdict.allowed": return True
-        if m == "blocked" and e.type == "verdict.blocked": return True
-        if m == "asked" and e.type == "verdict.ask": return True
-        if m == "scope" and e.type == "verdict.scope_violation": return True
+        if m == "allowed" and e.type == "verdict.allowed":
+            return True
+        if m == "blocked" and e.type == "verdict.blocked":
+            return True
+        if m == "asked" and e.type == "verdict.ask":
+            return True
+        if m == "scope" and e.type == "verdict.scope_violation":
+            return True
         # always show spawn events regardless of filter (context for subs)
-        if e.type == "agent.spawned": return True
+        if e.type == "agent.spawned":
+            return True
         return False
 
     def _add_row(self, e: Event) -> None:
@@ -470,15 +488,15 @@ class QuillWatchTUI(App[None]):
         }.get(e.risk, PALETTE["muted"])
 
         type_glyph = {
-            "verdict.allowed":         (PALETTE["allow"], "✓ allow"),
-            "verdict.blocked":         (PALETTE["block"], "✗ block"),
-            "verdict.ask":             (PALETTE["ask"],   "? ask"),
-            "verdict.scope_violation": (PALETTE["sub"],   "✗ scope"),
-            "tool.attempted":          (PALETTE["muted"], "· attempt"),
-            "tool.completed":          (PALETTE["allow"], "✓ done"),
-            "agent.spawned":           (PALETTE["sub"],   "▸ spawn"),
-            "session.start":           (PALETTE["muted"], "▸ start"),
-            "session.end":             (PALETTE["muted"], "◂ end"),
+            "verdict.allowed": (PALETTE["allow"], "✓ allow"),
+            "verdict.blocked": (PALETTE["block"], "✗ block"),
+            "verdict.ask": (PALETTE["ask"], "? ask"),
+            "verdict.scope_violation": (PALETTE["sub"], "✗ scope"),
+            "tool.attempted": (PALETTE["muted"], "· attempt"),
+            "tool.completed": (PALETTE["allow"], "✓ done"),
+            "agent.spawned": (PALETTE["sub"], "▸ spawn"),
+            "session.start": (PALETTE["muted"], "▸ start"),
+            "session.end": (PALETTE["muted"], "◂ end"),
         }
         tcolor, tlabel = type_glyph.get(e.type, (PALETTE["muted"], e.type))
 
@@ -518,7 +536,10 @@ class QuillWatchTUI(App[None]):
         # Steel-blue, no clutter, scannable.
         if suggestion:
             self._table.add_row(
-                "", "", "", "",
+                "",
+                "",
+                "",
+                "",
                 f"[#{PALETTE['hint'][1:]}]↪ try[/]",
                 f"[#{PALETTE['hint'][1:]}]{suggestion[:90]}[/]",
             )
@@ -529,10 +550,14 @@ class QuillWatchTUI(App[None]):
         projects: Counter[str] = Counter()
         for e in self.events:
             t = e.type
-            if t == "verdict.allowed": c["allow"] += 1
-            elif t == "verdict.blocked": c["block"] += 1
-            elif t == "verdict.ask": c["ask"] += 1
-            elif t == "verdict.scope_violation": c["scope"] += 1
+            if t == "verdict.allowed":
+                c["allow"] += 1
+            elif t == "verdict.blocked":
+                c["block"] += 1
+            elif t == "verdict.ask":
+                c["ask"] += 1
+            elif t == "verdict.scope_violation":
+                c["scope"] += 1
             if e.is_sub:
                 lbl = self._sub_labels.get(e.session_id, "sub")
                 agents[lbl] += 1
@@ -557,14 +582,12 @@ class QuillWatchTUI(App[None]):
 
         if agents:
             text = "\n".join(
-                f"  {n}  [#{PALETTE['muted'][1:]}]({k})[/]"
-                for n, k in agents.most_common(8)
+                f"  {n}  [#{PALETTE['muted'][1:]}]({k})[/]" for n, k in agents.most_common(8)
             )
             self.query_one("#agent-list", Static).update(text)
         if projects:
             text = "\n".join(
-                f"  {n}  [#{PALETTE['muted'][1:]}]({k})[/]"
-                for n, k in projects.most_common(8)
+                f"  {n}  [#{PALETTE['muted'][1:]}]({k})[/]" for n, k in projects.most_common(8)
             )
             self.query_one("#project-list", Static).update(text)
 
@@ -579,17 +602,34 @@ class QuillWatchTUI(App[None]):
     def action_toggle_pause(self) -> None:
         self.paused = not self.paused
 
-    def action_filter_all(self) -> None:     self.filter_mode = "all";     self._rebuild_table()
-    def action_filter_allowed(self) -> None: self.filter_mode = "allowed"; self._rebuild_table()
-    def action_filter_blocked(self) -> None: self.filter_mode = "blocked"; self._rebuild_table()
-    def action_filter_asked(self) -> None:   self.filter_mode = "asked";   self._rebuild_table()
-    def action_filter_scope(self) -> None:   self.filter_mode = "scope";   self._rebuild_table()
+    def action_filter_all(self) -> None:
+        self.filter_mode = "all"
+        self._rebuild_table()
+
+    def action_filter_allowed(self) -> None:
+        self.filter_mode = "allowed"
+        self._rebuild_table()
+
+    def action_filter_blocked(self) -> None:
+        self.filter_mode = "blocked"
+        self._rebuild_table()
+
+    def action_filter_asked(self) -> None:
+        self.filter_mode = "asked"
+        self._rebuild_table()
+
+    def action_filter_scope(self) -> None:
+        self.filter_mode = "scope"
+        self._rebuild_table()
 
     def action_clear(self) -> None:
         self._table.clear()
 
-    def action_scroll_top(self) -> None: self._table.action_scroll_home()
-    def action_scroll_bottom(self) -> None: self._table.action_scroll_end()
+    def action_scroll_top(self) -> None:
+        self._table.action_scroll_home()
+
+    def action_scroll_bottom(self) -> None:
+        self._table.action_scroll_end()
 
     def action_peek(self) -> None:
         try:
@@ -617,18 +657,20 @@ class QuillWatchTUI(App[None]):
 
     def action_help(self) -> None:
         # Footer already shows binding hints; pop a help modal with the full set.
-        evt = Event(raw={
-            "type": "quill.help",
-            "ts": datetime.now().isoformat(),
-            "payload": {
-                "tool_name": "help",
-                "reason": (
-                    "q: quit · ?: this help · 1-4: filter · a: all · "
-                    "p: pause · c: clear · g/G: top/bottom · y: yank · "
-                    "enter: peek event · esc: dismiss"
-                ),
-            },
-        })
+        evt = Event(
+            raw={
+                "type": "quill.help",
+                "ts": datetime.now().isoformat(),
+                "payload": {
+                    "tool_name": "help",
+                    "reason": (
+                        "q: quit · ?: this help · 1-4: filter · a: all · "
+                        "p: pause · c: clear · g/G: top/bottom · y: yank · "
+                        "enter: peek event · esc: dismiss"
+                    ),
+                },
+            }
+        )
         self.push_screen(PeekModal(evt))
 
 

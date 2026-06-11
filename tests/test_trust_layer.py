@@ -2,6 +2,7 @@
 that just landed. These are unit tests against the pure-function derive APIs;
 the adapter integration test for handoff.out lives in test_claude_hook.py.
 """
+
 from __future__ import annotations
 
 from quill import events as ev
@@ -32,12 +33,17 @@ def _evt(t: str, sid: str = "s1", **payload: object) -> dict[str, object]:
 def test_receipt_aggregates_did_and_changed() -> None:
     events = [
         _evt(ev.SESSION_OPEN, intent="ship the wizard"),
-        _evt(ev.TOOL_ATTEMPTED, tool_name="Edit",
-             args_preview={"file_path": "src/dashboard/page.tsx"}),
-        _evt(ev.TOOL_ATTEMPTED, tool_name="Write",
-             args_preview={"file_path": "src/dashboard/style.css"}),
-        _evt(ev.TOOL_ATTEMPTED, tool_name="Bash",
-             args_preview={"command": "npm test"}),
+        _evt(
+            ev.TOOL_ATTEMPTED,
+            tool_name="Edit",
+            args_preview={"file_path": "src/dashboard/page.tsx"},
+        ),
+        _evt(
+            ev.TOOL_ATTEMPTED,
+            tool_name="Write",
+            args_preview={"file_path": "src/dashboard/style.css"},
+        ),
+        _evt(ev.TOOL_ATTEMPTED, tool_name="Bash", args_preview={"command": "npm test"}),
         _evt(ev.SESSION_CLOSE),
     ]
     receipts = derive_from_events(events)
@@ -55,10 +61,13 @@ def test_receipt_aggregates_did_and_changed() -> None:
 
 def test_receipt_uncertain_from_high_risk_allowed() -> None:
     events = [
-        _evt(ev.TOOL_ATTEMPTED, tool_name="Bash",
-             __risk="high", args_preview={"command": "rm -rf build"}),
-        _evt(ev.VERDICT_ALLOWED, tool_name="Bash",
-             __risk="high", reason="user typed yes"),
+        _evt(
+            ev.TOOL_ATTEMPTED,
+            tool_name="Bash",
+            __risk="high",
+            args_preview={"command": "rm -rf build"},
+        ),
+        _evt(ev.VERDICT_ALLOWED, tool_name="Bash", __risk="high", reason="user typed yes"),
     ]
     receipts = derive_from_events(events)
     r = receipts["s1"]
@@ -96,7 +105,7 @@ def test_receipt_tdr_and_trust_delta() -> None:
 def test_taint_classify_webfetch_marks_untrusted() -> None:
     untrusted, private, exfil = classify_call_taint("WebFetch", {"url": "https://x.com"})
     assert untrusted is True
-    assert exfil is True       # WebFetch is also exfil-capable
+    assert exfil is True  # WebFetch is also exfil-capable
     assert private is False
 
 
@@ -146,20 +155,32 @@ def test_taint_state_monotonic_and_flips_once() -> None:
 
 def test_taint_trifecta_closes_with_all_three() -> None:
     state = TaintState()
-    update_for_call(state, "WebFetch", {"url": "https://x"})        # untrusted+exfil
+    update_for_call(state, "WebFetch", {"url": "https://x"})  # untrusted+exfil
     assert not state.trifecta_closed
-    update_for_call(state, "Read", {"file_path": "/x/.env"})         # private
+    update_for_call(state, "Read", {"file_path": "/x/.env"})  # private
     assert state.trifecta_closed
 
 
 def test_taint_fold_replays_audit_events() -> None:
     events = [
-        {"type": ev.TOOL_ATTEMPTED, "session_id": "s1", "mac": "m1",
-         "payload": {"tool_name": "WebFetch", "args_preview": {"url": "https://x"}}},
-        {"type": ev.TOOL_ATTEMPTED, "session_id": "s1", "mac": "m2",
-         "payload": {"tool_name": "Read", "args_preview": {"file_path": "/.env"}}},
-        {"type": ev.TOOL_ATTEMPTED, "session_id": "s2", "mac": "m3",
-         "payload": {"tool_name": "Read", "args_preview": {"file_path": "README.md"}}},
+        {
+            "type": ev.TOOL_ATTEMPTED,
+            "session_id": "s1",
+            "mac": "m1",
+            "payload": {"tool_name": "WebFetch", "args_preview": {"url": "https://x"}},
+        },
+        {
+            "type": ev.TOOL_ATTEMPTED,
+            "session_id": "s1",
+            "mac": "m2",
+            "payload": {"tool_name": "Read", "args_preview": {"file_path": "/.env"}},
+        },
+        {
+            "type": ev.TOOL_ATTEMPTED,
+            "session_id": "s2",
+            "mac": "m3",
+            "payload": {"tool_name": "Read", "args_preview": {"file_path": "README.md"}},
+        },
     ]
     states = fold_audit_events(events)
     assert states["s1"].trifecta_closed
@@ -179,10 +200,16 @@ def test_payload_hash_stable_across_dict_orderings() -> None:
 def test_bridge_pairs_out_and_in_by_payload_hash() -> None:
     h = payload_hash({"to": "sub", "from": "root"})
     events = [
-        {"type": ev.AGENT_HANDOFF_OUT, "session_id": "root",
-         "payload": {"to_agent_id": "sub", "payload_hash": h}},
-        {"type": ev.AGENT_HANDOFF_IN, "session_id": "sub",
-         "payload": {"from_session_id": "root", "payload_hash": h}},
+        {
+            "type": ev.AGENT_HANDOFF_OUT,
+            "session_id": "root",
+            "payload": {"to_agent_id": "sub", "payload_hash": h},
+        },
+        {
+            "type": ev.AGENT_HANDOFF_IN,
+            "session_id": "sub",
+            "payload": {"from_session_id": "root", "payload_hash": h},
+        },
     ]
     handoffs = fold_handoffs(events)
     assert len(handoffs) == 1
@@ -195,8 +222,11 @@ def test_bridge_pairs_out_and_in_by_payload_hash() -> None:
 def test_bridge_orphan_when_no_in() -> None:
     h = payload_hash({"to": "lost", "from": "root"})
     events = [
-        {"type": ev.AGENT_HANDOFF_OUT, "session_id": "root",
-         "payload": {"to_agent_id": "lost", "payload_hash": h}},
+        {
+            "type": ev.AGENT_HANDOFF_OUT,
+            "session_id": "root",
+            "payload": {"to_agent_id": "lost", "payload_hash": h},
+        },
     ]
     pair = fold_handoffs(events)[h]
     assert pair.is_orphan
@@ -205,14 +235,16 @@ def test_bridge_orphan_when_no_in() -> None:
 def test_bridge_cascade_with_three_distinct_receivers() -> None:
     h = payload_hash({"contract": "broadcast"})
     events = [
-        {"type": ev.AGENT_HANDOFF_OUT, "session_id": "root",
-         "payload": {"payload_hash": h}},
+        {"type": ev.AGENT_HANDOFF_OUT, "session_id": "root", "payload": {"payload_hash": h}},
     ]
     for sid in ("a", "b", "c"):
-        events.append({
-            "type": ev.AGENT_HANDOFF_IN, "session_id": sid,
-            "payload": {"from_session_id": "root", "payload_hash": h},
-        })
+        events.append(
+            {
+                "type": ev.AGENT_HANDOFF_IN,
+                "session_id": sid,
+                "payload": {"from_session_id": "root", "payload_hash": h},
+            }
+        )
     pair = fold_handoffs(events)[h]
     assert pair.is_cascade
 

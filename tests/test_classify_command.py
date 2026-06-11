@@ -4,6 +4,7 @@ The classifier maps a Bash command string -> Risk + reason. This is the
 hot path for Claude Code's built-in `Bash` tool. The cases here pin
 defaults so a regression on a destructive pattern is caught in CI.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -63,8 +64,7 @@ def test_critical_commands(cmd: str, expected_reason_substr: str) -> None:
         f"expected CRITICAL for {cmd!r}, got {result.risk.value} ({result.reason})"
     )
     assert expected_reason_substr.lower() in result.reason.lower(), (
-        f"reason for {cmd!r} was {result.reason!r}, expected substring "
-        f"{expected_reason_substr!r}"
+        f"reason for {cmd!r} was {result.reason!r}, expected substring {expected_reason_substr!r}"
     )
 
 
@@ -136,10 +136,10 @@ def test_unknown_command_is_medium() -> None:
         # `/` as boundary points.
         'open "https://github.com/manumarri-sudo/quill"',
         'open "https://github.com/some-pseudo-user/repo"',
-        'curl https://api.example.com/sudo-status',
+        "curl https://api.example.com/sudo-status",
         'echo "sudo-bash-style" > note.txt',
         # `--` flags that contain "sudo" substrings
-        'echo --no-sudo',
+        "echo --no-sudo",
     ],
 )
 def test_url_slugs_with_sudo_are_not_classified_as_critical(cmd: str) -> None:
@@ -157,16 +157,14 @@ def test_url_slugs_with_sudo_are_not_classified_as_critical(cmd: str) -> None:
     [
         "sudo apt install nodejs",
         "sudo -i",
-        "echo done; sudo rm -rf /",      # sudo after a separator still fires
+        "echo done; sudo rm -rf /",  # sudo after a separator still fires
         "true && sudo halt",
     ],
 )
 def test_real_sudo_invocations_still_critical(cmd: str) -> None:
     """The sudo pattern must still catch genuine sudo invocations."""
     result = classify_command(cmd)
-    assert result.risk is Risk.CRITICAL, (
-        f"{cmd!r} should be CRITICAL but got {result.risk.value}"
-    )
+    assert result.risk is Risk.CRITICAL, f"{cmd!r} should be CRITICAL but got {result.risk.value}"
 
 
 def test_classification_reason_is_useful_to_humans() -> None:

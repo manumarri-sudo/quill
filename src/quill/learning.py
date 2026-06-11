@@ -34,6 +34,7 @@ The math is:
 Production exemplar: Falco's auto-tuner. Suggests exceptions daily;
 human keeps or discards. https://www.sysdig.com/blog/falco-rule-tuning
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -53,25 +54,25 @@ from typing import Any, Literal
 # during runtime is what produced the alert-fatigue problem in the first
 # place.
 
-PRIOR_ALPHA: float = 1.0   # prior "approvals" (operator-bypasses of blocks)
-PRIOR_BETA: float = 9.0    # prior "denies" (block stood)
+PRIOR_ALPHA: float = 1.0  # prior "approvals" (operator-bypasses of blocks)
+PRIOR_BETA: float = 9.0  # prior "denies" (block stood)
 # Prior mean = alpha / (alpha + beta) = 1 / 10 = 0.10. This encodes
 # "by default, the operator approves 10% of blocked attempts; the
 # other 90% the block stands." A high approval rate is what surfaces
 # a pattern as a loosening candidate. The research doc had this flipped
 # (Beta(9, 1) was annotated "10%" but gives 0.9); we encode the meaning,
 # not the label.
-EWMA_ALPHA: float = 0.1    # recency weight; 10 obs to half-decay
+EWMA_ALPHA: float = 0.1  # recency weight; 10 obs to half-decay
 
 # Auto-tightening triggers (safe - never widens attack surface).
-TIGHTEN_DENY_STREAK: int = 5         # 5 consecutive denies -> elevate
-TIGHTEN_WILSON_UPPER: float = 0.05   # 95% upper on approval < 5% means
-                                     # denials dominate -> upgrade pattern
+TIGHTEN_DENY_STREAK: int = 5  # 5 consecutive denies -> elevate
+TIGHTEN_WILSON_UPPER: float = 0.05  # 95% upper on approval < 5% means
+# denials dominate -> upgrade pattern
 
 # Loosen-candidate triggers (surfaced only, NEVER auto-applied).
-LOOSEN_WILSON_LOWER: float = 0.65    # 95% lower on approval > 65% means
-                                     # approvals dominate -> review
-LOOSEN_MIN_FIRES: int = 20           # don't suggest below 20 fires
+LOOSEN_WILSON_LOWER: float = 0.65  # 95% lower on approval > 65% means
+# approvals dominate -> review
+LOOSEN_MIN_FIRES: int = 20  # don't suggest below 20 fires
 
 # Operator-anomaly thresholds (rate-based, no autoencoder).
 FATIGUE_INTER_ARRIVAL_SEC: float = 2.0
@@ -99,32 +100,41 @@ COMPROMISE_BURST_PER_5MIN: int = 50  # 50 approvals in 5 min = suspect
 # ---------------------------------------------------------------------------
 # Paths. All env-overridable for test isolation.
 
+
 def _stats_path() -> Path:
-    return Path(os.environ.get(
-        "QUILL_PATTERN_STATS",
-        str(Path.home() / ".quill" / "pattern_stats.json"),
-    )).expanduser()
+    return Path(
+        os.environ.get(
+            "QUILL_PATTERN_STATS",
+            str(Path.home() / ".quill" / "pattern_stats.json"),
+        )
+    ).expanduser()
 
 
 def _suggestions_path() -> Path:
-    return Path(os.environ.get(
-        "QUILL_SUGGESTIONS",
-        str(Path.home() / ".quill" / "suggestions.jsonl"),
-    )).expanduser()
+    return Path(
+        os.environ.get(
+            "QUILL_SUGGESTIONS",
+            str(Path.home() / ".quill" / "suggestions.jsonl"),
+        )
+    ).expanduser()
 
 
 def _log_path() -> Path:
-    return Path(os.environ.get(
-        "QUILL_LEARNING_LOG",
-        str(Path.home() / ".quill" / "learning.log"),
-    )).expanduser()
+    return Path(
+        os.environ.get(
+            "QUILL_LEARNING_LOG",
+            str(Path.home() / ".quill" / "learning.log"),
+        )
+    ).expanduser()
 
 
 def _overrides_path() -> Path:
-    return Path(os.environ.get(
-        "QUILL_OVERRIDES",
-        str(Path.home() / ".quill" / "overrides.toml"),
-    )).expanduser()
+    return Path(
+        os.environ.get(
+            "QUILL_OVERRIDES",
+            str(Path.home() / ".quill" / "overrides.toml"),
+        )
+    ).expanduser()
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +143,7 @@ def _overrides_path() -> Path:
 # them. Blocks expire automatically when (promoted_at + ttl_days) is
 # in the past, so a forgotten override doesn't grant permission
 # forever - Permission Decay applied to the loosening side.
+
 
 def load_active_overrides() -> dict[str, dict[str, Any]]:
     """Return {pattern_id: {ttl_days, promoted_at, evidence, ...}} for
@@ -147,6 +158,7 @@ def load_active_overrides() -> dict[str, dict[str, Any]]:
     if not p.exists():
         return {}
     import sys as _sys
+
     if _sys.version_info >= (3, 11):
         import tomllib as _tomllib
     else:
@@ -201,6 +213,7 @@ def load_active_overrides() -> dict[str, dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # PatternStats: the integer state per classifier pattern.
 
+
 @dataclass
 class PatternStats:
     """One pattern's running stats. All counters are integers; floats
@@ -250,6 +263,7 @@ class PatternStats:
         else:
             # erf-based inverse for arbitrary confidence; uncommon path.
             from statistics import NormalDist
+
             z = NormalDist().inv_cdf(1 - (1 - confidence) / 2)
         p = self.approvals / n
         z2 = z * z
@@ -275,9 +289,7 @@ class PatternStats:
         self.last_fire_ts = now
 
         outcome = 1.0 if decision == "approve" else 0.0
-        self.ewma_approval_rate = (
-            EWMA_ALPHA * outcome + (1 - EWMA_ALPHA) * self.ewma_approval_rate
-        )
+        self.ewma_approval_rate = EWMA_ALPHA * outcome + (1 - EWMA_ALPHA) * self.ewma_approval_rate
 
         if decision == "approve":
             self.approvals += 1
@@ -296,6 +308,7 @@ class PatternStats:
 
 try:
     import fcntl as _fcntl
+
     _HAS_FLOCK = True
 except ImportError:  # pragma: no cover - non-POSIX (Windows) fallback
     _HAS_FLOCK = False
@@ -412,6 +425,7 @@ def _read_modify_write_stats():
 # ---------------------------------------------------------------------------
 # Append-only logs.
 
+
 def append_suggestion(payload: dict[str, Any]) -> None:
     """Surface a suggestion to the operator. Never auto-applied;
     `quill suggestions promote <id>` is the apply path."""
@@ -440,6 +454,7 @@ def log_event(line: str) -> None:
 # Pure-function detectors. Each returns a suggestion dict or None.
 # Tightening detectors WILL auto-apply (caller writes the change).
 # Loosening detectors NEVER auto-apply (caller only surfaces).
+
 
 def detect_tightening(p: PatternStats) -> dict[str, Any] | None:
     """Auto-applies. The two triggers are:
@@ -482,8 +497,7 @@ def detect_loosen_candidate(p: PatternStats) -> dict[str, Any] | None:
         "type": "loosening_candidate",
         "pattern_id": p.pattern_id,
         "evidence": (
-            f"approval rate {p.posterior_mean:.0%} "
-            f"(Wilson 95% lower {wilson_low:.0%}, n={p.fires})"
+            f"approval rate {p.posterior_mean:.0%} (Wilson 95% lower {wilson_low:.0%}, n={p.fires})"
         ),
         "proposal": (
             "Review for per-context override. Promote with "
@@ -529,10 +543,7 @@ def detect_auto_promote_candidate(p: PatternStats) -> dict[str, Any] | None:
     return {
         "type": "policy.promotion_suggested",
         "pattern_id": pid,
-        "evidence": (
-            f"{p.approvals} approvals in "
-            f"{max(1, int(span // 86400))} day(s), 0 denies"
-        ),
+        "evidence": (f"{p.approvals} approvals in {max(1, int(span // 86400))} day(s), 0 denies"),
         "proposal": (
             "Auto-allow this pattern from now on? Press once to confirm. "
             "Reverse anytime with `quill suggestions revoke`."
@@ -570,6 +581,7 @@ def detect_operator_fatigue(p: PatternStats) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # Public entry. Called from the hook adapter AFTER the verdict is
 # rendered. Never blocks the hot path. Failure here is non-fatal.
+
 
 def post_decision_update(
     pattern_id: str,
@@ -687,22 +699,21 @@ def page_hinkley(
     min_dev_down = 0.0
     for i, x in enumerate(xs, start=1):
         mean = mean + (x - mean) / i
-        sum_dev_up += (x - mean - delta)
+        sum_dev_up += x - mean - delta
         min_dev_up = min(min_dev_up, sum_dev_up)
-        sum_dev_down += (mean - x - delta)
+        sum_dev_down += mean - x - delta
         min_dev_down = min(min_dev_down, sum_dev_down)
 
     stat_up = sum_dev_up - min_dev_up
     stat_down = sum_dev_down - min_dev_down
     window = min(20, n)
     rate_now = sum(xs[-window:]) / window
-    rate_prior = sum(xs[:max(1, n - window)]) / max(1, n - window)
+    rate_prior = sum(xs[: max(1, n - window)]) / max(1, n - window)
     if stat_up > lam and rate_now > rate_prior:
         return PageHinkleyResult(True, "upward", stat_up, n, rate_now, rate_prior)
     if stat_down > lam and rate_now < rate_prior:
         return PageHinkleyResult(True, "downward", stat_down, n, rate_now, rate_prior)
-    return PageHinkleyResult(False, "none", max(stat_up, stat_down), n,
-                             rate_now, rate_prior)
+    return PageHinkleyResult(False, "none", max(stat_up, stat_down), n, rate_now, rate_prior)
 
 
 def aggregate_observations_for_session(
@@ -720,7 +731,7 @@ def aggregate_observations_for_session(
         payload = e.get("payload") or {}
         if not isinstance(payload, dict):
             continue
-        if etype == "verdict.blocked" or etype == "verdict.ask":
+        if etype in {"verdict.blocked", "verdict.ask"}:
             out.append(0.0)
         elif etype == "verdict.allowed":
             reason = str(payload.get("reason") or "")
@@ -770,6 +781,7 @@ def check_drift_for_session(
 # ---------------------------------------------------------------------------
 # Helpers for the CLI.
 
+
 def read_recent_log(n: int = 50) -> list[str]:
     p = _log_path()
     if not p.exists():
@@ -794,9 +806,7 @@ def read_suggestions(limit: int = 100) -> list[dict[str, Any]]:
     return out[-limit:]
 
 
-_STALE_PATTERN_PREFIXES: tuple[str, ...] = (
-    "approved one-shot via quill approve ",
-)
+_STALE_PATTERN_PREFIXES: tuple[str, ...] = ("approved one-shot via quill approve ",)
 
 
 def find_stale_patterns(
@@ -841,8 +851,7 @@ def cleanup_stale_patterns() -> tuple[int, list[str]]:
                 removed.append(pid)
     if removed:
         log_event(
-            f"cleanup_stale_patterns removed {len(removed)} row(s): "
-            + ", ".join(removed[:5])
+            f"cleanup_stale_patterns removed {len(removed)} row(s): " + ", ".join(removed[:5])
         )
     return len(removed), removed
 

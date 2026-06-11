@@ -78,7 +78,7 @@ dev = [
     "pytest-benchmark>=4.0",
     "hypothesis>=6.100",
     "syrupy>=4.6",
-    "ruff>=0.5",
+    "ruff==0.15.16",   # pinned so CI's format-check matches local formatting exactly
     "mypy>=1.10",
     "pyright>=1.1.370",
     "pip-audit>=2.7",
@@ -144,6 +144,16 @@ ignore = [
     "S110",               # try-except-pass for best-effort cleanup
     "E701", "E702",       # multiple statements on one line - fine in compact dispatch
     "E501",               # line too long - handled by formatter, not always reachable
+    "RUF002", "RUF003",   # ambiguous unicode (×, curly quotes) in prose docstrings/comments - intentional
+    "PLW0603",            # `global` for the self-test / cache flags - deliberate, not a bug
+    "S108",               # hardcoded /tmp in best-effort cleanup paths - intentional
+    "S606",               # starting a process without a shell (os.execvp) - the SECURE choice here
+    "SIM117",             # nested `with` (contextlib.suppress + resource) - a wash; not worth re-indenting stable code
+    "PLC3002",            # directly-called lambda - intentional inline compute
+    "ANN202",             # missing return type on a couple of private helpers - minor
+    "PTH105",             # os.replace for atomic rename - the canonical primitive
+    "PLW1510",            # subprocess.run without explicit check - return codes handled manually
+    "SIM102",             # nested if vs `and` - cosmetic
 ]
 
 [tool.ruff.lint.per-file-ignores]

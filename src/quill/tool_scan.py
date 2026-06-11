@@ -26,6 +26,7 @@ are cheaper than false negatives for a security gate.
 Composition: runs BEFORE `pinning.verify` so a freshly-poisoned tool
 fails on first sight, not only on rug-pull.
 """
+
 from __future__ import annotations
 
 import re
@@ -42,27 +43,24 @@ from typing import Any, Final
 # and ZWJ/ZWNJ/zero-width-space.
 
 _INVISIBLE_RANGES: Final[tuple[tuple[int, int], ...]] = (
-    (0x0000, 0x0008),    # control chars before \t
-    (0x000E, 0x001F),    # control chars between \r and space
-    (0x007F, 0x009F),    # DEL + C1 controls
-    (0x200B, 0x200F),    # zero-width space, ZWNJ, ZWJ, LRM, RLM
-    (0x202A, 0x202E),    # bidi override controls (Trojan Source class)
-    (0x2060, 0x206F),    # word joiner, invisible operators
-    (0xFEFF, 0xFEFF),    # BOM
-    (0xFFF9, 0xFFFB),    # interlinear annotation
+    (0x0000, 0x0008),  # control chars before \t
+    (0x000E, 0x001F),  # control chars between \r and space
+    (0x007F, 0x009F),  # DEL + C1 controls
+    (0x200B, 0x200F),  # zero-width space, ZWNJ, ZWJ, LRM, RLM
+    (0x202A, 0x202E),  # bidi override controls (Trojan Source class)
+    (0x2060, 0x206F),  # word joiner, invisible operators
+    (0xFEFF, 0xFEFF),  # BOM
+    (0xFFF9, 0xFFFB),  # interlinear annotation
     (0xE0000, 0xE007F),  # Unicode tag block (ASCII smuggling)
     (0xE0080, 0xE00FF),  # tag block extension (rarely allocated)
     (0xF0000, 0xFFFFD),  # supplementary PUA-A
     (0x100000, 0x10FFFD),  # supplementary PUA-B
-    (0xE000, 0xF8FF),    # BMP private use area
+    (0xE000, 0xF8FF),  # BMP private use area
 )
 
 
 def _is_invisible(cp: int) -> bool:
-    for lo, hi in _INVISIBLE_RANGES:
-        if lo <= cp <= hi:
-            return True
-    return False
+    return any(lo <= cp <= hi for lo, hi in _INVISIBLE_RANGES)
 
 
 # Imperatives that read as injection overrides when seen by an LLM that
@@ -119,10 +117,10 @@ _HEX_BLOB_RE = re.compile(r"[0-9a-fA-F]{256,}")
 class ToolScanFinding:
     """One finding from `scan`. Multiple findings can attach to one tool."""
 
-    severity: str       # "critical" | "high" | "medium"
-    category: str       # "invisible_unicode" | "injection_phrase" | "base64_blob" | "hex_blob"
+    severity: str  # "critical" | "high" | "medium"
+    category: str  # "invisible_unicode" | "injection_phrase" | "base64_blob" | "hex_blob"
     detail: str
-    sample: str = ""    # short excerpt, redacted for display
+    sample: str = ""  # short excerpt, redacted for display
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,15 +164,17 @@ def _scan_invisibles(text: str) -> list[ToolScanFinding]:
         except ValueError:
             names.append(f"U+{cp:04X}")
     sev = "critical" if any(0xE0000 <= cp <= 0xE007F for cp in cps) else "high"
-    findings.append(ToolScanFinding(
-        severity=sev,
-        category="invisible_unicode",
-        detail=(
-            f"{len(bad)} invisible/steganographic codepoint(s) in description: "
-            + ", ".join(names)
-            + ("…" if len(cps) > 6 else "")
-        ),
-    ))
+    findings.append(
+        ToolScanFinding(
+            severity=sev,
+            category="invisible_unicode",
+            detail=(
+                f"{len(bad)} invisible/steganographic codepoint(s) in description: "
+                + ", ".join(names)
+                + ("…" if len(cps) > 6 else "")
+            ),
+        )
+    )
     return findings
 
 
@@ -187,32 +187,38 @@ def _scan_injection_phrases(text: str) -> list[ToolScanFinding]:
     if not hits:
         return []
     sev = "critical" if len(hits) >= 2 else "high"
-    return [ToolScanFinding(
-        severity=sev,
-        category="injection_phrase",
-        detail=f"description contains injection-shaped imperative(s): {hits[:5]}",
-        sample=hits[0],
-    )]
+    return [
+        ToolScanFinding(
+            severity=sev,
+            category="injection_phrase",
+            detail=f"description contains injection-shaped imperative(s): {hits[:5]}",
+            sample=hits[0],
+        )
+    ]
 
 
 def _scan_encoded_blobs(text: str) -> list[ToolScanFinding]:
     findings: list[ToolScanFinding] = []
     b64 = _BASE64_BLOB_RE.findall(text)
     if b64:
-        findings.append(ToolScanFinding(
-            severity="medium",
-            category="base64_blob",
-            detail=f"{len(b64)} base64-shaped blob(s) (≥40 chars) in description",
-            sample=b64[0][:32] + "…",
-        ))
+        findings.append(
+            ToolScanFinding(
+                severity="medium",
+                category="base64_blob",
+                detail=f"{len(b64)} base64-shaped blob(s) (≥40 chars) in description",
+                sample=b64[0][:32] + "…",
+            )
+        )
     hx = _HEX_BLOB_RE.findall(text)
     if hx:
-        findings.append(ToolScanFinding(
-            severity="medium",
-            category="hex_blob",
-            detail=f"{len(hx)} hex blob(s) (≥256 chars) in description",
-            sample=hx[0][:32] + "…",
-        ))
+        findings.append(
+            ToolScanFinding(
+                severity="medium",
+                category="hex_blob",
+                detail=f"{len(hx)} hex blob(s) (≥256 chars) in description",
+                sample=hx[0][:32] + "…",
+            )
+        )
     return findings
 
 

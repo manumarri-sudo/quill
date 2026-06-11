@@ -21,6 +21,7 @@ Four invariants under test:
      without blocking forever even when writers are active (shared
      lock semantics work).
 """
+
 from __future__ import annotations
 
 import os
@@ -37,6 +38,7 @@ def _isolate(monkeypatch, tmp_path: Path) -> None:
 
 # ---------------------------------------------------------------------------
 # Test B1: Single-writer behaviour is unchanged.
+
 
 def test_single_writer_still_works(tmp_path: Path, monkeypatch) -> None:
     _isolate(monkeypatch, tmp_path)
@@ -60,23 +62,28 @@ def test_single_writer_still_works(tmp_path: Path, monkeypatch) -> None:
 # This is the canonical read-modify-write race test. Without the
 # flock fix, the test sees fires < 400 due to lost updates.
 
+
 def _worker_record(stats_path: str, n: int, pattern_id: str, decision: str) -> None:
     """Subprocess entry: hammer post_decision_update n times."""
     import os as _os
+
     _os.environ["QUILL_PATTERN_STATS"] = stats_path
     _os.environ["QUILL_SUGGESTIONS"] = stats_path + ".sug"
     _os.environ["QUILL_LEARNING_LOG"] = stats_path + ".log"
     import importlib
-    sys.path.insert(0, '/Users/manaswimarri/quill/src')
-    if 'quill.learning' in sys.modules:
-        importlib.reload(sys.modules['quill.learning'])
+
+    sys.path.insert(0, "/Users/manaswimarri/quill/src")
+    if "quill.learning" in sys.modules:
+        importlib.reload(sys.modules["quill.learning"])
     from quill.learning import post_decision_update
+
     for _ in range(n):
         post_decision_update(pattern_id, decision)
 
 
 def test_8_concurrent_writers_lose_no_updates(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """Fork 8 child processes, each pounds 50 records into the SAME
     pattern. Without flock, lost updates make total < 400. With flock,
@@ -103,6 +110,7 @@ def test_8_concurrent_writers_lose_no_updates(
         os.waitpid(pid, 0)
 
     from quill.learning import load_stats
+
     stats = load_stats()
     assert pattern_id in stats, f"pattern missing; stats keys: {list(stats)}"
     p = stats[pattern_id]
@@ -117,8 +125,10 @@ def test_8_concurrent_writers_lose_no_updates(
 # ---------------------------------------------------------------------------
 # Test B3: Mixed concurrency - approves + denies, each 100 records.
 
+
 def test_mixed_concurrent_approves_and_denies_balance(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     stats_path = str(tmp_path / "stats.json")
@@ -149,27 +159,26 @@ def test_mixed_concurrent_approves_and_denies_balance(
         os.waitpid(pid, 0)
 
     from quill.learning import load_stats
+
     stats = load_stats()
     p = stats[pattern_id]
     expected_approves = n_approve_workers * n_per
     expected_denies = n_deny_workers * n_per
     expected_fires = expected_approves + expected_denies
-    assert p.fires == expected_fires, (
-        f"expected {expected_fires} fires, got {p.fires}"
-    )
+    assert p.fires == expected_fires, f"expected {expected_fires} fires, got {p.fires}"
     assert p.approvals == expected_approves, (
         f"expected {expected_approves} approvals, got {p.approvals}"
     )
-    assert p.denies == expected_denies, (
-        f"expected {expected_denies} denies, got {p.denies}"
-    )
+    assert p.denies == expected_denies, f"expected {expected_denies} denies, got {p.denies}"
 
 
 # ---------------------------------------------------------------------------
 # Test B4: Reader does not block on shared lock.
 
+
 def test_reader_does_not_block_indefinitely(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """A reader (load_stats with shared flock) completing while writers
     are active proves the lock semantics work. We just verify no
@@ -187,8 +196,7 @@ def test_reader_does_not_block_indefinitely(
     t1 = time.perf_counter()
     elapsed_ms = (t1 - t0) * 1000
     assert elapsed_ms < 100, (
-        f"load_stats() took {elapsed_ms:.1f}ms with no contention; "
-        f"flock contention or deadlock"
+        f"load_stats() took {elapsed_ms:.1f}ms with no contention; flock contention or deadlock"
     )
     assert "Bash:read-test" in stats
     assert stats["Bash:read-test"].fires == 5
@@ -199,6 +207,5 @@ def test_reader_does_not_block_indefinitely(
         s = load_stats()
         # Each read sees the cumulative state - no stale reads.
         assert s["Bash:read-test"].fires == 6 + i, (
-            f"iteration {i}: expected fires={6+i}, got "
-            f"{s['Bash:read-test'].fires}"
+            f"iteration {i}: expected fires={6 + i}, got {s['Bash:read-test'].fires}"
         )

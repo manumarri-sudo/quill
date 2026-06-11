@@ -14,6 +14,7 @@ Idempotent: a `<!-- quill-integration v1 -->` marker bookends the block.
 Re-runs detect the marker and report "already integrated." Snippet
 version bumps trigger a clean replace, not a duplicate append.
 """
+
 from __future__ import annotations
 
 import re
@@ -103,12 +104,12 @@ Audit log path: `~/.quill/audit.log.jsonl`. Always cite session_id + timestamp.
 class Integration:
     """One coding agent that Quill can plug instructions into."""
 
-    name: str                # internal id (matches CLI arg)
-    label: str               # human-readable
+    name: str  # internal id (matches CLI arg)
+    label: str  # human-readable
     detect_paths: tuple[Path, ...]  # files/dirs whose existence indicates the agent
     target_path_global: Path | None  # ~/.claude/CLAUDE.md style; per-user
-    target_path_project: Path        # ./CLAUDE.md style; per-repo
-    snippet: str             # the text to inject
+    target_path_project: Path  # ./CLAUDE.md style; per-repo
+    snippet: str  # the text to inject
 
 
 def _claude_code() -> Integration:

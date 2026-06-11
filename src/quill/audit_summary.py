@@ -17,6 +17,7 @@ The module is pure: parsing, filtering, counting, and rendering live here
 so the CLI wrapper in `quill.cli` stays thin and the same code path is
 covered by `tests/test_audit_summary.py` directly.
 """
+
 from __future__ import annotations
 
 import json
@@ -186,8 +187,7 @@ class SummaryStats:
                 for s in self.by_session
             ],
             "pending_ask": [
-                {"ts": p.ts, "tool": p.tool, "what": p.what, "why": p.why}
-                for p in self.pending_ask
+                {"ts": p.ts, "tool": p.tool, "what": p.what, "why": p.why} for p in self.pending_ask
             ],
             "pending_block": [
                 {"ts": p.ts, "tool": p.tool, "what": p.what, "why": p.why}
@@ -268,9 +268,9 @@ def filter_events(
             cwd = payload.get("cwd") if isinstance(payload, dict) else ""
             if not isinstance(cwd, str):
                 continue
-            if not (cwd == cwd_norm
-                    or cwd.startswith(cwd_norm + "/")
-                    or cwd.startswith(cwd_norm + "\\")):
+            if not (
+                cwd == cwd_norm or cwd.startswith(cwd_norm + "/") or cwd.startswith(cwd_norm + "\\")
+            ):
                 continue
         kept.append(evt)
     return kept
@@ -338,7 +338,10 @@ def compute_summary(
     responsible for I/O (log read, console print).
     """
     in_window = filter_events(
-        events, window=window, now=now, cwd_filter=cwd_filter,
+        events,
+        window=window,
+        now=now,
+        cwd_filter=cwd_filter,
     )
 
     high_overnight = 0
@@ -386,23 +389,27 @@ def compute_summary(
                 critical_blocked += 1
             blocked += 1
             if len(pending_block) < max_pending:
-                pending_block.append(PendingItem(
-                    ts=str(evt.get("ts") or ""),
-                    tool=str(payload.get("tool_name") or "-"),
-                    what=_short_what(payload),
-                    why=_why(payload),
-                ))
+                pending_block.append(
+                    PendingItem(
+                        ts=str(evt.get("ts") or ""),
+                        tool=str(payload.get("tool_name") or "-"),
+                        what=_short_what(payload),
+                        why=_why(payload),
+                    )
+                )
             continue
 
         if etype == ASK_EVENT_TYPE:
             asked += 1
             if len(pending_ask) < max_pending:
-                pending_ask.append(PendingItem(
-                    ts=str(evt.get("ts") or ""),
-                    tool=str(payload.get("tool_name") or "-"),
-                    what=_short_what(payload),
-                    why=_why(payload),
-                ))
+                pending_ask.append(
+                    PendingItem(
+                        ts=str(evt.get("ts") or ""),
+                        tool=str(payload.get("tool_name") or "-"),
+                        what=_short_what(payload),
+                        why=_why(payload),
+                    )
+                )
             continue
 
         if etype == ALLOWED_PLAIN_EVENT_TYPE:
@@ -416,14 +423,20 @@ def compute_summary(
     ]
     by_session = [
         SessionBreakdown(
-            session_id=sid, tool_calls=n, cwd=session_cwd.get(sid, ""),
+            session_id=sid,
+            tool_calls=n,
+            cwd=session_cwd.get(sid, ""),
         )
         for sid, n in session_counter.most_common(top_sessions)
     ]
 
-    generated_at = (now or datetime.now(UTC)).astimezone(
-        UTC,
-    ).isoformat()
+    generated_at = (
+        (now or datetime.now(UTC))
+        .astimezone(
+            UTC,
+        )
+        .isoformat()
+    )
 
     return SummaryStats(
         window_seconds=window.total_seconds(),
@@ -506,8 +519,7 @@ def render_markdown(stats: SummaryStats) -> str:
     lines.append(f"- Sessions active: **{stats.active_sessions:,}**")
     if stats.asked_count:
         lines.append(
-            f"- HIGH actions that still asked (overnight was off): "
-            f"**{stats.asked_count:,}**",
+            f"- HIGH actions that still asked (overnight was off): **{stats.asked_count:,}**",
         )
     lines.append("")
 
@@ -526,8 +538,7 @@ def render_markdown(stats: SummaryStats) -> str:
         lines.append("|------|-------|----------------|")
         for t in stats.by_tool:
             lines.append(
-                f"| {_md_escape(t.tool)} | {t.count} | "
-                f"{_md_escape(t.sample_what) or '-'} |",
+                f"| {_md_escape(t.tool)} | {t.count} | {_md_escape(t.sample_what) or '-'} |",
             )
     else:
         lines.append("_(no HIGH actions auto-approved in window)_")
@@ -539,8 +550,7 @@ def render_markdown(stats: SummaryStats) -> str:
         lines.append("|------------|------------|-----|")
         for s in stats.by_session:
             lines.append(
-                f"| `{_short_sid(s.session_id)}` | {s.tool_calls} | "
-                f"{_md_escape(s.cwd) or '-'} |",
+                f"| `{_short_sid(s.session_id)}` | {s.tool_calls} | {_md_escape(s.cwd) or '-'} |",
             )
     else:
         lines.append("_(no session activity in window)_")
@@ -552,8 +562,7 @@ def render_markdown(stats: SummaryStats) -> str:
             t = _time_only(p.ts)
             lines.append(
                 f"- `{t}` **{_md_escape(p.tool)}** - "
-                f"{_md_escape(p.what) or '-'}"
-                + (f"  _{_md_escape(p.why)}_" if p.why else ""),
+                f"{_md_escape(p.what) or '-'}" + (f"  _{_md_escape(p.why)}_" if p.why else ""),
             )
     else:
         lines.append("- (empty - good!)")
@@ -565,8 +574,7 @@ def render_markdown(stats: SummaryStats) -> str:
             t = _time_only(p.ts)
             lines.append(
                 f"- `{t}` **{_md_escape(p.tool)}** - "
-                f"{_md_escape(p.what) or '-'}"
-                + (f"  _{_md_escape(p.why)}_" if p.why else ""),
+                f"{_md_escape(p.what) or '-'}" + (f"  _{_md_escape(p.why)}_" if p.why else ""),
             )
     else:
         lines.append("- (empty - good!)")
@@ -614,8 +622,7 @@ def render_table(stats: SummaryStats) -> Table:
     table.add_row(
         "CRITICAL blocked",
         f"{stats.critical_blocked_count:,}",
-        "safety invariant held" if stats.critical_blocked_count == 0
-        else "review immediately",
+        "safety invariant held" if stats.critical_blocked_count == 0 else "review immediately",
     )
     table.add_row(
         "LOW/MEDIUM logged",

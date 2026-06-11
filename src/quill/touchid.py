@@ -20,6 +20,7 @@ DO NOT change the policy constant without reading SECURITY.md.
 Verified live on Apple Silicon macOS (2026-05-08). The threading.Event +
 reply-block pattern fires without requiring a separate NSRunLoop pump.
 """
+
 from __future__ import annotations
 
 import threading

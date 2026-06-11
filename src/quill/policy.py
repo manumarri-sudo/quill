@@ -4,6 +4,7 @@ No AI in the gate. Every check is O(1) hash lookup or compiled regex.
 Pre-compile patterns at config load, then policy decisions are constant time
 on the hot path.
 """
+
 from __future__ import annotations
 
 import enum
@@ -106,146 +107,243 @@ DEFAULT_HIGH_PATTERNS: Final[tuple[str, ...]] = (
 # concrete - a paste-able command, not advice.
 CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     # Filesystem destruction
-    (r"\brm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*\s+)+(?!\s*$)", "rm -rf",
-     "Move to a quarantine dir instead so you can recover: "
-     "`mv <target> /tmp/quarantine_$(date +%s)`"),
-    (r"\bfind\b.*-delete\b", "find -delete",
-     "Run without -delete first to preview matches: replace `-delete` with `-print`"),
-    (r"\bdd\s+if=", "dd low-level disk write",
-     "Verify the of= target with `lsblk` first; one wrong character corrupts the wrong disk"),
-    (r"\bmkfs\.", "filesystem format",
-     "Confirm the device path with `lsblk -f` first - formatting the wrong drive is unrecoverable"),
-    (r":\(\)\s*\{.*:\|:&.*\}\s*;\s*:", "fork bomb",
-     "This is a fork bomb pattern. Refuse."),
+    (
+        r"\brm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*\s+)+(?!\s*$)",
+        "rm -rf",
+        "Move to a quarantine dir instead so you can recover: "
+        "`mv <target> /tmp/quarantine_$(date +%s)`",
+    ),
+    (
+        r"\bfind\b.*-delete\b",
+        "find -delete",
+        "Run without -delete first to preview matches: replace `-delete` with `-print`",
+    ),
+    (
+        r"\bdd\s+if=",
+        "dd low-level disk write",
+        "Verify the of= target with `lsblk` first; one wrong character corrupts the wrong disk",
+    ),
+    (
+        r"\bmkfs\.",
+        "filesystem format",
+        "Confirm the device path with `lsblk -f` first - formatting the wrong drive is unrecoverable",
+    ),
+    (r":\(\)\s*\{.*:\|:&.*\}\s*;\s*:", "fork bomb", "This is a fork bomb pattern. Refuse."),
     # Version control destructive
-    (r"\bgit\s+push\s+(?:--force|--force-with-lease|-f)\b", "git push --force",
-     "Use `git push --force-with-lease` to avoid clobbering a teammate's commits - "
-     "or rebase first: `git fetch && git rebase origin/<branch>`"),
-    (r"\bgit\s+reset\s+--hard\b", "git reset --hard",
-     "Stash uncommitted work first: `git stash push -u -m 'pre-reset'`, then reset"),
-    (r"\bgit\s+clean\s+-[a-zA-Z]*[fdx]+", "git clean -fdx",
-     "Preview first with `git clean -ndx` (dry run); commit anything you want to keep"),
-    (r"\bgit\s+update-ref\s+-d\b", "git update-ref -d",
-     "Tag the commit before deleting the ref: `git tag backup-$(date +%s) <ref>`"),
+    (
+        r"\bgit\s+push\s+(?:--force|--force-with-lease|-f)\b",
+        "git push --force",
+        "Use `git push --force-with-lease` to avoid clobbering a teammate's commits - "
+        "or rebase first: `git fetch && git rebase origin/<branch>`",
+    ),
+    (
+        r"\bgit\s+reset\s+--hard\b",
+        "git reset --hard",
+        "Stash uncommitted work first: `git stash push -u -m 'pre-reset'`, then reset",
+    ),
+    (
+        r"\bgit\s+clean\s+-[a-zA-Z]*[fdx]+",
+        "git clean -fdx",
+        "Preview first with `git clean -ndx` (dry run); commit anything you want to keep",
+    ),
+    (
+        r"\bgit\s+update-ref\s+-d\b",
+        "git update-ref -d",
+        "Tag the commit before deleting the ref: `git tag backup-$(date +%s) <ref>`",
+    ),
     # Database destructive
-    (r"\bdrop\s+(?:table|database|schema|index)\b", "DROP TABLE/DATABASE/SCHEMA",
-     "Back up first: `pg_dump -t <table> > /tmp/backup_$(date +%s).sql`. "
-     "Then run the DROP in a transaction so you can `ROLLBACK` if needed."),
-    (r"\btruncate\s+(?:table\s+)?\w+", "TRUNCATE TABLE",
-     "TRUNCATE is unrecoverable. `DELETE FROM <table>` (in a transaction) "
-     "lets you ROLLBACK; or back up with `pg_dump -t <table>` first"),
-    (r"\bdelete\s+from\s+\w+(?!.*\bwhere\b)", "DELETE FROM without WHERE",
-     "Add a WHERE clause. To delete all rows intentionally, use TRUNCATE explicitly "
-     "(in a transaction) so the intent is documented"),
+    (
+        r"\bdrop\s+(?:table|database|schema|index)\b",
+        "DROP TABLE/DATABASE/SCHEMA",
+        "Back up first: `pg_dump -t <table> > /tmp/backup_$(date +%s).sql`. "
+        "Then run the DROP in a transaction so you can `ROLLBACK` if needed.",
+    ),
+    (
+        r"\btruncate\s+(?:table\s+)?\w+",
+        "TRUNCATE TABLE",
+        "TRUNCATE is unrecoverable. `DELETE FROM <table>` (in a transaction) "
+        "lets you ROLLBACK; or back up with `pg_dump -t <table>` first",
+    ),
+    (
+        r"\bdelete\s+from\s+\w+(?!.*\bwhere\b)",
+        "DELETE FROM without WHERE",
+        "Add a WHERE clause. To delete all rows intentionally, use TRUNCATE explicitly "
+        "(in a transaction) so the intent is documented",
+    ),
     # Remote code execution
-    (r"\bcurl\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b", "curl | sh",
-     "Download first, read the script, *then* run: "
-     "`curl -fsSL <url> -o /tmp/install.sh && cat /tmp/install.sh && bash /tmp/install.sh`"),
-    (r"\bwget\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b", "wget | sh",
-     "Download first, read it, then run: `wget <url> -O /tmp/install.sh && cat /tmp/install.sh`"),
-    (r"\beval\b\s+[\"']?\$\(", "eval $(...)",
-     "Capture the command first and inspect it: `cmd=$(...)` then `echo \"$cmd\"`"),
+    (
+        r"\bcurl\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b",
+        "curl | sh",
+        "Download first, read the script, *then* run: "
+        "`curl -fsSL <url> -o /tmp/install.sh && cat /tmp/install.sh && bash /tmp/install.sh`",
+    ),
+    (
+        r"\bwget\s+[^|]*\|\s*(?:sh|bash|zsh|fish)\b",
+        "wget | sh",
+        "Download first, read it, then run: `wget <url> -O /tmp/install.sh && cat /tmp/install.sh`",
+    ),
+    (
+        r"\beval\b\s+[\"']?\$\(",
+        "eval $(...)",
+        'Capture the command first and inspect it: `cmd=$(...)` then `echo "$cmd"`',
+    ),
     # Privilege & deploys
-    (r"(?:^|[;&|`(\s])sudo(?=\s)", "sudo invocation",
-     "Confirm you actually need root for this. Many tools (npm, pip, brew) "
-     "should never be run with sudo"),
-    (r"\bchmod\s+(?:[0-7]*7[0-7]?7|\+s)", "chmod 777 / setuid",
-     "World-writable or setuid is almost never what you want. Try `chmod 644` "
-     "for files / `chmod 755` for executables"),
-    (r"\bnpm\s+publish\b", "npm publish",
-     "Dry-run first to see exactly what gets uploaded: `npm publish --dry-run`. "
-     "Verify version, files, and that no secrets are in the tarball"),
-    (r"\byarn\s+publish\b", "yarn publish",
-     "Dry-run first: `yarn pack` produces the tarball without publishing. Inspect it"),
-    (r"\bvercel\s+(?:--prod\b|deploy\s+(?:\S+\s+)*--prod\b)", "vercel --prod",
-     "Preview-deploy first: `vercel deploy` (without --prod) - verify the preview "
-     "URL, then promote: `vercel promote <preview-url>`"),
-    (r"\bflyctl\s+deploy\b(?!.*--config\s+.*staging)", "flyctl deploy",
-     "Deploy to staging first: `flyctl deploy --config fly.staging.toml` - verify, "
-     "then deploy prod"),
-    (r"\brailway\s+up\b.*--service\s+prod", "railway up --service prod",
-     "Use a staging service first; railway has no built-in rollback once a "
-     "prod deploy goes out"),
-    (r"\bkubectl\s+(?:delete|apply\s+-f.*prod)", "kubectl delete / prod apply",
-     "Dry-run first: `kubectl ... --dry-run=server -o yaml` shows what would change"),
-    (r"\bdocker\s+(?:rmi|system\s+prune)", "docker rmi / system prune",
-     "List what would be removed first: `docker images` / `docker system df`"),
-    (r"\bterraform\s+(?:destroy|apply\s+-auto-approve)", "terraform destroy / auto-apply",
-     "Always plan first: `terraform plan -out=plan.tfplan`, review, then "
-     "`terraform apply plan.tfplan`. Never auto-approve in prod"),
+    (
+        r"(?:^|[;&|`(\s])sudo(?=\s)",
+        "sudo invocation",
+        "Confirm you actually need root for this. Many tools (npm, pip, brew) "
+        "should never be run with sudo",
+    ),
+    (
+        r"\bchmod\s+(?:[0-7]*7[0-7]?7|\+s)",
+        "chmod 777 / setuid",
+        "World-writable or setuid is almost never what you want. Try `chmod 644` "
+        "for files / `chmod 755` for executables",
+    ),
+    (
+        r"\bnpm\s+publish\b",
+        "npm publish",
+        "Dry-run first to see exactly what gets uploaded: `npm publish --dry-run`. "
+        "Verify version, files, and that no secrets are in the tarball",
+    ),
+    (
+        r"\byarn\s+publish\b",
+        "yarn publish",
+        "Dry-run first: `yarn pack` produces the tarball without publishing. Inspect it",
+    ),
+    (
+        r"\bvercel\s+(?:--prod\b|deploy\s+(?:\S+\s+)*--prod\b)",
+        "vercel --prod",
+        "Preview-deploy first: `vercel deploy` (without --prod) - verify the preview "
+        "URL, then promote: `vercel promote <preview-url>`",
+    ),
+    (
+        r"\bflyctl\s+deploy\b(?!.*--config\s+.*staging)",
+        "flyctl deploy",
+        "Deploy to staging first: `flyctl deploy --config fly.staging.toml` - verify, "
+        "then deploy prod",
+    ),
+    (
+        r"\brailway\s+up\b.*--service\s+prod",
+        "railway up --service prod",
+        "Use a staging service first; railway has no built-in rollback once a prod deploy goes out",
+    ),
+    (
+        r"\bkubectl\s+(?:delete|apply\s+-f.*prod)",
+        "kubectl delete / prod apply",
+        "Dry-run first: `kubectl ... --dry-run=server -o yaml` shows what would change",
+    ),
+    (
+        r"\bdocker\s+(?:rmi|system\s+prune)",
+        "docker rmi / system prune",
+        "List what would be removed first: `docker images` / `docker system df`",
+    ),
+    (
+        r"\bterraform\s+(?:destroy|apply\s+-auto-approve)",
+        "terraform destroy / auto-apply",
+        "Always plan first: `terraform plan -out=plan.tfplan`, review, then "
+        "`terraform apply plan.tfplan`. Never auto-approve in prod",
+    ),
     # Secret exfil shape - widened to cover the credential dirs the kill-test
     # called out (gh, docker, .npmrc, .pypirc, .netrc, ssh keys by canonical
     # name). The pattern is intentionally read-action-agnostic: a credential
     # file reaching ANY command is suspicious, but the most common verbs are
     # cat/head/tail/less/more/xxd/od/strings/base64.
-    (r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b.*(?:~|\$\{?HOME\}?)/?\.(?:ssh|aws|kube|config/gh|docker|gnupg)\b",
-     "read ~/.ssh ~/.aws ~/.kube ~/.config/gh ~/.docker ~/.gnupg",
-     "If you need a credential value, read the specific file you mean and "
-     "redact for display: `head -c 20 <file>; echo '...'`"),
-    (r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b.*\b(?:\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519|id_ecdsa|id_dsa)\b",
-     "read credential file (.npmrc, .pypirc, .netrc, ssh private key)",
-     "Use the tool's auth helper instead (npm whoami, gh auth status, ssh-agent) "
-     "rather than reading the raw credential"),
-    (r"\b(?:cat|head|tail|less|more)\b\s+(?:[^|]*\s)?\.env\b", "read .env",
-     "Show only keys, not values: `grep -oE '^[A-Z_]+=' .env`"),
+    (
+        r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b.*(?:~|\$\{?HOME\}?)/?\.(?:ssh|aws|kube|config/gh|docker|gnupg)\b",
+        "read ~/.ssh ~/.aws ~/.kube ~/.config/gh ~/.docker ~/.gnupg",
+        "If you need a credential value, read the specific file you mean and "
+        "redact for display: `head -c 20 <file>; echo '...'`",
+    ),
+    (
+        r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b.*\b(?:\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519|id_ecdsa|id_dsa)\b",
+        "read credential file (.npmrc, .pypirc, .netrc, ssh private key)",
+        "Use the tool's auth helper instead (npm whoami, gh auth status, ssh-agent) "
+        "rather than reading the raw credential",
+    ),
+    (
+        r"\b(?:cat|head|tail|less|more)\b\s+(?:[^|]*\s)?\.env\b",
+        "read .env",
+        "Show only keys, not values: `grep -oE '^[A-Z_]+=' .env`",
+    ),
     # Find + exfil: `find $HOME -name "*.env" -print0 | xargs -0 cat` style.
     # The kill-test called this out specifically as a bypass shape.
-    (r"\bfind\b[^|]+-name\s+(?:[\"']?)[^\"' ]*\.(?:env|pem|key)(?:[\"']?)",
-     "find by credential-file extension",
-     "If you need to locate config, use a specific path. Globbing for "
-     "*.env / *.pem / *.key across $HOME is a credential-harvest pattern"),
+    (
+        r"\bfind\b[^|]+-name\s+(?:[\"']?)[^\"' ]*\.(?:env|pem|key)(?:[\"']?)",
+        "find by credential-file extension",
+        "If you need to locate config, use a specific path. Globbing for "
+        "*.env / *.pem / *.key across $HOME is a credential-harvest pattern",
+    ),
     # Pipe credential read to network sink (the bare exfil shape, independent
     # of trifecta tracking - if it's this shape, it's critical on its own).
-    (r"\b(?:cat|head|tail|xxd|tar|base64)\b[^|;]*(?:credential|secret|token|\.env|\.ssh|\.aws|\.kube|\.netrc|\.npmrc|id_rsa|id_ed25519)[^|;]*\|\s*(?:curl|wget|nc|netcat|httpie?|http)\b",
-     "credential read piped to network sink",
-     "Refuse. This is the credential-exfiltration shape: do not pipe "
-     "credentials or .env into curl/wget/nc"),
+    (
+        r"\b(?:cat|head|tail|xxd|tar|base64)\b[^|;]*(?:credential|secret|token|\.env|\.ssh|\.aws|\.kube|\.netrc|\.npmrc|id_rsa|id_ed25519)[^|;]*\|\s*(?:curl|wget|nc|netcat|httpie?|http)\b",
+        "credential read piped to network sink",
+        "Refuse. This is the credential-exfiltration shape: do not pipe "
+        "credentials or .env into curl/wget/nc",
+    ),
     # Interpreter one-liners that wrap a destructive call. Python's shutil.rmtree,
     # os.remove, os.unlink, Node fs.rmSync, Ruby FileUtils.rm_rf, Perl unlink/rmtree.
     # These bypass the literal `rm -rf` pattern by going through the language SDK.
-    (r"\bpython\d?\s+-c\s+[^&|;]*\b(?:shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir|pathlib\.[A-Z]\w*\.\s*unlink|subprocess\.[A-Za-z_]+\([^)]*rm)",
-     "python -c with destructive call",
-     "Move the work into a script file you can read first: "
-     "`python /tmp/work.py` after writing /tmp/work.py"),
-    (r"\bnode\s+-e\s+[^&|;]*\b(?:fs\.rmSync|fs\.unlinkSync|fs\.rm\(|fs\.rmdirSync|child_process\.exec[^(]*rm)",
-     "node -e with destructive call",
-     "Write the script to a file first so it can be reviewed"),
-    (r"\bruby\s+-e\s+[^&|;]*\b(?:FileUtils\.rm_rf|FileUtils\.remove_dir|File\.delete|Dir\.delete)",
-     "ruby -e with destructive call",
-     "Write the script to a file first so it can be reviewed"),
-    (r"\bperl\s+-e\s+[^&|;]*\b(?:File::Path::rmtree|unlink|File::Path::remove_tree)",
-     "perl -e with destructive call",
-     "Write the script to a file first so it can be reviewed"),
+    (
+        r"\bpython\d?\s+-c\s+[^&|;]*\b(?:shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir|pathlib\.[A-Z]\w*\.\s*unlink|subprocess\.[A-Za-z_]+\([^)]*rm)",
+        "python -c with destructive call",
+        "Move the work into a script file you can read first: "
+        "`python /tmp/work.py` after writing /tmp/work.py",
+    ),
+    (
+        r"\bnode\s+-e\s+[^&|;]*\b(?:fs\.rmSync|fs\.unlinkSync|fs\.rm\(|fs\.rmdirSync|child_process\.exec[^(]*rm)",
+        "node -e with destructive call",
+        "Write the script to a file first so it can be reviewed",
+    ),
+    (
+        r"\bruby\s+-e\s+[^&|;]*\b(?:FileUtils\.rm_rf|FileUtils\.remove_dir|File\.delete|Dir\.delete)",
+        "ruby -e with destructive call",
+        "Write the script to a file first so it can be reviewed",
+    ),
+    (
+        r"\bperl\s+-e\s+[^&|;]*\b(?:File::Path::rmtree|unlink|File::Path::remove_tree)",
+        "perl -e with destructive call",
+        "Write the script to a file first so it can be reviewed",
+    ),
     # Shell-fetched payload executed inline: `bash -c "$(curl ...)"` and its
     # sh / zsh / fish variants. This is the curl|sh shape moved one indirection
     # to evade the literal pipe-to-shell detector.
-    (r"\b(?:bash|sh|zsh|fish|dash|ksh)\s+-c\s+[\"']?\s*(?:\$\(|`)\s*(?:curl|wget|fetch)\b",
-     "shell -c with curl-substitution payload",
-     "Download to a file first, read it, then run: "
-     "`curl -fsSL <url> -o /tmp/x.sh && cat /tmp/x.sh && bash /tmp/x.sh`"),
+    (
+        r"\b(?:bash|sh|zsh|fish|dash|ksh)\s+-c\s+[\"']?\s*(?:\$\(|`)\s*(?:curl|wget|fetch)\b",
+        "shell -c with curl-substitution payload",
+        "Download to a file first, read it, then run: "
+        "`curl -fsSL <url> -o /tmp/x.sh && cat /tmp/x.sh && bash /tmp/x.sh`",
+    ),
     # Heredoc into an interpreter: `python <<EOF\n...rmtree...\nEOF`. Risk is
     # the destructive call buried inside the heredoc; same matching shape as
     # the -c variants above but with `<<` (heredoc) instead of `-c`.
-    (r"\b(?:python\d?|node|ruby|perl)\b[^<]*<<[-~]?\s*['\"]?(?:EOF|PY|JS|RB|PL|HEREDOC|END)",
-     "interpreter heredoc",
-     "Heredocs hide what's about to run. Write the script to a file first "
-     "and run it: `cat > /tmp/work.py <<'EOF' ... EOF && python /tmp/work.py`"),
+    (
+        r"\b(?:python\d?|node|ruby|perl)\b[^<]*<<[-~]?\s*['\"]?(?:EOF|PY|JS|RB|PL|HEREDOC|END)",
+        "interpreter heredoc",
+        "Heredocs hide what's about to run. Write the script to a file first "
+        "and run it: `cat > /tmp/work.py <<'EOF' ... EOF && python /tmp/work.py`",
+    ),
     # Base64-decoded payload into shell. `echo <b64> | base64 -d | bash`
-    (r"\bbase64\s+(?:-d|--decode)\b[^|;]*\|\s*(?:bash|sh|zsh|fish|python\d?|node|perl|ruby)\b",
-     "base64-decoded payload piped to interpreter",
-     "Decode to a file first so you can inspect the script before running it"),
+    (
+        r"\bbase64\s+(?:-d|--decode)\b[^|;]*\|\s*(?:bash|sh|zsh|fish|python\d?|node|perl|ruby)\b",
+        "base64-decoded payload piped to interpreter",
+        "Decode to a file first so you can inspect the script before running it",
+    ),
     # Gate self-tamper: a write/delete/in-place-edit targeting Quill's own
     # config or the host agent's hook settings is an attempt to disable the
     # gate from inside (the second-review critique's "attacker writes to
     # settings.json to alter hook routing"). Mutating verb + a gate-config
     # path. (Within the app-layer model: a write that does NOT go through a
     # gated tool still bypasses this - see docs/SECURITY-MODEL.md.)
-    (r"(?:>>?|\btee\b|\bsed\s+-i|\btruncate\b|\brm\b|\bmv\b|\bcp\b|\bdd\b|\bln\b)"
-     r"[^|;]*(?:\.claude/settings(?:\.local)?\.json|\.cursor/hooks\.json|"
-     r"\.quill/(?:config\.toml|key|overrides\.toml))",
-     "write/delete targeting the gate's own config (settings.json / config.toml)",
-     "Editing the gate's config to disable it is a privilege-escalation shape. "
-     "Change policy deliberately via `quill` commands, not by rewriting the files"),
+    (
+        r"(?:>>?|\btee\b|\bsed\s+-i|\btruncate\b|\brm\b|\bmv\b|\bcp\b|\bdd\b|\bln\b)"
+        r"[^|;]*(?:\.claude/settings(?:\.local)?\.json|\.cursor/hooks\.json|"
+        r"\.quill/(?:config\.toml|key|overrides\.toml))",
+        "write/delete targeting the gate's own config (settings.json / config.toml)",
+        "Editing the gate's config to disable it is a privilege-escalation shape. "
+        "Change policy deliberately via `quill` commands, not by rewriting the files",
+    ),
 )
 
 # Private-data-read shapes. These DON'T classify to critical by themselves
@@ -262,50 +360,90 @@ PRIVATE_READ_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     # Bare / piped / redirected dump only. `printenv PATH` (a single named
     # variable) is the targeted read the suggestion itself recommends, so it
     # stays LOW.
-    (r"^\s*(?:env|printenv)\s*(?:$|\||>)",
-     "env/printenv dumps environment (often contains secrets)",
-     "If you need a specific value, ask for it by name: `echo $MY_VAR`. "
-     "Dumping the whole environment to an agent's context is a credential "
-     "exposure shape"),
-    (r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b\s+(?:[^|;]*\s)?(?:~|\$\{?HOME\}?)/?\.(?:config/gh|docker|gnupg|kube|aws|ssh)\b",
-     "read credential directory",
-     "Use the tool's auth helper (gh auth status, aws sts get-caller-identity) "
-     "instead of cat'ing the raw config"),
-    (r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b[^|;]*(?:\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519|id_ecdsa|id_dsa)\b",
-     "read credential file",
-     "Use the package manager's auth helper rather than reading the raw token"),
+    (
+        r"^\s*(?:env|printenv)\s*(?:$|\||>)",
+        "env/printenv dumps environment (often contains secrets)",
+        "If you need a specific value, ask for it by name: `echo $MY_VAR`. "
+        "Dumping the whole environment to an agent's context is a credential "
+        "exposure shape",
+    ),
+    (
+        r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b\s+(?:[^|;]*\s)?(?:~|\$\{?HOME\}?)/?\.(?:config/gh|docker|gnupg|kube|aws|ssh)\b",
+        "read credential directory",
+        "Use the tool's auth helper (gh auth status, aws sts get-caller-identity) "
+        "instead of cat'ing the raw config",
+    ),
+    (
+        r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b[^|;]*(?:\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519|id_ecdsa|id_dsa)\b",
+        "read credential file",
+        "Use the package manager's auth helper rather than reading the raw token",
+    ),
 )
 
 HIGH_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
-    (r"\bgit\s+push\b", "git push",
-     "Verify branch + diff first: `git status && git log @{u}..HEAD --oneline`"),
-    (r"\bgit\s+commit\b", "git commit",
-     "Show staged hunks first: `git diff --staged`"),
-    (r"\brm\s+(?!-[a-zA-Z]*[rRf])", "rm (single file)",
-     "Move to /tmp first: `mv <file> /tmp/` lets you recover for the session"),
-    (r"\bsed\s+-i\b", "sed -i (in-place)",
-     "Drop `-i` and pipe through `diff` first to preview the change"),
-    (r"\bgh\s+pr\s+merge\b", "gh pr merge",
-     "Verify checks: `gh pr checks` before merging"),
-    (r"\bgh\s+repo\s+(?:delete|edit)\b", "gh repo delete/edit",
-     "Repo-level changes are visible to collaborators - confirm with the team first"),
-    (r"\bnpm\s+install\s+(?:-g|--global)\b", "npm install -g",
-     "Prefer `npx <pkg>` for one-off use, or project-local install. "
-     "Globals can run install scripts at root"),
-    (r"\bnpm\s+install\b", "npm install (mutates lockfile)",
-     "If your lockfile should be authoritative, prefer `npm ci`"),
-    (r"\bvercel\s+deploy\b", "vercel deploy (preview)",
-     "Preview is cheap; promote with `vercel promote <url>` after verifying"),
-    (r"\bdocker\s+(?:push|run\b.*--privileged)", "docker push / privileged run",
-     "Drop privileges if possible, use `--cap-add` selectively"),
-    (r"\bcurl\s+-X\s+(?:POST|PUT|DELETE|PATCH)\b", "curl write request",
-     "Confirm URL + body. Use the API's `--dry-run` if available"),
-    (r"\bopen\s+\S+://", "open URL/app",
-     "Verify the URL first if it came from an untrusted source"),
-    (r"\bpip\s+install\s+(?:[^-]|-(?!h))", "pip install",
-     "Use a venv: `python -m venv .venv && .venv/bin/pip install ...`"),
-    (r"\bbrew\s+install\b", "brew install",
-     "Confirm the formula source: `brew info <pkg>` shows the homepage"),
+    (
+        r"\bgit\s+push\b",
+        "git push",
+        "Verify branch + diff first: `git status && git log @{u}..HEAD --oneline`",
+    ),
+    (r"\bgit\s+commit\b", "git commit", "Show staged hunks first: `git diff --staged`"),
+    (
+        r"\brm\s+(?!-[a-zA-Z]*[rRf])",
+        "rm (single file)",
+        "Move to /tmp first: `mv <file> /tmp/` lets you recover for the session",
+    ),
+    (
+        r"\bsed\s+-i\b",
+        "sed -i (in-place)",
+        "Drop `-i` and pipe through `diff` first to preview the change",
+    ),
+    (r"\bgh\s+pr\s+merge\b", "gh pr merge", "Verify checks: `gh pr checks` before merging"),
+    (
+        r"\bgh\s+repo\s+(?:delete|edit)\b",
+        "gh repo delete/edit",
+        "Repo-level changes are visible to collaborators - confirm with the team first",
+    ),
+    (
+        r"\bnpm\s+install\s+(?:-g|--global)\b",
+        "npm install -g",
+        "Prefer `npx <pkg>` for one-off use, or project-local install. "
+        "Globals can run install scripts at root",
+    ),
+    (
+        r"\bnpm\s+install\b",
+        "npm install (mutates lockfile)",
+        "If your lockfile should be authoritative, prefer `npm ci`",
+    ),
+    (
+        r"\bvercel\s+deploy\b",
+        "vercel deploy (preview)",
+        "Preview is cheap; promote with `vercel promote <url>` after verifying",
+    ),
+    (
+        r"\bdocker\s+(?:push|run\b.*--privileged)",
+        "docker push / privileged run",
+        "Drop privileges if possible, use `--cap-add` selectively",
+    ),
+    (
+        r"\bcurl\s+-X\s+(?:POST|PUT|DELETE|PATCH)\b",
+        "curl write request",
+        "Confirm URL + body. Use the API's `--dry-run` if available",
+    ),
+    (
+        r"\bopen\s+\S+://",
+        "open URL/app",
+        "Verify the URL first if it came from an untrusted source",
+    ),
+    (
+        r"\bpip\s+install\s+(?:[^-]|-(?!h))",
+        "pip install",
+        "Use a venv: `python -m venv .venv && .venv/bin/pip install ...`",
+    ),
+    (
+        r"\bbrew\s+install\b",
+        "brew install",
+        "Confirm the formula source: `brew info <pkg>` shows the homepage",
+    ),
 )
 
 LOW_COMMAND_PATTERNS: Final[tuple[str, ...]] = (
@@ -357,39 +495,51 @@ _PRIVATE_READ_RE: Final[tuple[tuple[re.Pattern[str], str, str], ...]] = tuple(
 RAW_CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     # Interpreter heredoc: `python - <<'PY' ... PY`, `node <<JS`, etc. The
     # delimiter is commonly single-quoted, which the masker blanks; scan raw.
-    (r"(?:^|[;&|]\s*)(?:python\d?|node|ruby|perl|bash|sh|zsh)\b[^<\n]*<<[-~]?\s*['\"]?"
-     r"(?:EOF|PY|JS|RB|PL|SH|HEREDOC|END)\b",
-     "interpreter heredoc",
-     "Heredocs hide what's about to run. Write the script to a file first "
-     "and run it: `cat > /tmp/work.py <<'EOF' ... EOF && python /tmp/work.py`"),
+    (
+        r"(?:^|[;&|]\s*)(?:python\d?|node|ruby|perl|bash|sh|zsh)\b[^<\n]*<<[-~]?\s*['\"]?"
+        r"(?:EOF|PY|JS|RB|PL|SH|HEREDOC|END)\b",
+        "interpreter heredoc",
+        "Heredocs hide what's about to run. Write the script to a file first "
+        "and run it: `cat > /tmp/work.py <<'EOF' ... EOF && python /tmp/work.py`",
+    ),
     # find for credential-file extensions, with the glob commonly quoted
     # (`-name "*.env"`). Masking blanks the quoted glob; scan raw.
-    (r"(?:^|[;&|]\s*)find\b[^|\n]+-name\s+['\"]?\*?\.(?:env|pem|key)\b",
-     "find by credential-file extension",
-     "Globbing for *.env / *.pem / *.key is a credential-harvest pattern. "
-     "Use a specific path instead of scanning the tree"),
+    (
+        r"(?:^|[;&|]\s*)find\b[^|\n]+-name\s+['\"]?\*?\.(?:env|pem|key)\b",
+        "find by credential-file extension",
+        "Globbing for *.env / *.pem / *.key is a credential-harvest pattern. "
+        "Use a specific path instead of scanning the tree",
+    ),
     # Interpreter one-liners that wrap a destructive call. The code lives
     # inside the `-c "..."` / `-e "..."` quotes, which masking blanks - so
     # these must scan raw. Anchored to a leading interpreter verb so that
     # `echo "python -c shutil.rmtree(...)"` (the verb mid-string) does not
     # false-fire.
-    (r"(?:^|[;&|]\s*)python\d?\s+-c\b.*?"
-     r"(?:shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir|pathlib\.[A-Z]\w*\s*\.\s*unlink)",
-     "python -c with destructive call",
-     "Move the work into a script file you can read first: "
-     "`python /tmp/work.py` after writing /tmp/work.py"),
-    (r"(?:^|[;&|]\s*)node\s+-e\b.*?"
-     r"(?:\brmSync\b|\bunlinkSync\b|\brmdirSync\b|fs\.rm\()",
-     "node -e with destructive call",
-     "Write the script to a file first so it can be reviewed"),
-    (r"(?:^|[;&|]\s*)ruby\s+-e\b.*?"
-     r"(?:FileUtils\.rm_rf|FileUtils\.remove_dir|File\.delete|Dir\.delete)",
-     "ruby -e with destructive call",
-     "Write the script to a file first so it can be reviewed"),
-    (r"(?:^|[;&|]\s*)perl\s+-e\b.*?"
-     r"(?:File::Path::rmtree|File::Path::remove_tree|unlink)",
-     "perl -e with destructive call",
-     "Write the script to a file first so it can be reviewed"),
+    (
+        r"(?:^|[;&|]\s*)python\d?\s+-c\b.*?"
+        r"(?:shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir|pathlib\.[A-Z]\w*\s*\.\s*unlink)",
+        "python -c with destructive call",
+        "Move the work into a script file you can read first: "
+        "`python /tmp/work.py` after writing /tmp/work.py",
+    ),
+    (
+        r"(?:^|[;&|]\s*)node\s+-e\b.*?"
+        r"(?:\brmSync\b|\bunlinkSync\b|\brmdirSync\b|fs\.rm\()",
+        "node -e with destructive call",
+        "Write the script to a file first so it can be reviewed",
+    ),
+    (
+        r"(?:^|[;&|]\s*)ruby\s+-e\b.*?"
+        r"(?:FileUtils\.rm_rf|FileUtils\.remove_dir|File\.delete|Dir\.delete)",
+        "ruby -e with destructive call",
+        "Write the script to a file first so it can be reviewed",
+    ),
+    (
+        r"(?:^|[;&|]\s*)perl\s+-e\b.*?"
+        r"(?:File::Path::rmtree|File::Path::remove_tree|unlink)",
+        "perl -e with destructive call",
+        "Write the script to a file first so it can be reviewed",
+    ),
     # Obfuscation catches - DEFENSE-IN-DEPTH, not a hard boundary. A
     # determined adversary has effectively infinite shell-grammar tricks to
     # reconstruct a command (string-splitting, hex/oct escapes, printf
@@ -400,17 +550,21 @@ RAW_CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     #
     # Command substitution that resolves a destructive binary then applies a
     # recursive-force flag: `$(which rm) -rf`, `$(command -v rm) -rf`.
-    (r"\$\(\s*(?:which|command\s+-v|type(?:\s+-\w+)?)\s+"
-     r"(?:rm|rmdir|dd|mkfs|shred|srm)\b[^)]*\)\s*-[a-zA-Z]*[rRfF]",
-     "command substitution resolving a destructive binary",
-     "Run the explicit command so the gate can classify it; hiding `rm`/`dd` "
-     "behind $(which ...) is an obfuscation shape"),
+    (
+        r"\$\(\s*(?:which|command\s+-v|type(?:\s+-\w+)?)\s+"
+        r"(?:rm|rmdir|dd|mkfs|shred|srm)\b[^)]*\)\s*-[a-zA-Z]*[rRfF]",
+        "command substitution resolving a destructive binary",
+        "Run the explicit command so the gate can classify it; hiding `rm`/`dd` "
+        "behind $(which ...) is an obfuscation shape",
+    ),
     # Two or more adjacent variable expansions assembled into a command,
     # immediately followed by a recursive-force flag: `$a$b -rf /`.
-    (r"(?:\$\{?\w+\}?){2,}\s+-[a-zA-Z]*(?:rf|fr)\b",
-     "variable-assembled command with recursive-force flag",
-     "Reconstructing a command from shell variables to dodge pattern "
-     "matching is an obfuscation shape; run the explicit command"),
+    (
+        r"(?:\$\{?\w+\}?){2,}\s+-[a-zA-Z]*(?:rf|fr)\b",
+        "variable-assembled command with recursive-force flag",
+        "Reconstructing a command from shell variables to dodge pattern "
+        "matching is an obfuscation shape; run the explicit command",
+    ),
 )
 _RAW_CRITICAL_CMD_RE: Final[tuple[tuple[re.Pattern[str], str, str], ...]] = tuple(
     (re.compile(p, re.IGNORECASE), r, s) for p, r, s in RAW_CRITICAL_COMMAND_PATTERNS
@@ -429,7 +583,7 @@ def _user_bash_allowlist() -> tuple[re.Pattern[str], ...]:
     Cached on first call; restart the agent / re-run the hook process to
     pick up edits.
     """
-    global _USER_BASH_ALLOWLIST  # noqa: PLW0603 - module-level cache by design
+    global _USER_BASH_ALLOWLIST
     cached = globals().get("_USER_BASH_ALLOWLIST")
     if cached is not None:
         return cached
@@ -438,12 +592,13 @@ def _user_bash_allowlist() -> tuple[re.Pattern[str], ...]:
         import tomllib  # py311+
 
         from quill.config import default_config_path
+
         p = default_config_path()
         if p.exists():
             with p.open("rb") as f:
                 raw = tomllib.load(f)
             bash_section = raw.get("bash") or {}
-            for entry in (bash_section.get("allowlist") or []):
+            for entry in bash_section.get("allowlist") or []:
                 if isinstance(entry, str) and entry.strip():
                     try:
                         patterns.append(re.compile(entry, re.IGNORECASE))
@@ -500,6 +655,7 @@ def _mask_quoted(cmd: str) -> str:
     executed and masking is sound. Double-quoted regions blank everything
     but preserve any `$(…)` / backtick spans within.
     """
+
     def _blank(m: re.Match[str]) -> str:
         s = m.group(0)
         if len(s) <= 2:
@@ -626,7 +782,9 @@ def classify_command(command: str) -> CommandClassification:
     for rex, reason, suggestion in _PRIVATE_READ_RE:
         if rex.search(masked):
             return CommandClassification(
-                Risk.HIGH, f"private_data_read: {reason}", suggestion,
+                Risk.HIGH,
+                f"private_data_read: {reason}",
+                suggestion,
             )
 
     # Gate 4: user allowlist may now short-circuit the REMAINING (non-critical,

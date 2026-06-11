@@ -3,6 +3,7 @@
 Covers: digest stability, issue → consume → exhausted, expiry, revocation,
 mismatch by tool name, mismatch by args, persistence across reload.
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta

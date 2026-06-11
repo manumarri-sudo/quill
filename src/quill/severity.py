@@ -33,6 +33,7 @@ References (primary):
   - https://no-color.org/ - the NO_COLOR convention; Rich respects this
     automatically through its Console.
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -40,8 +41,15 @@ from typing import Literal
 from quill.policy import Risk
 
 SeverityLabel = Literal[
-    "critical", "high", "medium", "low", "ok",
-    "trifecta", "chain", "secret", "pin_refusal",
+    "critical",
+    "high",
+    "medium",
+    "low",
+    "ok",
+    "trifecta",
+    "chain",
+    "secret",
+    "pin_refusal",
 ]
 
 
@@ -49,38 +57,38 @@ SeverityLabel = Literal[
 # we deliberately avoid emojis here because not every Mac terminal renders
 # them with consistent width (drifts the table alignment in `quill insights`).
 _ICONS: dict[SeverityLabel, str] = {
-    "critical":    "X",
-    "high":        "!",
-    "medium":      "~",
-    "low":         ".",
-    "ok":          "+",
-    "trifecta":    "*",
-    "chain":       "=",
-    "secret":      "$",
+    "critical": "X",
+    "high": "!",
+    "medium": "~",
+    "low": ".",
+    "ok": "+",
+    "trifecta": "*",
+    "chain": "=",
+    "secret": "$",
     "pin_refusal": "X",
 }
 
 _COLORS: dict[SeverityLabel, str] = {
-    "critical":    "red",
-    "high":        "yellow",
-    "medium":      "yellow",
-    "low":         "dim",
-    "ok":          "green",
-    "trifecta":    "red",
-    "chain":       "magenta",
-    "secret":      "red",
+    "critical": "red",
+    "high": "yellow",
+    "medium": "yellow",
+    "low": "dim",
+    "ok": "green",
+    "trifecta": "red",
+    "chain": "magenta",
+    "secret": "red",
     "pin_refusal": "red",
 }
 
 _TEXT_LABEL: dict[SeverityLabel, str] = {
-    "critical":    "CRITICAL",
-    "high":        "HIGH",
-    "medium":      "MEDIUM",
-    "low":         "LOW",
-    "ok":          "OK",
-    "trifecta":    "TRIFECTA",
-    "chain":       "CHAIN",
-    "secret":      "SECRET",
+    "critical": "CRITICAL",
+    "high": "HIGH",
+    "medium": "MEDIUM",
+    "low": "LOW",
+    "ok": "OK",
+    "trifecta": "TRIFECTA",
+    "chain": "CHAIN",
+    "secret": "SECRET",
     "pin_refusal": "PIN-FLIP",
 }
 

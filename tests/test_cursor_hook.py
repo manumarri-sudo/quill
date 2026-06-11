@@ -5,6 +5,7 @@ Pinned here because Cursor versions evolve faster than Quill's release
 cadence; if a future Cursor version changes the JSON shape, these tests
 catch it.
 """
+
 from __future__ import annotations
 
 import json
@@ -142,6 +143,7 @@ def test_run_hook_emits_one_shot_approval_token_on_block() -> None:
     """When a call is denied, the audit log records the approve_token so
     `quill approve <token>` can release the next retry."""
     import tempfile
+
     with tempfile.TemporaryDirectory() as d:
         log = Path(d) / "audit.jsonl"
         with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
@@ -200,14 +202,18 @@ def test_install_is_idempotent(tmp_path: Path) -> None:
 def test_install_preserves_existing_user_hooks(tmp_path: Path) -> None:
     """If the user already has a custom hook, Quill must not clobber it."""
     p = tmp_path / "hooks.json"
-    p.write_text(json.dumps({
-        "version": 1,
-        "hooks": {
-            "beforeShellExecution": [
-                {"command": "my-custom-linter", "type": "command"},
-            ],
-        },
-    }))
+    p.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "hooks": {
+                    "beforeShellExecution": [
+                        {"command": "my-custom-linter", "type": "command"},
+                    ],
+                },
+            }
+        )
+    )
     install_into_settings(p)
     data = json.loads(p.read_text())
     cmds = [h["command"] for h in data["hooks"]["beforeShellExecution"]]

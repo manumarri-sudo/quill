@@ -18,6 +18,7 @@ If no recent agent session exists, the hook is a no-op. The hook
 also no-ops on merge / squash / amend commits where prepending a
 new block would be wrong.
 """
+
 from __future__ import annotations
 
 import os
@@ -31,7 +32,7 @@ from quill.receipt import Receipt, derive_from_events, load_audit_events
 # How recent does "active session" need to be? If the latest session_close
 # is older than this, the hook adds nothing (we don't want a 3-day-old
 # session's summary on today's commit).
-DEFAULT_FRESHNESS_SECONDS: Final[int] = 4 * 60 * 60   # 4 hours
+DEFAULT_FRESHNESS_SECONDS: Final[int] = 4 * 60 * 60  # 4 hours
 
 # Source types from git's prepare-commit-msg (second positional arg).
 # Skip the cases where prepending is wrong.
@@ -113,8 +114,7 @@ def render_commit_block(r: Receipt) -> str:
         for v in r.to_verify[:3]:
             lines.append(f"#   ? {v[:200]}")
     lines.append(
-        "# (added by quill prepare-commit-msg; uncomment a line to keep it, "
-        "or delete this block)",
+        "# (added by quill prepare-commit-msg; uncomment a line to keep it, or delete this block)",
     )
     lines.append("")
     return "\n".join(lines)
@@ -203,6 +203,7 @@ def _resolve_quill_binary() -> str:
     """
     import shutil
     import sys
+
     venv_quill = Path(sys.executable).parent / "quill"
     if venv_quill.exists() and os.access(venv_quill, os.X_OK):
         return str(venv_quill)
@@ -226,18 +227,14 @@ def _hook_script() -> str:
         "# quill prepare-commit-msg hook\n"
         "# Installed by `quill commit-hook-install`; remove with "
         "`quill commit-hook-uninstall`.\n"
-        f"exec {binary} git-hook \"$@\"\n"
+        f'exec {binary} git-hook "$@"\n'
     )
 
 
 # Kept for back-compat with any code that imported _HOOK_SCRIPT before
 # this change; new code should call _hook_script() to get the resolved
 # binary path baked in.
-_HOOK_SCRIPT: Final[str] = (
-    "#!/bin/sh\n"
-    "# quill prepare-commit-msg hook\n"
-    "exec quill git-hook \"$@\"\n"
-)
+_HOOK_SCRIPT: Final[str] = '#!/bin/sh\n# quill prepare-commit-msg hook\nexec quill git-hook "$@"\n'
 
 
 def hook_path(repo_root: Path) -> Path:

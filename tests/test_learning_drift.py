@@ -14,6 +14,7 @@ must hold:
      NOT report drift (Page-Hinkley is unreliable in sparse regime
      by design).
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ from quill.learning import (
 # ---------------------------------------------------------------------------
 # Test 1: Upward shift is detected.
 
+
 def test_page_hinkley_detects_upward_shift(tmp_path: Path, monkeypatch) -> None:
     """50 denies followed by 50 approves is the canonical upward
     shift. Detector must fire with direction='upward'."""
@@ -40,8 +42,7 @@ def test_page_hinkley_detects_upward_shift(tmp_path: Path, monkeypatch) -> None:
     observations = [0.0] * 50 + [1.0] * 50
     result = page_hinkley(observations)
     assert result.detected, (
-        f"clear upward shift must fire; got stat={result.statistic:.2f}, "
-        f"lambda={PH_LAMBDA}"
+        f"clear upward shift must fire; got stat={result.statistic:.2f}, lambda={PH_LAMBDA}"
     )
     assert result.direction == "upward"
     assert result.rate_now > result.rate_prior_window
@@ -50,6 +51,7 @@ def test_page_hinkley_detects_upward_shift(tmp_path: Path, monkeypatch) -> None:
 
 # ---------------------------------------------------------------------------
 # Test 2: Downward shift is detected.
+
 
 def test_page_hinkley_detects_downward_shift(tmp_path: Path, monkeypatch) -> None:
     """50 approves followed by 50 denies is the symmetric downward
@@ -67,8 +69,10 @@ def test_page_hinkley_detects_downward_shift(tmp_path: Path, monkeypatch) -> Non
 # ---------------------------------------------------------------------------
 # Test 3: Noise does not trigger detection.
 
+
 def test_page_hinkley_does_not_fire_on_stable_noise(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """200 observations drawn from a stable Bernoulli(0.3) should NOT
     trigger drift. Run twice with different seeds; both must stay
@@ -79,8 +83,7 @@ def test_page_hinkley_does_not_fire_on_stable_noise(
     monkeypatch.setenv("QUILL_LEARNING_LOG", str(tmp_path / "l.log"))
     for seed in (12345, 67890, 42):
         rng = random.Random(seed)
-        observations = [1.0 if rng.random() < 0.30 else 0.0
-                        for _ in range(200)]
+        observations = [1.0 if rng.random() < 0.30 else 0.0 for _ in range(200)]
         result = page_hinkley(observations)
         assert not result.detected, (
             f"seed {seed}: stable Bernoulli(0.30) noise should NOT fire "
@@ -92,8 +95,10 @@ def test_page_hinkley_does_not_fire_on_stable_noise(
 # ---------------------------------------------------------------------------
 # Test 4: Sparse sessions do not crash and do not report drift.
 
+
 def test_drift_check_handles_sparse_and_empty_sessions(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """A session with < 20 outcomes returns no-detect. An empty event
     list returns no-detect. A session whose session_id is unknown
@@ -116,8 +121,11 @@ def test_drift_check_handles_sparse_and_empty_sessions(
     fake_events = [
         {"type": "verdict.blocked", "session_id": "s1", "payload": {}},
         {"type": "verdict.ask", "session_id": "s1", "payload": {}},
-        {"type": "verdict.allowed", "session_id": "s1",
-         "payload": {"reason": "read-only command"}},  # plain LOW, excluded
+        {
+            "type": "verdict.allowed",
+            "session_id": "s1",
+            "payload": {"reason": "read-only command"},
+        },  # plain LOW, excluded
         {"type": "verdict.blocked", "session_id": "s2", "payload": {}},
     ]
     obs_s1 = aggregate_observations_for_session(fake_events, "s1")
@@ -133,12 +141,16 @@ def test_drift_check_handles_sparse_and_empty_sessions(
     # Strong-signal session - upward shift across 60 outcomes - DOES
     # fire and writes a suggestion to the configured suggestions path.
     big_events: list[dict] = []
-    for i in range(30):
-        big_events.append({"type": "verdict.blocked", "session_id": "big",
-                           "payload": {}})
-    for i in range(30):
-        big_events.append({"type": "verdict.allowed", "session_id": "big",
-                           "payload": {"reason": "approved one-shot via foo"}})
+    for _i in range(30):
+        big_events.append({"type": "verdict.blocked", "session_id": "big", "payload": {}})
+    for _i in range(30):
+        big_events.append(
+            {
+                "type": "verdict.allowed",
+                "session_id": "big",
+                "payload": {"reason": "approved one-shot via foo"},
+            }
+        )
     sug3 = check_drift_for_session(big_events, "big")
     assert sug3 is not None
     assert sug3["type"] == "drift_detected"

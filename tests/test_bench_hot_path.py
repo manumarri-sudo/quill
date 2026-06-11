@@ -14,6 +14,7 @@ Numbers are P50/P99 wall-clock per call on Apple Silicon. CI will pin a
 "don't get worse than this" multiplier (1.5x baseline) so a regression
 fails loudly without requiring a hardware-class spec.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,6 +36,7 @@ pytestmark = pytest.mark.bench
 
 
 # -- 1. policy.classify_command (the regex-iter that dominates Bash gating) ---
+
 
 @pytest.mark.benchmark(group="policy")
 def test_bench_classify_command_critical(benchmark):
@@ -75,6 +77,7 @@ def test_bench_classify_namespace(benchmark):
 
 
 # -- 2. AuditLog.emit (flock + HMAC + write + maybe-fsync) -------------------
+
 
 @pytest.fixture
 def fresh_audit(tmp_path: Path):
@@ -124,6 +127,7 @@ def test_bench_audit_emit_critical_force_fsync(benchmark, fresh_audit):
 
 # -- 3. Full Claude-hook decide() (no audit, no notify, no taint) ------------
 
+
 @pytest.mark.benchmark(group="hook")
 def test_bench_hook_decide_bash_low(benchmark):
     out = benchmark(decide, "Bash", {"command": "ls -la"})
@@ -138,12 +142,15 @@ def test_bench_hook_decide_bash_critical(benchmark):
 
 @pytest.mark.benchmark(group="hook")
 def test_bench_hook_decide_edit(benchmark):
-    out = benchmark(decide, "Edit", {"file_path": "/tmp/x.py", "old_string": "a", "new_string": "b"})
+    out = benchmark(
+        decide, "Edit", {"file_path": "/tmp/x.py", "old_string": "a", "new_string": "b"}
+    )
     # Edit is HIGH by default → "ask".
     assert out.permission == "ask"
 
 
 # -- 4. End-to-end run_hook (decide + audit emit + JSON parse) ----------------
+
 
 @pytest.mark.benchmark(group="e2e")
 def test_bench_run_hook_e2e_allow(benchmark, fresh_audit):
@@ -152,12 +159,14 @@ def test_bench_run_hook_e2e_allow(benchmark, fresh_audit):
     Excludes: notification dispatch, taint state, session-index disk I/O.
     These are the bytes that actually matter on the gate-allow hot path.
     """
-    stdin_text = json.dumps({
-        "session_id": "bench-sid",
-        "tool_name": "Bash",
-        "tool_input": {"command": "ls -la"},
-        "cwd": "/tmp",
-    })
+    stdin_text = json.dumps(
+        {
+            "session_id": "bench-sid",
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -la"},
+            "cwd": "/tmp",
+        }
+    )
 
     def do():
         run_hook(stdin_text, audit=fresh_audit)
@@ -168,12 +177,14 @@ def test_bench_run_hook_e2e_allow(benchmark, fresh_audit):
 @pytest.mark.benchmark(group="e2e")
 def test_bench_run_hook_e2e_block(benchmark, fresh_audit):
     """Full hook path with a CRITICAL command (force_fsync per emit)."""
-    stdin_text = json.dumps({
-        "session_id": "bench-sid-crit",
-        "tool_name": "Bash",
-        "tool_input": {"command": "rm -rf node_modules"},
-        "cwd": "/tmp",
-    })
+    stdin_text = json.dumps(
+        {
+            "session_id": "bench-sid-crit",
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf node_modules"},
+            "cwd": "/tmp",
+        }
+    )
 
     def do():
         run_hook(stdin_text, audit=fresh_audit)

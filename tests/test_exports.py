@@ -8,6 +8,7 @@ We pin:
 - Chain-broken logs surface honestly in the report header.
 - KPIs are computed correctly (TDR, intervention rate).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -36,8 +37,10 @@ def test_every_control_references_real_event_types() -> None:
     silently keep referring to the old name. Pin every control's
     event-type tuple against the canonical event-type registry."""
     real = ev.ALL_EVENT_TYPES | {
-        "tool.pin_refused", "notify.dispatched",
-        "approve.biometric.ok", "approve.biometric.deny",
+        "tool.pin_refused",
+        "notify.dispatched",
+        "approve.biometric.ok",
+        "approve.biometric.deny",
     }
     for c in CONTROLS:
         for et in c.quill_event_types:
@@ -62,8 +65,12 @@ def test_aggregate_full_session_satisfies_eu_ai_act_controls() -> None:
         _evt(ev.SESSION_OPEN),
         _evt(ev.TOOL_ATTEMPTED, tool_name="Bash", args_preview={"command": "ls"}),
         _evt(ev.VERDICT_ALLOWED, tool_name="Bash", reason="read-only"),
-        _evt(ev.TOOL_ATTEMPTED, tool_name="Bash", __risk="critical",
-             args_preview={"command": "rm -rf /etc/passwd"}),
+        _evt(
+            ev.TOOL_ATTEMPTED,
+            tool_name="Bash",
+            __risk="critical",
+            args_preview={"command": "rm -rf /etc/passwd"},
+        ),
         _evt(ev.VERDICT_BLOCKED, tool_name="Bash", __risk="critical", reason="rm -rf"),
         _evt(ev.TOOL_ATTEMPTED, tool_name="Edit", __risk="high"),
         _evt(ev.VERDICT_ASK, tool_name="Edit", __risk="high"),
@@ -71,15 +78,15 @@ def test_aggregate_full_session_satisfies_eu_ai_act_controls() -> None:
     ]
     rep = aggregate(events, log_path=Path("/x/audit.jsonl"))
     by_code = {ce.control.code: ce for ce in rep.by_control}
-    assert by_code["ART-14-IN-COMMAND"].matching_events >= 1   # blocked
-    assert by_code["ART-14-IN-LOOP"].matching_events >= 1      # ask
-    assert by_code["ART-14-ON-LOOP"].matching_events >= 1      # allowed
+    assert by_code["ART-14-IN-COMMAND"].matching_events >= 1  # blocked
+    assert by_code["ART-14-IN-LOOP"].matching_events >= 1  # ask
+    assert by_code["ART-14-ON-LOOP"].matching_events >= 1  # allowed
     # ART-12-RETENTION was split into ART-12-AUTO-LOGGING + ART-12-TAMPER-EVIDENT
     # + ART-19-RETENTION (Article 19 owns the retention period; Article 12 owns
     # auto-logging and tamper-evidence).
-    assert by_code["ART-12-AUTO-LOGGING"].matching_events >= 2 # tool.attempted x2
+    assert by_code["ART-12-AUTO-LOGGING"].matching_events >= 2  # tool.attempted x2
     assert by_code["ART-12-TAMPER-EVIDENT"].matching_events >= 2  # tool.attempted x2
-    assert by_code["ART-19-RETENTION"].matching_events >= 2    # tool.attempted x2
+    assert by_code["ART-19-RETENTION"].matching_events >= 2  # tool.attempted x2
 
 
 def test_kpis_compute_tdr_correctly() -> None:

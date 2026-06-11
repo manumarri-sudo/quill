@@ -17,6 +17,7 @@ step the user can take (`quill audit show ...`, `quill trust add ...`,
 This is the v0.3 surface for the "use the data to make Quill smarter"
 promise. No LLM, no inference; pure aggregation over the audit log.
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -81,7 +82,7 @@ class ReviewableSession:
     """A session flagged for follow-up review."""
 
     session_id: str
-    reason: str           # "trifecta closed", "chain repaired", "critical block at 2am"
+    reason: str  # "trifecta closed", "chain repaired", "critical block at 2am"
     sample_ts: str = ""
 
 
@@ -110,8 +111,9 @@ class Insights:
 
     @property
     def downgrade_candidates(self) -> list[PatternStat]:
-        return [s for s in self.pattern_stats.values()
-                if s.recommendation == "trust-path candidate"]
+        return [
+            s for s in self.pattern_stats.values() if s.recommendation == "trust-path candidate"
+        ]
 
     @property
     def review_sessions(self) -> list[ReviewableSession]:
@@ -207,16 +209,19 @@ def compute_insights(
 
     # Materialize trust-path stats sorted by impact desc
     insights.trust_paths = [
-        TrustPathStat(path=p, auto_allows=n)
-        for p, n in trust_counter.most_common(20)
+        TrustPathStat(path=p, auto_allows=n) for p, n in trust_counter.most_common(20)
     ]
 
     # Materialize reviewable sessions, deduped + reasoned
     flagged: dict[str, ReviewableSession] = {}
     for sid in trifecta_sessions:
-        flagged.setdefault(sid, ReviewableSession(
-            session_id=sid, reason="trifecta closed",
-        ))
+        flagged.setdefault(
+            sid,
+            ReviewableSession(
+                session_id=sid,
+                reason="trifecta closed",
+            ),
+        )
     for sid in chain_repair_sessions:
         if sid in flagged:
             flagged[sid] = ReviewableSession(
@@ -245,6 +250,7 @@ def compute_insights(
 
 def format_insights(insights: Insights, *, plain: bool = False) -> str:
     """Render an Insights report as a human-readable string."""
+
     def b(text: str) -> str:
         return text if plain else f"[bold]{text}[/bold]"
 
@@ -256,11 +262,13 @@ def format_insights(insights: Insights, *, plain: bool = False) -> str:
     w_start = insights.window_start.strftime("%Y-%m-%d")
     w_end = insights.window_end.strftime("%Y-%m-%d")
     lines.append(b("Quill insights") + f"  ({w_start} to {w_end})")
-    lines.append(dim(
-        f"scanned {insights.events_scanned} events; "
-        f"{insights.events_in_window} in window; "
-        f"{len(insights.pattern_stats)} distinct patterns observed",
-    ))
+    lines.append(
+        dim(
+            f"scanned {insights.events_scanned} events; "
+            f"{insights.events_in_window} in window; "
+            f"{len(insights.pattern_stats)} distinct patterns observed",
+        )
+    )
     lines.append("")
 
     if not insights.pattern_stats:
@@ -275,6 +283,7 @@ def format_insights(insights: Insights, *, plain: bool = False) -> str:
     # meaning across surfaces.
     from quill.severity import color as _color
     from quill.severity import icon as _icon
+
     lines.append(b("top patterns by fire frequency:"))
     lines.append(f"  {'':1} {'pattern':<32} {'fires':>5} {'block':>6} {'ask':>5}  recommendation")
     lines.append("  " + "-" * 78)
@@ -304,7 +313,10 @@ def format_insights(insights: Insights, *, plain: bool = False) -> str:
 
     # Trust-path effectiveness
     if insights.trust_paths:
-        lines.append(b("trust-path effectiveness:") + dim(" (auto-allows that would have prompted otherwise)"))
+        lines.append(
+            b("trust-path effectiveness:")
+            + dim(" (auto-allows that would have prompted otherwise)")
+        )
         for tp in insights.trust_paths[:10]:
             display = tp.path
             if len(display) > 60:
@@ -338,9 +350,15 @@ def format_insights(insights: Insights, *, plain: bool = False) -> str:
     lines.append(b("what's next:"))
     lines.append("  quill audit show --type verdict.blocked --last 30   recent blocks")
     if insights.downgrade_candidates:
-        lines.append("  quill trust add <path>                              promote a trust-path candidate")
+        lines.append(
+            "  quill trust add <path>                              promote a trust-path candidate"
+        )
     if insights.reviewable_sessions:
         sid = insights.reviewable_sessions[0].session_id
-        lines.append(f"  quill receipts show {sid[:12]}                drill into a flagged session")
-    lines.append("  quill audit export --pack                           compliance PDF (SOC 2 / EU AI Act)")
+        lines.append(
+            f"  quill receipts show {sid[:12]}                drill into a flagged session"
+        )
+    lines.append(
+        "  quill audit export --pack                           compliance PDF (SOC 2 / EU AI Act)"
+    )
     return "\n".join(lines)

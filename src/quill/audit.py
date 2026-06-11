@@ -19,6 +19,7 @@ hook subprocesses fire concurrently). fsync is BATCHED by default (every
 N entries or M ms, whichever first), with FORCE-fsync on any entry whose
 risk >= HIGH so a power loss never drops a critical-risk row.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -35,6 +36,7 @@ from typing import Any, Final
 
 try:
     import fcntl  # POSIX only
+
     _HAS_FLOCK = True
 except ImportError:  # pragma: no cover - Windows path
     fcntl = None  # type: ignore[assignment]
@@ -120,7 +122,7 @@ class AuditLog:
                     stripped = buf.rstrip(b"\r\n")
                     last_nl = stripped.rfind(b"\n")
                     if last_nl >= 0:
-                        line = stripped[last_nl + 1:]
+                        line = stripped[last_nl + 1 :]
                     elif pos == 0:
                         # Read the entire file; only one record present.
                         line = stripped
@@ -185,8 +187,10 @@ class AuditLog:
                 self._prev_mac = mac
                 self._pending += 1
 
-                need_fsync = force_fsync if force_fsync is not None else (
-                    risk in ("high", "critical") or self._pending >= FSYNC_BATCH_SIZE
+                need_fsync = (
+                    force_fsync
+                    if force_fsync is not None
+                    else (risk in ("high", "critical") or self._pending >= FSYNC_BATCH_SIZE)
                 )
                 if need_fsync:
                     os.fsync(self._fd)
@@ -204,6 +208,7 @@ class AuditLog:
         # via `quill doctor` (read `otel.dual_write_failed_count`).
         try:
             from quill import otel
+
             otel.emit_span(
                 event_type=event_type,
                 session_id=session_id,
@@ -213,10 +218,12 @@ class AuditLog:
             )
         except Exception as e:
             from quill import otel as _otel_mod
+
             _otel_mod._dual_write_failed_count += 1
             if not _otel_mod._dual_write_failed_announced:
                 _otel_mod._dual_write_failed_announced = True
                 import sys as _sys
+
                 _sys.stderr.write(
                     f"[quill] OTel dual-write failed ({type(e).__name__}: {e}). "
                     f"Audit chain is intact; OTel span dropped. Subsequent "

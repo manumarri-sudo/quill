@@ -22,6 +22,7 @@ need any of that, so we kept the dispatch and dropped the rest.
 
 Source: https://github.com/IBM/mcp-context-forge - credited in NOTICE.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -46,16 +47,19 @@ class _PinCacheInvalidator(Protocol):
 # ToolListChangedNotification and ToolsListChangedNotification at various
 # versions; we match either.
 _NOTIFICATION_KIND_MAP: dict[tuple[str, ...], str] = {
-    ("ToolListChangedNotification", "ToolsListChangedNotification"):
-        "upstream.tools.list_changed",
-    ("ResourceListChangedNotification", "ResourcesListChangedNotification"):
-        "upstream.resources.list_changed",
-    ("PromptListChangedNotification", "PromptsListChangedNotification"):
-        "upstream.prompts.list_changed",
-    ("ResourceUpdatedNotification",):       "upstream.resource.updated",
-    ("LoggingMessageNotification",):        "upstream.log",
-    ("ProgressNotification",):              "upstream.progress",
-    ("CancelledNotification",):             "upstream.cancelled",
+    ("ToolListChangedNotification", "ToolsListChangedNotification"): "upstream.tools.list_changed",
+    (
+        "ResourceListChangedNotification",
+        "ResourcesListChangedNotification",
+    ): "upstream.resources.list_changed",
+    (
+        "PromptListChangedNotification",
+        "PromptsListChangedNotification",
+    ): "upstream.prompts.list_changed",
+    ("ResourceUpdatedNotification",): "upstream.resource.updated",
+    ("LoggingMessageNotification",): "upstream.log",
+    ("ProgressNotification",): "upstream.progress",
+    ("CancelledNotification",): "upstream.cancelled",
 }
 
 
@@ -329,10 +333,7 @@ def make_sampling_callback(
         ).hexdigest()
         with contextlib.suppress(Exception):
             audit.emit(
-                event_type=(
-                    "upstream.sampling.allowed" if allow
-                    else "upstream.sampling.refused"
-                ),
+                event_type=("upstream.sampling.allowed" if allow else "upstream.sampling.refused"),
                 session_id=session_id,
                 agent_id=f"upstream:{upstream_name}",
                 risk="high",
@@ -355,7 +356,7 @@ def make_sampling_callback(
         return mcp_types.ErrorData(
             code=-32601,
             message="quill: sampling refused by policy (default-deny). "
-                    "set allow_sampling=true in [[upstream]] config for trusted servers.",
+            "set allow_sampling=true in [[upstream]] config for trusted servers.",
         )
 
     return _refuse

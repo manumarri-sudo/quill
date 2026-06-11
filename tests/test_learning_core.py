@@ -16,6 +16,7 @@ step is built on sand:
      poisoning the tmp file, plus round-trips through asdict/dict
      cleanly across many records.
 """
+
 from __future__ import annotations
 
 import os
@@ -36,8 +37,8 @@ from quill.learning import (
 # ---------------------------------------------------------------------------
 # Test 1: Beta-binomial math correctness.
 
-def test_beta_binomial_matches_hand_calculation(tmp_path: Path,
-                                                monkeypatch) -> None:
+
+def test_beta_binomial_matches_hand_calculation(tmp_path: Path, monkeypatch) -> None:
     """The posterior of Beta(alpha_0, beta_0) + k approvals out of n
     fires is Beta(alpha_0 + k, beta_0 + n - k). Posterior mean is
     (alpha_0 + k) / (alpha_0 + beta_0 + n). Hand-verify across the
@@ -64,7 +65,8 @@ def test_beta_binomial_matches_hand_calculation(tmp_path: Path,
     assert p.approvals == 5
     assert p.denies == 0
     assert p.posterior_mean == pytest.approx(
-        (PRIOR_ALPHA + 5) / (PRIOR_ALPHA + PRIOR_BETA + 5), abs=1e-9,
+        (PRIOR_ALPHA + 5) / (PRIOR_ALPHA + PRIOR_BETA + 5),
+        abs=1e-9,
     )
     assert p.posterior_mean == pytest.approx(6.0 / 15.0, abs=1e-9)
 
@@ -90,8 +92,8 @@ def test_beta_binomial_matches_hand_calculation(tmp_path: Path,
 # ---------------------------------------------------------------------------
 # Test 2: Wilson 95% interval correctness + boundary behaviour.
 
-def test_wilson_interval_is_correct_at_known_points(tmp_path: Path,
-                                                    monkeypatch) -> None:
+
+def test_wilson_interval_is_correct_at_known_points(tmp_path: Path, monkeypatch) -> None:
     """Wilson score interval for a binomial proportion at confidence
     0.95. Reference values computed from the canonical formula:
 
@@ -146,6 +148,7 @@ def test_wilson_interval_is_correct_at_known_points(tmp_path: Path,
 # ---------------------------------------------------------------------------
 # Test 3: EWMA recency behaviour at the chosen alpha=0.1.
 
+
 def test_ewma_decays_at_expected_rate(tmp_path: Path, monkeypatch) -> None:
     """EWMA(alpha=0.1) should reach ~50% of a step change after roughly
     log(0.5)/log(1 - alpha) = log(0.5)/log(0.9) ~= 6.6 observations.
@@ -183,8 +186,10 @@ def test_ewma_decays_at_expected_rate(tmp_path: Path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 # Test 4: Atomic save survives mid-write interruption + round-trips.
 
+
 def test_atomic_save_survives_mid_write_interruption(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """tmp-rename means a partial write to the .tmp file cannot
     corrupt the canonical pattern_stats.json. Simulate an
@@ -196,9 +201,15 @@ def test_atomic_save_survives_mid_write_interruption(
     monkeypatch.setenv("QUILL_PATTERN_STATS", str(stats_path))
 
     # Write one round.
-    p = PatternStats(pattern_id="alpha", fires=10, approvals=7, denies=3,
-                     last_fire_ts=1234.0, first_fire_ts=1100.0,
-                     ewma_approval_rate=0.42)
+    p = PatternStats(
+        pattern_id="alpha",
+        fires=10,
+        approvals=7,
+        denies=3,
+        last_fire_ts=1234.0,
+        first_fire_ts=1100.0,
+        ewma_approval_rate=0.42,
+    )
     save_stats({"alpha": p})
     assert stats_path.exists()
 
@@ -222,8 +233,11 @@ def test_atomic_save_survives_mid_write_interruption(
     # Many records round-trip cleanly.
     big = {
         f"pat-{i}": PatternStats(
-            pattern_id=f"pat-{i}", fires=i, approvals=i // 2,
-            denies=i // 2, ewma_approval_rate=i / 100.0,
+            pattern_id=f"pat-{i}",
+            fires=i,
+            approvals=i // 2,
+            denies=i // 2,
+            ewma_approval_rate=i / 100.0,
         )
         for i in range(50)
     }

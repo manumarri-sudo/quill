@@ -4,6 +4,7 @@ The interactive prompts themselves can't be tested without a TTY harness;
 these tests cover the pure functions (detection, TOML rendering, install
 dispatch) and the non-interactive abort paths.
 """
+
 from __future__ import annotations
 
 import sys
@@ -27,8 +28,13 @@ def test_detect_returns_full_agent_list():
     assert len(detected) == 7
     names = {a.name for a in detected}
     assert names == {
-        "claude_code", "cursor", "cline", "aider",
-        "continue", "windsurf", "zed",
+        "claude_code",
+        "cursor",
+        "cline",
+        "aider",
+        "continue",
+        "windsurf",
+        "zed",
     }
 
 
@@ -123,6 +129,7 @@ def test_notify_section_omitted_when_empty():
 def test_generated_boring_config_loads_via_load_config(tmp_path):
     """The rendered boring-preset TOML must round-trip through quill.config.load_config."""
     from quill.config import load_config
+
     cfg_text = build_config_toml(
         intent="exploratory development",
         scope=["github:read"],
@@ -143,6 +150,7 @@ def test_generated_paranoid_config_loads_with_policy_overrides(tmp_path):
     """Paranoid preset writes [policy] string values; the field_validator must coerce them."""
     from quill.config import load_config
     from quill.policy import Risk
+
     cfg_text = build_config_toml(
         intent="paranoid session",
         scope=[],
@@ -191,6 +199,7 @@ def test_claude_code_installer_signature():
     import inspect
 
     from quill.adapters import claude_code as cc
+
     sig = inspect.signature(cc.install_into_settings)
     params = sig.parameters
     # First positional + matcher + timeout
@@ -202,6 +211,7 @@ def test_cursor_installer_signature():
     import inspect
 
     from quill.adapters import cursor as cu
+
     sig = inspect.signature(cu.install_into_settings)
     # accepts at least one positional argument
     assert len(sig.parameters) >= 1

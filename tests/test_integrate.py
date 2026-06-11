@@ -1,4 +1,5 @@
 """Tests for `quill integrate` — teaching coding agents to query Quill."""
+
 from __future__ import annotations
 
 from pathlib import Path

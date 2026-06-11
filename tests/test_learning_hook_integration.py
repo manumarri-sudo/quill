@@ -15,6 +15,7 @@ Four detailed tests pin these one at a time. Each uses an isolated
 QUILL_HOME via monkeypatch so the operator's real pattern_stats are
 never touched.
 """
+
 from __future__ import annotations
 
 import json
@@ -29,14 +30,16 @@ def _payload(
     cwd: str = "/tmp",
     **tool_input,
 ) -> str:
-    return json.dumps({
-        "session_id": session_id,
-        "transcript_path": transcript,
-        "cwd": cwd,
-        "hook_event_name": "PreToolUse",
-        "tool_name": tool_name,
-        "tool_input": tool_input,
-    })
+    return json.dumps(
+        {
+            "session_id": session_id,
+            "transcript_path": transcript,
+            "cwd": cwd,
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+        }
+    )
 
 
 def _isolate(monkeypatch, tmp_path: Path) -> None:
@@ -45,9 +48,7 @@ def _isolate(monkeypatch, tmp_path: Path) -> None:
     # Write a minimal config so the operator's real bash allowlist /
     # trust scopes / policy overrides don't leak in.
     cfg = tmp_path / "config.toml"
-    cfg.write_text(
-        '[session]\nintent = "test"\nscope = []\n[trust]\npaths = []\n'
-    )
+    cfg.write_text('[session]\nintent = "test"\nscope = []\n[trust]\npaths = []\n')
     monkeypatch.setenv("QUILL_CONFIG", str(cfg))
     monkeypatch.setenv("QUILL_PATTERN_STATS", str(tmp_path / "stats.json"))
     monkeypatch.setenv("QUILL_SUGGESTIONS", str(tmp_path / "suggestions.jsonl"))
@@ -73,8 +74,10 @@ def _isolate(monkeypatch, tmp_path: Path) -> None:
 # Test 1: The hook still produces valid Claude Code JSON, with the
 # required hookEventName field, regardless of learning success/failure.
 
+
 def test_hook_response_shape_unchanged_by_learning_integration(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     from quill.adapters.claude_code import run_hook
@@ -98,8 +101,7 @@ def test_hook_response_shape_unchanged_by_learning_integration(
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         for tool, inp, expected in cases:
             out = run_hook(
-                _payload(tool_name=tool, transcript=str(transcript),
-                         cwd=str(tmp_path), **inp),
+                _payload(tool_name=tool, transcript=str(transcript), cwd=str(tmp_path), **inp),
                 audit=audit,
             )
             assert "hookSpecificOutput" in out
@@ -113,8 +115,10 @@ def test_hook_response_shape_unchanged_by_learning_integration(
 # ---------------------------------------------------------------------------
 # Test 2: A learning failure cannot break the hook.
 
+
 def test_learning_exception_does_not_break_the_hook(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     # Force the learning module to fail by pointing its stats path at
@@ -136,8 +140,12 @@ def test_learning_exception_does_not_break_the_hook(
 
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         out = run_hook(
-            _payload(tool_name="Bash", transcript=str(transcript),
-                     cwd=str(tmp_path), command="DROP TABLE users"),
+            _payload(
+                tool_name="Bash",
+                transcript=str(transcript),
+                cwd=str(tmp_path),
+                command="DROP TABLE users",
+            ),
             audit=audit,
         )
 
@@ -150,8 +158,10 @@ def test_learning_exception_does_not_break_the_hook(
 # ---------------------------------------------------------------------------
 # Test 3: Repeated denies of the same pattern auto-tighten.
 
+
 def test_repeated_denies_emit_tightening_suggestion(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     from quill.adapters.claude_code import run_hook
@@ -171,8 +181,12 @@ def test_repeated_denies_emit_tightening_suggestion(
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         for _ in range(TIGHTEN_DENY_STREAK):
             run_hook(
-                _payload(tool_name="Bash", transcript=str(transcript),
-                         cwd=str(tmp_path), command="DROP TABLE users"),
+                _payload(
+                    tool_name="Bash",
+                    transcript=str(transcript),
+                    cwd=str(tmp_path),
+                    command="DROP TABLE users",
+                ),
                 audit=audit,
             )
 
@@ -205,7 +219,8 @@ def test_repeated_denies_emit_tightening_suggestion(
         # token-consumes interleaved with denies might never let
         # the streak reach 5 in this test's exact sequence. Verify
         # by reading suggestions.jsonl directly.
-        True for _ in [0]
+        True
+        for _ in [0]
     ):
         if sug_file.exists():
             suggestions = [json.loads(line) for line in sug_file.read_text().splitlines()]
@@ -213,16 +228,20 @@ def test_repeated_denies_emit_tightening_suggestion(
             # If the streak ever reached the threshold, the suggestion
             # is recorded. Otherwise the test only verifies recording.
             if tightening:
-                assert "denies" in tightening[0]["evidence"].lower() or \
-                       "approval" in tightening[0]["evidence"].lower()
+                assert (
+                    "denies" in tightening[0]["evidence"].lower()
+                    or "approval" in tightening[0]["evidence"].lower()
+                )
 
 
 # ---------------------------------------------------------------------------
 # Test 4: A high-approval pattern surfaces a loosen-candidate but never
 # auto-applies to overrides.toml.
 
+
 def test_loosen_candidate_surfaces_but_never_auto_applies(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     _isolate(monkeypatch, tmp_path)
     overrides_path = tmp_path / "overrides.toml"
@@ -251,14 +270,12 @@ def test_loosen_candidate_surfaces_but_never_auto_applies(
     assert s["pattern_id"] == pattern_id
     assert "expires_ts" in s
     assert "promote" in s["proposal"].lower() or "review" in s["proposal"].lower()
-    assert "never auto-applied" in s["proposal"].lower() or \
-           "auto-applied" in s["proposal"].lower()
+    assert "never auto-applied" in s["proposal"].lower() or "auto-applied" in s["proposal"].lower()
 
     # CRITICAL invariant: no overrides.toml was created. The learner
     # MUST never silently widen the attack surface.
     assert not overrides_path.exists(), (
-        "loosen-candidate must NOT auto-write overrides.toml; "
-        "operator promotion is required"
+        "loosen-candidate must NOT auto-write overrides.toml; operator promotion is required"
     )
 
     # And the learning.log records the suggestion event.

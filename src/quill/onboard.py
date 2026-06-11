@@ -10,6 +10,7 @@ Idempotent. If config.toml already exists, onboard offers to overwrite
 or exit without changes. Non-TTY contexts exit cleanly without touching
 anything. The risk preset writes [policy] overrides, not new code paths.
 """
+
 from __future__ import annotations
 
 import platform
@@ -37,11 +38,11 @@ PRESET_DESCRIPTIONS: Final[dict[str, str]] = {
 class DetectedAgent:
     """One detected coding agent on the user's machine."""
 
-    name: str            # internal id ("claude_code", "cursor", ...)
-    label: str           # display name ("Claude Code")
+    name: str  # internal id ("claude_code", "cursor", ...)
+    label: str  # display name ("Claude Code")
     detected: bool
     installer: str = ""  # which adapter to call ("claude_code", "cursor", "")
-    notes: str = ""      # one-line context shown to the user
+    notes: str = ""  # one-line context shown to the user
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +214,7 @@ def build_config_toml(
             '"NotebookEdit" = "high"',
         ]
     else:
-        parts.append("# add per-tool risk overrides here, e.g. '\"fs.delete\" = \"critical\"'")
+        parts.append('# add per-tool risk overrides here, e.g. \'"fs.delete" = "critical"\'')
     parts.append("")
     if notify:
         parts.append("[notify]")
@@ -244,7 +245,8 @@ def _print_detected(console: Console, detected: list[DetectedAgent]) -> None:
 
 
 def _prompt_choose_agents(
-    console: Console, detected: list[DetectedAgent],
+    console: Console,
+    detected: list[DetectedAgent],
 ) -> list[DetectedAgent]:
     found = [a for a in detected if a.detected and a.installer]
     if not found:
@@ -363,13 +365,17 @@ def _install_hook(console: Console, agent: DetectedAgent) -> None:
     try:
         if agent.installer == "claude_code":
             from quill.adapters import claude_code as cc
+
             p, already = cc.install_into_settings(
-                None, matcher="Bash|Edit|Write|NotebookEdit", timeout=10,
+                None,
+                matcher="Bash|Edit|Write|NotebookEdit",
+                timeout=10,
             )
             status = "already wired" if already else "installed"
             console.print(f"  [green]✓[/green] {agent.label}: {status} ({p})")
         elif agent.installer == "cursor":
             from quill.adapters import cursor as cu
+
             p, already = cu.install_into_settings(None)
             status = "already wired" if already else "installed"
             console.print(f"  [green]✓[/green] {agent.label}: {status} ({p})")
@@ -394,12 +400,14 @@ def run(force: bool = False, console: Console | None = None) -> int:
         )
         return 2
 
-    out.print(Panel.fit(
-        "[bold]quill onboard[/bold]\n"
-        "[dim]the pause button between your AI agent and the things you can't undo.[/dim]\n"
-        "[dim]this takes about 60 seconds.[/dim]",
-        border_style="cyan",
-    ))
+    out.print(
+        Panel.fit(
+            "[bold]quill onboard[/bold]\n"
+            "[dim]the pause button between your AI agent and the things you can't undo.[/dim]\n"
+            "[dim]this takes about 60 seconds.[/dim]",
+            border_style="cyan",
+        )
+    )
 
     if cfg_path.exists() and not force:
         out.print(f"\n[yellow]existing config at[/yellow] {cfg_path}")
@@ -435,12 +443,14 @@ def run(force: bool = False, console: Console | None = None) -> int:
         for agent in chosen:
             _install_hook(out, agent)
 
-    out.print(Panel.fit(
-        "[bold]you're set.[/bold]\n"
-        "  [dim]restart your coding agent to pick up the hook[/dim]\n"
-        "  [dim]then run [bold]quill watch[/bold] for the live dashboard[/dim]\n"
-        "  [dim]or [bold]quill audit show[/bold] to review what's been logged[/dim]\n"
-        "  [dim]docs:[/dim] https://github.com/manumarri-sudo/quill",
-        border_style="green",
-    ))
+    out.print(
+        Panel.fit(
+            "[bold]you're set.[/bold]\n"
+            "  [dim]restart your coding agent to pick up the hook[/dim]\n"
+            "  [dim]then run [bold]quill watch[/bold] for the live dashboard[/dim]\n"
+            "  [dim]or [bold]quill audit show[/bold] to review what's been logged[/dim]\n"
+            "  [dim]docs:[/dim] https://github.com/manumarri-sudo/quill",
+            border_style="green",
+        )
+    )
     return 0

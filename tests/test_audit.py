@@ -2,6 +2,7 @@
 
 Covers: append-only writes, chain integrity, tamper detection, file mode.
 """
+
 from __future__ import annotations
 
 import json
@@ -130,8 +131,7 @@ def test_chain_resumes_when_log_has_only_one_huge_event(tmp_path: Path) -> None:
     p = tmp_path / "audit.jsonl"
     key = b"k" * 32
     with AuditLog(path=p, hmac_key=key) as log:
-        log.emit(event_type="bash.only", session_id="s",
-                 payload={"command": "y" * 8000})
+        log.emit(event_type="bash.only", session_id="s", payload={"command": "y" * 8000})
     with AuditLog(path=p, hmac_key=key) as log:
         log.emit(event_type="bash.after", session_id="s", payload={})
     total, failures = verify_chain(p, key)
@@ -195,10 +195,7 @@ def test_chain_intact_under_concurrent_multiprocess_writers(tmp_path: Path) -> N
     workers = 4
     per_worker = 25
     ctx = mp.get_context("fork")
-    procs = [
-        ctx.Process(target=worker, args=(str(p), key, w, per_worker))
-        for w in range(workers)
-    ]
+    procs = [ctx.Process(target=worker, args=(str(p), key, w, per_worker)) for w in range(workers)]
     for proc in procs:
         proc.start()
     for proc in procs:

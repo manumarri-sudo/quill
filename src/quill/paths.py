@@ -5,6 +5,7 @@ permissions, telemetry, sessions, watch pid). Individual per-file env
 vars still override (QUILL_LOG, QUILL_KEY, etc.) for surgical control.
 Default home is ~/.quill.
 """
+
 from __future__ import annotations
 
 import os
@@ -45,6 +46,7 @@ def is_trusted_cwd(cwd: str) -> bool:
         return False
     try:
         from quill.config import load_config
+
         cfg = load_config()
     except Exception:
         return False

@@ -18,6 +18,7 @@ Coverage matrix:
   - real dangerous commands: rm -rf, vercel --prod, git push --force, sudo,
     DROP TABLE, TRUNCATE, curl|sh, fork bomb, dd, mkfs
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -83,7 +84,9 @@ class TestStatePersistence:
         assert state.high_approved == 0
         assert state.critical_blocked == 0
 
-    def test_malformed_state_file_falls_back_to_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_malformed_state_file_falls_back_to_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A corrupt JSON file MUST NOT make the gate think overnight is on."""
         f = tmp_path / "overnight.json"
         f.write_text("{not valid json")
@@ -95,6 +98,7 @@ class TestStatePersistence:
         """0o600 so other users on the machine can't read overnight state."""
         overnight.turn_on()
         from quill.paths import default_path
+
         p = default_path("overnight.json", env_override="QUILL_OVERNIGHT_FILE")
         assert p.exists()
         # On macOS / linux the lower 9 bits encode user/group/other rwx.
@@ -154,9 +158,7 @@ class TestManualToggleExpiry:
 
 def _at(hour: int, minute: int = 0) -> datetime:
     """Build a deterministic local datetime at the given local hour/minute."""
-    return datetime.now(UTC).astimezone().replace(
-        hour=hour, minute=minute, second=0, microsecond=0
-    )
+    return datetime.now(UTC).astimezone().replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 
 class TestConfigWindow:
@@ -182,8 +184,15 @@ class TestConfigWindow:
     def test_midnight_crossing_window(self) -> None:
         """The default 22:00-08:00 window must cover the night, not the day."""
         for h, expected in [
-            (22, True), (23, True), (0, True), (3, True), (7, True),
-            (8, False), (12, False), (15, False), (21, False),
+            (22, True),
+            (23, True),
+            (0, True),
+            (3, True),
+            (7, True),
+            (8, False),
+            (12, False),
+            (15, False),
+            (21, False),
         ]:
             active, _ = overnight.is_active(
                 config_enabled=True,
@@ -316,13 +325,17 @@ HIGH_BASH_COMMANDS = [
 
 class TestHighAutoApproveOvernight:
     def test_edit_asks_when_overnight_off(self) -> None:
-        decision = decide("Edit", {"file_path": "/foo/bar.py", "old_string": "a", "new_string": "b"})
+        decision = decide(
+            "Edit", {"file_path": "/foo/bar.py", "old_string": "a", "new_string": "b"}
+        )
         assert decision.permission == "ask"
         assert decision.risk is Risk.HIGH
 
     def test_edit_allows_when_overnight_on(self) -> None:
         overnight.turn_on()
-        decision = decide("Edit", {"file_path": "/foo/bar.py", "old_string": "a", "new_string": "b"})
+        decision = decide(
+            "Edit", {"file_path": "/foo/bar.py", "old_string": "a", "new_string": "b"}
+        )
         assert decision.permission == "allow"
         assert decision.risk is Risk.HIGH  # risk classification unchanged
         assert decision.audit_event_type == "verdict.allowed.overnight"
@@ -455,6 +468,7 @@ class TestCliSmoke:
         from typer.testing import CliRunner
 
         from quill.cli import app
+
         runner = CliRunner()
         result = runner.invoke(app, ["night", "on", "--hours", "8"])
         assert result.exit_code == 0
@@ -465,6 +479,7 @@ class TestCliSmoke:
         from typer.testing import CliRunner
 
         from quill.cli import app
+
         runner = CliRunner()
         runner.invoke(app, ["night", "on"])
         result = runner.invoke(app, ["day"])
@@ -476,6 +491,7 @@ class TestCliSmoke:
         from typer.testing import CliRunner
 
         from quill.cli import app
+
         runner = CliRunner()
         runner.invoke(app, ["night", "on"])
         result = runner.invoke(app, ["night", "status"])
@@ -485,6 +501,7 @@ class TestCliSmoke:
         from typer.testing import CliRunner
 
         from quill.cli import app
+
         runner = CliRunner()
         result = runner.invoke(app, ["night", "on", "--hours", "999"])
         assert result.exit_code == 2  # safety contract refuses multi-day toggle
@@ -493,6 +510,7 @@ class TestCliSmoke:
         from typer.testing import CliRunner
 
         from quill.cli import app
+
         runner = CliRunner()
         result = runner.invoke(app, ["night", "bogus"])
         assert result.exit_code == 2

@@ -48,6 +48,7 @@ Deliberately NOT included: TDR / Intervention Rate / Time-to-Trust.
 Those reward a quieter gate (approving everything scores 1.0) which
 is the wrong optimisation direction for a safety tool.
 """
+
 from __future__ import annotations
 
 import json
@@ -63,7 +64,7 @@ from quill.config import default_audit_path
 # Thresholds, kept low enough that suggestions appear after a handful
 # of days of dogfooding rather than asking the operator to wait a month.
 TRUST_SCOPE_MIN_ASKS = 20
-TRUST_SCOPE_MIN_DAYS_SPAN = 0   # any time-span counts; volume is what matters
+TRUST_SCOPE_MIN_DAYS_SPAN = 0  # any time-span counts; volume is what matters
 HEAVY_BASH_MIN_HITS = 20
 FALSE_POSITIVE_MIN_OVERRIDES = 3
 
@@ -72,11 +73,11 @@ FALSE_POSITIVE_MIN_OVERRIDES = 3
 class Suggestion:
     """One actionable recommendation derived from the audit log."""
 
-    severity: str           # "high" | "medium" | "low"
-    category: str           # see SuggestionCategory below
+    severity: str  # "high" | "medium" | "low"
+    category: str  # see SuggestionCategory below
     title: str
     rationale: str
-    paste_command: str      # operator copy-pastes this to apply
+    paste_command: str  # operator copy-pastes this to apply
     evidence: tuple[str, ...] = ()
 
 
@@ -146,10 +147,9 @@ def _normalize_block_reason(reason: str) -> str:
     s = reason
     # Old format prefix
     if s.startswith("Quill blocked: "):
-        s = s[len("Quill blocked: "):]
+        s = s[len("Quill blocked: ") :]
     # Drop the suggestion tail in every known format variant.
-    for sep in (" · try", " - try", ".  ↪ try", " ↪ try",
-                ". To allow", " · ", " - "):
+    for sep in (" · try", " - try", ".  ↪ try", " ↪ try", ". To allow", " · ", " - "):
         idx = s.find(sep)
         if idx >= 0:
             s = s[:idx]
@@ -221,21 +221,24 @@ def analyze_trust_scope_candidates(
         n_blocks = blocks_by_cwd.get(cwd, 0)
         if n_blocks > n // 4:
             continue
-        out.append(Suggestion(
-            severity="high" if n >= 100 else "medium",
-            category=SuggestionCategory.TRUST_SCOPE,
-            title=f"trust {cwd}",
-            rationale=(
-                f"{n} default-risk Edit/Write asks in this directory; "
-                f"{n_blocks} real blocks. The asks are noise that train "
-                f"approve-fatigue. Promoting the directory to a trust "
-                f"scope removes the noise without changing block coverage."
-            ),
-            paste_command=f"quill trust add {cwd}",
-            evidence=(
-                f"asks={n}", f"blocks={n_blocks}",
-            ),
-        ))
+        out.append(
+            Suggestion(
+                severity="high" if n >= 100 else "medium",
+                category=SuggestionCategory.TRUST_SCOPE,
+                title=f"trust {cwd}",
+                rationale=(
+                    f"{n} default-risk Edit/Write asks in this directory; "
+                    f"{n_blocks} real blocks. The asks are noise that train "
+                    f"approve-fatigue. Promoting the directory to a trust "
+                    f"scope removes the noise without changing block coverage."
+                ),
+                paste_command=f"quill trust add {cwd}",
+                evidence=(
+                    f"asks={n}",
+                    f"blocks={n_blocks}",
+                ),
+            )
+        )
     return out
 
 
@@ -244,23 +247,26 @@ def analyze_decayed_permissions() -> list[Suggestion]:
     out: list[Suggestion] = []
     try:
         from quill import decay as _decay
+
         store = _decay.DecayStore.load()
     except Exception:
         return out
     for perm in store.decayed():
-        out.append(Suggestion(
-            severity="medium",
-            category=SuggestionCategory.DECAYED_PERMISSION,
-            title=f"decayed: {perm.pattern}",
-            rationale=(
-                f"Permission '{perm.pattern}' has not been used in "
-                f"{perm.age_days} days (window was {perm.decay_after_days}). "
-                f"Reaffirm it if you still need it, or forget it so the "
-                f"default classifier fires next time."
-            ),
-            paste_command=f"quill decay reaffirm {perm.pattern}",
-            evidence=(f"kind={perm.kind}", f"age_days={perm.age_days}"),
-        ))
+        out.append(
+            Suggestion(
+                severity="medium",
+                category=SuggestionCategory.DECAYED_PERMISSION,
+                title=f"decayed: {perm.pattern}",
+                rationale=(
+                    f"Permission '{perm.pattern}' has not been used in "
+                    f"{perm.age_days} days (window was {perm.decay_after_days}). "
+                    f"Reaffirm it if you still need it, or forget it so the "
+                    f"default classifier fires next time."
+                ),
+                paste_command=f"quill decay reaffirm {perm.pattern}",
+                evidence=(f"kind={perm.kind}", f"age_days={perm.age_days}"),
+            )
+        )
     return out
 
 
@@ -309,23 +315,24 @@ def analyze_false_positive_overrides(
     for (tool_name, _), n in sorted(overrides.items(), key=lambda kv: -kv[1]):
         if n < FALSE_POSITIVE_MIN_OVERRIDES:
             continue
-        out.append(Suggestion(
-            severity="medium",
-            category=SuggestionCategory.FALSE_POSITIVE_OVERRIDE,
-            title=f"repeat bypass: {tool_name}",
-            rationale=(
-                f"The gate blocked {tool_name} and the operator approved "
-                f"it via `quill approve` {n} times. Repeated overrides "
-                f"on the same tool either mean the classification is "
-                f"wrong for your context, or this tool is broadly safe "
-                f"in your setup. Consider a per-tool policy override."
-            ),
-            paste_command=(
-                f'edit ~/.quill/config.toml and set: '
-                f'[policy]\n  "{tool_name}" = "medium"'
-            ),
-            evidence=(f"overrides={n}",),
-        ))
+        out.append(
+            Suggestion(
+                severity="medium",
+                category=SuggestionCategory.FALSE_POSITIVE_OVERRIDE,
+                title=f"repeat bypass: {tool_name}",
+                rationale=(
+                    f"The gate blocked {tool_name} and the operator approved "
+                    f"it via `quill approve` {n} times. Repeated overrides "
+                    f"on the same tool either mean the classification is "
+                    f"wrong for your context, or this tool is broadly safe "
+                    f"in your setup. Consider a per-tool policy override."
+                ),
+                paste_command=(
+                    f'edit ~/.quill/config.toml and set: [policy]\n  "{tool_name}" = "medium"'
+                ),
+                evidence=(f"overrides={n}",),
+            )
+        )
     return out
 
 
@@ -359,22 +366,24 @@ def analyze_heavy_bash_patterns(
     for head, n in sorted(pattern_hits.items(), key=lambda kv: -kv[1]):
         if n < HEAVY_BASH_MIN_HITS:
             continue
-        out.append(Suggestion(
-            severity="low",
-            category=SuggestionCategory.HEAVY_BASH_PATTERN,
-            title=f"heavy bash pattern: {head}",
-            rationale=(
-                f"`{head}` fired {n} times this window. If the pattern "
-                f"is genuinely safe in your environment, allowlist it "
-                f"so the gate stops surfacing it. If it's not, leave "
-                f"it - the frequency is the alarm working."
-            ),
-            paste_command=(
-                f'edit ~/.quill/config.toml and add: '
-                f'[bash]\n  allowlist = ["<regex matching {head}>"]'
-            ),
-            evidence=(f"hits={n}",),
-        ))
+        out.append(
+            Suggestion(
+                severity="low",
+                category=SuggestionCategory.HEAVY_BASH_PATTERN,
+                title=f"heavy bash pattern: {head}",
+                rationale=(
+                    f"`{head}` fired {n} times this window. If the pattern "
+                    f"is genuinely safe in your environment, allowlist it "
+                    f"so the gate stops surfacing it. If it's not, leave "
+                    f"it - the frequency is the alarm working."
+                ),
+                paste_command=(
+                    f"edit ~/.quill/config.toml and add: "
+                    f'[bash]\n  allowlist = ["<regex matching {head}>"]'
+                ),
+                evidence=(f"hits={n}",),
+            )
+        )
     return out
 
 
@@ -387,13 +396,10 @@ def analyze_silent_failures(
     in May 2026.
     """
     out: list[Suggestion] = []
-    p = sessions_dir or (Path.home() /
-                         "agentbrain" / "AgentOS-Vault" /
-                         "ClaudeCode" / "Sessions")
+    p = sessions_dir or (Path.home() / "agentbrain" / "AgentOS-Vault" / "ClaudeCode" / "Sessions")
     if not p.exists():
         return out
-    journals = sorted(p.glob("*.md"), key=lambda f: f.stat().st_mtime,
-                      reverse=True)[:10]
+    journals = sorted(p.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)[:10]
     zero_turn = 0
     for j in journals:
         try:
@@ -403,20 +409,22 @@ def analyze_silent_failures(
         if "user turns: 0" in text and "assistant turns: 0" in text:
             zero_turn += 1
     if zero_turn >= 5:
-        out.append(Suggestion(
-            severity="high",
-            category=SuggestionCategory.SILENT_FAILURE,
-            title=f"{zero_turn} of last 10 journals are stub-shaped (0 turns)",
-            rationale=(
-                "Auto-journal hook is firing but recording zero activity. "
-                "Likely cause: a transcript-schema mismatch (the bug "
-                "that hid for 3 weeks in May 2026). Inspect "
-                "src/quill/journal.py:summarize_transcript and confirm "
-                "it handles the current Claude Code transcript shape."
-            ),
-            paste_command="python -m pytest tests/test_journal.py -v",
-            evidence=(f"zero_turn_journals={zero_turn}/10",),
-        ))
+        out.append(
+            Suggestion(
+                severity="high",
+                category=SuggestionCategory.SILENT_FAILURE,
+                title=f"{zero_turn} of last 10 journals are stub-shaped (0 turns)",
+                rationale=(
+                    "Auto-journal hook is firing but recording zero activity. "
+                    "Likely cause: a transcript-schema mismatch (the bug "
+                    "that hid for 3 weeks in May 2026). Inspect "
+                    "src/quill/journal.py:summarize_transcript and confirm "
+                    "it handles the current Claude Code transcript shape."
+                ),
+                paste_command="python -m pytest tests/test_journal.py -v",
+                evidence=(f"zero_turn_journals={zero_turn}/10",),
+            )
+        )
     return out
 
 

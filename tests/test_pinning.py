@@ -4,6 +4,7 @@ Verifies the digest is stable across irrelevant orderings, fingerprints
 detect description/schema/annotation changes, and pins persist across
 PinStore reloads.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -131,6 +132,7 @@ def test_filter_pinned_separates_kept_and_refused(tmp_path: Path) -> None:
 
 def test_pinstore_file_mode_0o600(tmp_path: Path) -> None:
     import stat
+
     p = tmp_path / "pins.jsonl"
     store = PinStore(path=p)
     store.verify("filesystem", _tool())

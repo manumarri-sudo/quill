@@ -5,6 +5,7 @@ fixtures live in the test (not in tmp files) so the assertions can pin
 the exact computation, and a future regression on pattern-classification
 fails the test rather than silently changing the saves output.
 """
+
 from __future__ import annotations
 
 import json
@@ -140,12 +141,19 @@ def test_secrets_caught_recognized_via_reason(tmp_path: Path) -> None:
     p = tmp_path / "audit.log.jsonl"
     now = datetime.now(UTC)
     events = [
-        _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical",
-             reason="secret detected in write: GitHub PAT (line 42)"),
-        _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical",
-             reason="secret detected in write: AWS access key (line 18)"),
-        _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical",
-             reason="rm -rf"),
+        _evt(
+            ev.VERDICT_BLOCKED,
+            now.isoformat(),
+            risk="critical",
+            reason="secret detected in write: GitHub PAT (line 42)",
+        ),
+        _evt(
+            ev.VERDICT_BLOCKED,
+            now.isoformat(),
+            risk="critical",
+            reason="secret detected in write: AWS access key (line 18)",
+        ),
+        _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="rm -rf"),
     ]
     _write_log(events, p)
     s = compute_saves(p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1))
@@ -174,10 +182,13 @@ def test_trifecta_enforcement_recognized_via_reason(tmp_path: Path) -> None:
     p = tmp_path / "audit.log.jsonl"
     now = datetime.now(UTC)
     events = [
-        _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical",
-             reason="trifecta close · session has seen untrusted + accessed private + this call exfiltrates"),
-        _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical",
-             reason="rm -rf"),
+        _evt(
+            ev.VERDICT_BLOCKED,
+            now.isoformat(),
+            risk="critical",
+            reason="trifecta close · session has seen untrusted + accessed private + this call exfiltrates",
+        ),
+        _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="rm -rf"),
     ]
     _write_log(events, p)
     s = compute_saves(p, window_start=now - timedelta(hours=1), window_end=now + timedelta(hours=1))
@@ -257,7 +268,12 @@ def test_unbounded_window_includes_everything(tmp_path: Path) -> None:
     p = tmp_path / "audit.log.jsonl"
     now = datetime.now(UTC)
     events = [
-        _evt(ev.VERDICT_BLOCKED, (now - timedelta(days=365)).isoformat(), risk="critical", reason="rm -rf"),
+        _evt(
+            ev.VERDICT_BLOCKED,
+            (now - timedelta(days=365)).isoformat(),
+            risk="critical",
+            reason="rm -rf",
+        ),
         _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="rm -rf"),
     ]
     _write_log(events, p)
@@ -269,10 +285,12 @@ def test_malformed_jsonl_lines_skipped(tmp_path: Path) -> None:
     p = tmp_path / "audit.log.jsonl"
     now = datetime.now(UTC).isoformat()
     p.write_text(
-        json.dumps(_evt(ev.VERDICT_BLOCKED, now, risk="critical", reason="rm -rf")) + "\n"
+        json.dumps(_evt(ev.VERDICT_BLOCKED, now, risk="critical", reason="rm -rf"))
+        + "\n"
         + "this is not json\n"
         + "{partial\n"
-        + json.dumps(_evt(ev.VERDICT_BLOCKED, now, risk="critical", reason="DROP TABLE x")) + "\n",
+        + json.dumps(_evt(ev.VERDICT_BLOCKED, now, risk="critical", reason="DROP TABLE x"))
+        + "\n",
     )
     s = compute_saves(p)
     # 2 valid lines, 2 invalid skipped silently
@@ -346,8 +364,9 @@ def test_format_saves_includes_all_sections(tmp_path: Path) -> None:
     now = datetime.now(UTC)
     events = [
         _evt(ev.VERDICT_ALLOWED, now.isoformat(), reason="trusted scope: Edit in /tmp/x"),
-        _evt(ev.VERDICT_BLOCKED, now.isoformat(), risk="critical",
-             reason="rm -rf", tool_name="Bash"),
+        _evt(
+            ev.VERDICT_BLOCKED, now.isoformat(), risk="critical", reason="rm -rf", tool_name="Bash"
+        ),
         _evt(ev.APPROVE_BIOMETRIC_OK, now.isoformat()),
     ]
     _write_log(events, p)

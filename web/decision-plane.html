@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quill · Decision Plane</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Spline+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --paper:#f3efe4; --surface:#fffdf8; --ink:#1c2230; --ink-soft:#39414f;
+    --muted:#5f6877; --faint:#8b93a1; --line:rgba(28,24,14,0.12);
+    --brass:#a9762a; --brass-br:#c7923a;
+    --catch:#0e7c8c; --catch-soft:rgba(14,124,140,0.10);
+    --contain:#524bc0; --contain-soft:rgba(82,75,192,0.10);
+    --allow:#1f8f5f; --ask:#c4801a; --deny:#cf3f37; --evidence:#2f6f9e;
+    --shadow-sm:0 1px 2px rgba(40,30,10,0.05);
+    --shadow:0 2px 4px rgba(40,30,10,0.05),0 14px 34px rgba(40,30,10,0.07);
+    --serif:"Fraunces","Iowan Old Style",Palatino,Georgia,serif;
+    --sans:"Spline Sans",system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+    --mono:"IBM Plex Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:var(--sans); color:var(--ink); background:var(--paper);
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+    line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:860px;margin:0 auto;padding:48px 24px 80px}
+  header.top{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  .name{font-family:var(--serif);font-size:22px;font-weight:600;letter-spacing:.2px}
+  .name b{color:var(--brass)}
+  .top .tag{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.04em;text-transform:uppercase}
+  h1{font-family:var(--serif);font-weight:600;font-size:30px;letter-spacing:-.012em;margin:14px 0 6px}
+  .lede{color:var(--ink-soft);font-size:16px;max-width:64ch;margin:0 0 8px}
+  .lede em{color:var(--brass);font-style:normal;font-weight:500}
+
+  .flow{margin-top:30px}
+  .card{
+    background:var(--surface);border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow-sm);padding:16px 18px;position:relative;
+  }
+  .card .role{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-bottom:4px}
+  .card h3{margin:0;font-family:var(--serif);font-size:17px;font-weight:600}
+  .card p{margin:5px 0 0;color:var(--muted);font-size:13.5px}
+  .accent{border-left:4px solid var(--line)}
+  .accent.catch{border-left-color:var(--catch)} .accent.catch .role{color:var(--catch)}
+  .accent.contain{border-left-color:var(--contain)} .accent.contain .role{color:var(--contain)}
+  .accent.evidence{border-left-color:var(--evidence)} .accent.evidence .role{color:var(--evidence)}
+  .accent.start{border-left-color:var(--faint)}
+
+  .conn{display:flex;justify-content:center;padding:8px 0}
+  .conn svg{display:block}
+
+  /* decision-point inner chips */
+  .signals{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);background:var(--catch-soft);
+    border:1px solid rgba(14,124,140,.25);border-radius:999px;padding:5px 11px}
+
+  /* verdict fan-out */
+  .verdicts{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:4px}
+  .v{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 13px 14px;box-shadow:var(--shadow-sm);border-top:3px solid var(--line)}
+  .v .k{font-family:var(--serif);font-weight:600;font-size:15.5px;display:flex;align-items:center;gap:7px}
+  .v .d{color:var(--muted);font-size:12px;margin-top:4px}
+  .v .ic{font-family:var(--mono);font-weight:500}
+  .v.allow{border-top-color:var(--allow)} .v.allow .ic{color:var(--allow)}
+  .v.ask{border-top-color:var(--ask)} .v.ask .ic{color:var(--ask)}
+  .v.deny{border-top-color:var(--deny)} .v.deny .ic{color:var(--deny)}
+  .v.redact{border-top-color:var(--catch)} .v.redact .ic{color:var(--catch)}
+  @media(max-width:620px){.verdicts{grid-template-columns:repeat(2,1fr)}}
+
+  .foot{margin-top:34px;border-top:1px solid var(--line);padding-top:18px;color:var(--ink-soft);font-size:14px}
+  .foot b{font-weight:600;color:var(--ink)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <span class="name"><b>Quill</b></span>
+    <span class="tag">runtime authorization · decision plane</span>
+  </header>
+  <h1>One deterministic decision before every action</h1>
+  <p class="lede">Every tool call an AI agent makes runs through one local decision plane: a gate that <em>decides</em>, a kernel floor that <em>enforces what the gate can't see</em>, and a tamper-evident log that <em>proves what happened</em>. No model sits in the decision path, so the gate itself cannot be talked out of a verdict.</p>
+
+  <div class="flow">
+
+    <div class="card accent start">
+      <div class="role">Agent action</div>
+      <h3>Tool call</h3>
+      <p>Bash · Edit · Write · MCP tool — anything the coding agent (Claude Code, Cursor) tries to execute.</p>
+    </div>
+
+    <div class="conn"><svg width="20" height="34"><line x1="10" y1="0" x2="10" y2="26" stroke="#b9b09a" stroke-width="2"/><path d="M4 22 L10 32 L16 22" fill="none" stroke="#b9b09a" stroke-width="2"/></svg></div>
+
+    <div class="card accent catch">
+      <div class="role">Enforcement point</div>
+      <h3>The Quill gate</h3>
+      <p>A PreToolUse hook that fires <b>before</b> the call executes and holds it until a verdict comes back. The agent never reaches the tool unsupervised.</p>
+    </div>
+
+    <div class="conn"><svg width="20" height="34"><line x1="10" y1="0" x2="10" y2="26" stroke="#b9b09a" stroke-width="2"/><path d="M4 22 L10 32 L16 22" fill="none" stroke="#b9b09a" stroke-width="2"/></svg></div>
+
+    <div class="card accent catch">
+      <div class="role">Decision point</div>
+      <h3>Deterministic classifier</h3>
+      <p>Compiled regex and policy, no LLM in the path, so it can't be prompt-injected or jailbroken. It weighs three signals at once:</p>
+      <div class="signals">
+        <span class="chip">risk classification · low → critical</span>
+        <span class="chip">secret scan on writes</span>
+        <span class="chip">lethal-trifecta taint</span>
+      </div>
+    </div>
+
+    <div class="conn"><svg width="20" height="34"><line x1="10" y1="0" x2="10" y2="26" stroke="#b9b09a" stroke-width="2"/><path d="M4 22 L10 32 L16 22" fill="none" stroke="#b9b09a" stroke-width="2"/></svg></div>
+
+    <div class="verdicts">
+      <div class="v allow"><div class="k"><span class="ic">+</span> Allow</div><div class="d">Runs. Logged silently.</div></div>
+      <div class="v ask"><div class="k"><span class="ic">?</span> Ask</div><div class="d">Operator approves — Touch ID where available.</div></div>
+      <div class="v deny"><div class="k"><span class="ic">✕</span> Deny</div><div class="d">Blocked. The irreversible line never softens.</div></div>
+      <div class="v redact"><div class="k"><span class="ic">$</span> Redact</div><div class="d">Runs with detected secrets stripped.</div></div>
+    </div>
+
+    <div class="conn"><svg width="20" height="34"><line x1="10" y1="0" x2="10" y2="26" stroke="#b9b09a" stroke-width="2"/><path d="M4 22 L10 32 L16 22" fill="none" stroke="#b9b09a" stroke-width="2"/></svg></div>
+
+    <div class="card accent contain">
+      <div class="role">Kernel floor · enforces below the interpreter</div>
+      <h3>Seatbelt sandbox</h3>
+      <p>Whatever runs is confined by the OS on the real syscall: file writes are held to the project allowlist and network egress is sealed, <b>inherited by every interpreter and subprocess the agent spawns</b>. This catches what a text classifier structurally cannot — the script that writes its own payload, the raw <code>requests.post</code> exfil, the edit aimed at the gate's own config.</p>
+    </div>
+
+    <div class="conn"><svg width="20" height="34"><line x1="10" y1="0" x2="10" y2="26" stroke="#b9b09a" stroke-width="2"/><path d="M4 22 L10 32 L16 22" fill="none" stroke="#b9b09a" stroke-width="2"/></svg></div>
+
+    <div class="card accent evidence">
+      <div class="role">Evidence plane</div>
+      <h3>Tamper-evident audit log</h3>
+      <p>Every attempt — allowed, asked, denied, or redacted — is written to an HMAC-chained log and rolled up into an <b>Agent Receipt</b>: what it did, what changed, what it was uncertain about, what to verify.</p>
+    </div>
+
+  </div>
+
+  <div class="foot">
+    <b>The gate decides. The kernel floor enforces what the gate can't see. The log proves what happened.</b>
+    The honest claim is no known bypass for a non-root agent short of an OS-level zero-day or a misconfigured profile of our own — defense-in-depth, not a guarantee.
+    <div class="legend">
+      <span><i class="dot" style="background:var(--catch)"></i> gate (decide)</span>
+      <span><i class="dot" style="background:var(--contain)"></i> floor (enforce)</span>
+      <span><i class="dot" style="background:var(--evidence)"></i> log (prove)</span>
+      <span><i class="dot" style="background:var(--allow)"></i> allow</span>
+      <span><i class="dot" style="background:var(--ask)"></i> ask</span>
+      <span><i class="dot" style="background:var(--deny)"></i> deny</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

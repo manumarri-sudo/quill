@@ -6,12 +6,11 @@ verdict (is_path_protected) and the path logic the Swift PolicyEngine
 implements. If these drift, the always-on ESF layer would protect a
 different set of paths than the per-session Seatbelt floor.
 """
+
 from __future__ import annotations
 
 import json
 import os
-
-import pytest
 
 from quill import esf, sandbox
 
@@ -45,7 +44,7 @@ def test_covers_gate_disable_surface() -> None:
     rs = esf.compile_ruleset()
     joined = " ".join(rs["protected_files"] + rs["protected_prefixes"])
     assert ".claude/settings.json" in joined
-    assert ".claude/hooks" in joined        # the A2 hole, always-on
+    assert ".claude/hooks" in joined  # the A2 hole, always-on
     assert ".quill/config.toml" in joined
     assert ".quill/key" in joined
 
@@ -103,4 +102,4 @@ def test_parity_python_reference_vs_compiled_ruleset(tmp_path) -> None:
         assert esf.is_path_protected(f, rs) is True
     # a path under each prefix is judged protected
     for pre in rs["protected_prefixes"]:
-        assert esf.is_path_protected(os.path.join(pre, "child"), rs) is True
+        assert esf.is_path_protected(f"{pre}/child", rs) is True

@@ -19,6 +19,7 @@ mid-session can't reuse the token for a different command.
 Storage: $QUILL_HOME/approvals.json, mode 0o600. TTL default 10 minutes;
 expired approvals are cleaned on every load.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -46,6 +47,7 @@ def args_digest(args: Mapping[str, Any]) -> str:
 
 def _path() -> Path:
     from quill.paths import default_path
+
     return default_path("approvals.json", env_override="QUILL_APPROVALS_FILE")
 
 
@@ -76,9 +78,9 @@ class Approval:
     args_digest: str
     expires_at: str
     issued_at: str
-    reason: str = ""           # human-readable note about what was approved
-    consumed_at: str = ""      # set when the approval is used; persisted for audit
-    approved_at: str = ""      # set when the operator confirms; gate of consumability
+    reason: str = ""  # human-readable note about what was approved
+    consumed_at: str = ""  # set when the approval is used; persisted for audit
+    approved_at: str = ""  # set when the operator confirms; gate of consumability
 
     @property
     def is_expired(self) -> bool:

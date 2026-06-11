@@ -15,6 +15,7 @@ needs a human finger). What we CAN unit-test:
   - Lockout / user-cancel reasons map to the right structured strings
     (mocked LAError objects).
 """
+
 from __future__ import annotations
 
 import sys
@@ -45,7 +46,9 @@ def test_is_available_false_when_localauthentication_missing() -> None:
     """On Linux/Windows or macOS without the touchid extra installed,
     `import LocalAuthentication` raises ImportError. is_available() must
     return False - never raise - so the caller falls through cleanly."""
-    real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+    real_import = (
+        __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+    )
 
     def _no_la(name: str, *args: object, **kwargs: object) -> object:
         if name == "LocalAuthentication":
@@ -60,7 +63,9 @@ def test_is_available_false_when_localauthentication_missing() -> None:
 
 
 def test_authenticate_returns_not_available_when_module_missing() -> None:
-    real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+    real_import = (
+        __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+    )
 
     def _no_la(name: str, *args: object, **kwargs: object) -> object:
         if name == "LocalAuthentication":
