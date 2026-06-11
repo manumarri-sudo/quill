@@ -23,11 +23,8 @@ Four invariants under test:
 from __future__ import annotations
 
 import json
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-
-import pytest
 
 
 def _isolate(monkeypatch, tmp_path: Path) -> None:
@@ -92,7 +89,7 @@ def test_non_expired_override_downshifts_default_high_edit(
     _write_override(
         overrides_path,
         pattern_id="Edit:high risk: default risk for Edit",
-        promoted_at=datetime.now(timezone.utc) - timedelta(days=1),
+        promoted_at=datetime.now(UTC) - timedelta(days=1),
         ttl_days=14,
     )
 
@@ -128,7 +125,7 @@ def test_expired_override_does_not_apply(
     _write_override(
         overrides_path,
         pattern_id="Edit:high risk: default risk for Edit",
-        promoted_at=datetime.now(timezone.utc) - timedelta(days=30),
+        promoted_at=datetime.now(UTC) - timedelta(days=30),
         ttl_days=7,
     )
 
@@ -170,7 +167,7 @@ def test_critical_pattern_not_downshifted_by_override(
     _write_override(
         overrides_path,
         pattern_id="Bash:rm -rf",
-        promoted_at=datetime.now(timezone.utc),
+        promoted_at=datetime.now(UTC),
         ttl_days=30,
         evidence="attempted bypass",
     )
@@ -221,7 +218,7 @@ def test_override_written_via_promote_format_is_read_by_hook(
     section = "".join(
         c if c.isalnum() or c in "_-" else "_" for c in pattern_id
     )[:60]
-    promoted_at_iso = datetime.now(timezone.utc).isoformat()
+    promoted_at_iso = datetime.now(UTC).isoformat()
     block = (
         f"\n[overrides.{section}]\n"
         f'pattern_id = "{pattern_id}"\n'
@@ -276,8 +273,8 @@ def test_override_written_via_promote_format_is_read_by_hook(
         + f"\n[overrides.{new_section}]\n"
         + f'pattern_id = "{new_pattern}"\n'
         + f'promoted_at = "{promoted_at_iso}"\n'
-        + f"ttl_days = 14\n"
-        + f'evidence = "manual"\n'
+        + "ttl_days = 14\n"
+        + 'evidence = "manual"\n'
     )
     active2 = load_active_overrides()
     assert pattern_id in active2

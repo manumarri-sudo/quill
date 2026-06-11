@@ -9,19 +9,13 @@ from __future__ import annotations
 import sys
 import tomllib
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
-
-from quill.config import QuillConfig
 from quill.onboard import (
-    DetectedAgent,
     PRESET_DESCRIPTIONS,
     build_config_toml,
     detect_coding_tools,
     run,
 )
-
 
 # ---------------------------------------------------------------------------
 # detection
@@ -194,8 +188,9 @@ def test_run_aborts_in_non_tty(capsys, monkeypatch):
 def test_claude_code_installer_signature():
     """The onboard module calls cc.install_into_settings(None, matcher=..., timeout=...).
     Verify the adapter's function accepts that signature."""
-    from quill.adapters import claude_code as cc
     import inspect
+
+    from quill.adapters import claude_code as cc
     sig = inspect.signature(cc.install_into_settings)
     params = sig.parameters
     # First positional + matcher + timeout
@@ -204,8 +199,9 @@ def test_claude_code_installer_signature():
 
 
 def test_cursor_installer_signature():
-    from quill.adapters import cursor as cu
     import inspect
+
+    from quill.adapters import cursor as cu
     sig = inspect.signature(cu.install_into_settings)
     # accepts at least one positional argument
     assert len(sig.parameters) >= 1

@@ -294,7 +294,10 @@ _DASHBOARD_HTML = r"""<!doctype html>
 :root {
   --bg: #0c0e12; --panel: #14171c; --line: #1f242c;
   --fg: #e8eaed; --dim: #8a92a0;
-  --low: #2ec27e; --med: #6a9bf4; --high: #f5c451; --crit: #e0626a;
+  /* ISO 22324-aligned: low=green (allowed/safe), medium=amber-soft
+     (notice), high=amber (warning), critical=red (danger). Magenta
+     reserved for chain-integrity events; not in risk-class palette. */
+  --low: #2ec27e; --med: #e6a23c; --high: #f5c451; --crit: #e0626a;
   --sub: #c98ad6;     /* magenta-pink for sub-agent decoration */
   --spawn: #c98ad6;
 }
@@ -459,6 +462,10 @@ function render(evt) {
   div.className = "row" + (isSub ? " sub" : "") + (isSpawn ? " spawn-row" : "");
   const ts = (evt.ts || "").slice(11, 19);
   const risk = (evt.risk || "low").toLowerCase();
+  // Color-blind-safe carrier: every risk row leads with a single-char
+  // icon that survives any palette. Matches the ASCII icon set in
+  // src/quill/severity.py so CLI + browser tell the same story.
+  const riskIcon = ({critical: "X", high: "!", medium: "~", low: "+"})[risk] || ".";
   const [klass, label] = shortType(evt.type || "");
   const tool = p.tool_name || "";
   const reason = p.reason || p.risk_reason || "";
@@ -474,7 +481,7 @@ function render(evt) {
 
   div.innerHTML = `
     <div class=ts>${ts}</div>
-    <div class="risk ${risk}">${risk}</div>
+    <div class="risk ${risk}"><span class="risk-icon">${riskIcon}</span> ${risk}</div>
     <div class="type ${klass}"><span class="dot ${risk}"></span>${label}</div>
     <div class=tool>${toolHtml}</div>
   `;

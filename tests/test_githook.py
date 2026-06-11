@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
 
@@ -156,6 +155,7 @@ def test_prepare_commit_msg_appends_block_when_template_marker_absent(tmp_path):
     audit = tmp_path / "audit.log.jsonl"
     # Single session with one tool call so derive_from_events produces a Receipt
     import json
+
     from quill import events as ev
     now = datetime.now(UTC).isoformat()
     audit.write_text("\n".join(

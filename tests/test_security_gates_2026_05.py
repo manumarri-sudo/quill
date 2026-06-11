@@ -14,8 +14,6 @@ late-April / early-May 2026:
 """
 from __future__ import annotations
 
-import pytest
-
 from quill.policy import (
     SUBCOMMAND_CHAIN_LIMIT,
     Risk,
@@ -23,7 +21,6 @@ from quill.policy import (
     classify_command,
 )
 from quill.tool_scan import scan
-
 
 # ---------------------------------------------------------------------------
 # Gate 1 - subcommand-chain bypass (Claude Code CVE-2025-59536 / 21852)
@@ -221,7 +218,7 @@ def test_zero_width_chars_flagged_high_not_critical() -> None:
     # ("silently"). Test that at minimum the invisible_unicode finding is
     # present at HIGH.
     r = scan(tool)
-    assert not r.safe is False or any(
+    assert r.safe is not False or any(
         f.category == "invisible_unicode" and f.severity == "high"
         for f in r.findings
     )

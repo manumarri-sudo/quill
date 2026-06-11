@@ -20,8 +20,7 @@ Coverage matrix:
 """
 from __future__ import annotations
 
-import json
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -29,7 +28,6 @@ import pytest
 from quill import overnight
 from quill.adapters.claude_code import decide
 from quill.policy import Risk
-
 
 # ---------------------------------------------------------------------------
 # State persistence
@@ -125,7 +123,7 @@ class TestManualToggleExpiry:
     def test_auto_expires_at_deadline(self) -> None:
         """A toggle whose expires_at is in the past must NOT be active."""
         # turn on with deliberately past expiry by writing state directly
-        past = (datetime.now(timezone.utc).astimezone() - timedelta(hours=1)).isoformat()
+        past = (datetime.now(UTC).astimezone() - timedelta(hours=1)).isoformat()
         state = overnight.OvernightState(
             enabled=True,
             set_at=past,
@@ -156,7 +154,7 @@ class TestManualToggleExpiry:
 
 def _at(hour: int, minute: int = 0) -> datetime:
     """Build a deterministic local datetime at the given local hour/minute."""
-    return datetime.now(timezone.utc).astimezone().replace(
+    return datetime.now(UTC).astimezone().replace(
         hour=hour, minute=minute, second=0, microsecond=0
     )
 
@@ -455,6 +453,7 @@ class TestCounters:
 class TestCliSmoke:
     def test_quill_night_on_works(self) -> None:
         from typer.testing import CliRunner
+
         from quill.cli import app
         runner = CliRunner()
         result = runner.invoke(app, ["night", "on", "--hours", "8"])
@@ -464,6 +463,7 @@ class TestCliSmoke:
 
     def test_quill_day_works(self) -> None:
         from typer.testing import CliRunner
+
         from quill.cli import app
         runner = CliRunner()
         runner.invoke(app, ["night", "on"])
@@ -474,6 +474,7 @@ class TestCliSmoke:
 
     def test_quill_night_status_works(self) -> None:
         from typer.testing import CliRunner
+
         from quill.cli import app
         runner = CliRunner()
         runner.invoke(app, ["night", "on"])
@@ -482,6 +483,7 @@ class TestCliSmoke:
 
     def test_quill_night_rejects_bad_hours(self) -> None:
         from typer.testing import CliRunner
+
         from quill.cli import app
         runner = CliRunner()
         result = runner.invoke(app, ["night", "on", "--hours", "999"])
@@ -489,6 +491,7 @@ class TestCliSmoke:
 
     def test_quill_night_rejects_unknown_arg(self) -> None:
         from typer.testing import CliRunner
+
         from quill.cli import app
         runner = CliRunner()
         result = runner.invoke(app, ["night", "bogus"])

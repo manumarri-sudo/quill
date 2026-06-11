@@ -21,7 +21,7 @@ from __future__ import annotations
 import contextlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +40,7 @@ def _now() -> datetime:
     the configured overnight window (default 22:00-08:00) is a wall-clock
     statement, not a UTC-relative one. Operators sleep on local time.
     """
-    return datetime.now(timezone.utc).astimezone()
+    return datetime.now(UTC).astimezone()
 
 
 @dataclass(slots=True)
@@ -147,7 +147,7 @@ def is_manual_toggle_active(
         return False
     n = now or _now()
     if expires.tzinfo is None:
-        expires = expires.replace(tzinfo=timezone.utc).astimezone()
+        expires = expires.replace(tzinfo=UTC).astimezone()
     return n < expires
 
 

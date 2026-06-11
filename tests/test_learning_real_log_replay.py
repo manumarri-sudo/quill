@@ -14,12 +14,10 @@ The test is gated on the real log being present; skipped otherwise.
 from __future__ import annotations
 
 import json
-import os
 from collections import defaultdict
 from pathlib import Path
 
 import pytest
-
 
 REAL_LOG = Path.home() / ".quill" / "audit.log.jsonl"
 

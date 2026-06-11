@@ -157,8 +157,10 @@ def test_run_hook_consumes_existing_approval_and_allows(tmp_path: Path) -> None:
     from quill.approvals import ApprovalStore
 
     store = ApprovalStore.load()
-    # Issue an approval for the exact call we'll make.
-    store.issue("Bash", {"command": "rm -rf node_modules", "cwd": "/x"})
+    # Issue an approval for the exact call we'll make, then approve it
+    # (simulating `quill approve <token>`) - issuance alone is inert.
+    ap = store.issue("Bash", {"command": "rm -rf node_modules", "cwd": "/x"})
+    store.approve(ap.token)
 
     log = tmp_path / "audit.jsonl"
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:

@@ -18,8 +18,6 @@ step is built on sand:
 """
 from __future__ import annotations
 
-import json
-import math
 import os
 import time
 from pathlib import Path
@@ -34,7 +32,6 @@ from quill.learning import (
     load_stats,
     save_stats,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test 1: Beta-binomial math correctness.

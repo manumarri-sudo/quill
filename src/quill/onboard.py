@@ -26,7 +26,6 @@ from rich.table import Table
 
 from quill.config import default_audit_path, default_config_path
 
-
 PRESET_DESCRIPTIONS: Final[dict[str, str]] = {
     "boring": "default: silent on reads, ask on writes, type-to-confirm on critical",
     "paranoid": "ask on every Edit/Write/Bash; type-to-confirm on every critical",
@@ -374,7 +373,7 @@ def _install_hook(console: Console, agent: DetectedAgent) -> None:
             p, already = cu.install_into_settings(None)
             status = "already wired" if already else "installed"
             console.print(f"  [green]✓[/green] {agent.label}: {status} ({p})")
-    except Exception as e:  # noqa: BLE001 - report any install failure verbatim
+    except Exception as e:
         console.print(f"  [yellow]⚠[/yellow] {agent.label} install failed: {e}")
 
 

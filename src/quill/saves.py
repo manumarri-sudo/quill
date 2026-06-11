@@ -356,17 +356,33 @@ def format_saves(saves: Saves, *, plain: bool = False) -> str:
     ))
     lines.append("")
 
-    # verified counts
+    # verified counts - ISO 22324 / NIST-aligned color treatment + icons.
+    # Color carries severity at a glance; icon + text label survive
+    # NO_COLOR / screen-reader paths. Bright safety classes (critical,
+    # secret, trifecta, pin_refusal) all render red so the eye snaps to
+    # them first; trust-path auto-allows render green because they're
+    # the "Quill saved you a click" outcome.
+    from quill.severity import stat_line as _sl
     lines.append(b("verified from your audit log:"))
-    lines.append(f"  {saves.trust_auto_allows:>4}  auto-allows inside trusted scope (would have prompted otherwise)")
-    lines.append(f"  {saves.critical_blocks:>4}  critical-risk operations blocked")
-    lines.append(f"  {saves.secrets_caught:>4}  hardcoded secrets caught before write")
-    lines.append(f"  {saves.biometric_approvals:>4}  Touch ID approvals consumed")
-    lines.append(f"  {saves.biometric_denials:>4}  Touch ID approvals denied")
-    lines.append(f"  {saves.pin_refusals:>4}  tool-description rug-pulls refused")
-    lines.append(f"  {saves.trifecta_enforcements:>4}  lethal-trifecta sessions escalated to deny")
-    lines.append(f"  {saves.scope_violations:>4}  out-of-scope calls refused")
-    lines.append(f"  {saves.chain_repairs:>4}  chain integrity events recorded")
+    lines.append(_sl("ok", saves.trust_auto_allows,
+                     "auto-allows inside trusted scope (would have prompted otherwise)",
+                     plain=plain))
+    lines.append(_sl("critical", saves.critical_blocks,
+                     "critical-risk operations blocked", plain=plain))
+    lines.append(_sl("secret", saves.secrets_caught,
+                     "hardcoded secrets caught before write", plain=plain))
+    lines.append(_sl("ok", saves.biometric_approvals,
+                     "Touch ID approvals consumed", plain=plain))
+    lines.append(_sl("high", saves.biometric_denials,
+                     "Touch ID approvals denied", plain=plain))
+    lines.append(_sl("pin_refusal", saves.pin_refusals,
+                     "tool-description rug-pulls refused", plain=plain))
+    lines.append(_sl("trifecta", saves.trifecta_enforcements,
+                     "lethal-trifecta sessions escalated to deny", plain=plain))
+    lines.append(_sl("high", saves.scope_violations,
+                     "out-of-scope calls refused", plain=plain))
+    lines.append(_sl("chain", saves.chain_repairs,
+                     "chain integrity events recorded", plain=plain))
     lines.append("")
 
     # estimated savings

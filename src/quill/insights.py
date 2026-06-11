@@ -267,15 +267,39 @@ def format_insights(insights: Insights, *, plain: bool = False) -> str:
         lines.append(dim("no gated events in window. run an agent session and come back."))
         return "\n".join(lines)
 
-    # Top patterns table
+    # Top patterns table. Each row leads with a severity icon based on the
+    # block-vs-ask ratio - rows that mostly BLOCKED render red (critical-
+    # behaving pattern), rows that mostly ASKED render yellow (ambiguous),
+    # rows that resolved cleanly render green. Same ISO 22324 mapping as
+    # `quill saves`; the eye should land on the same colors with the same
+    # meaning across surfaces.
+    from quill.severity import color as _color
+    from quill.severity import icon as _icon
     lines.append(b("top patterns by fire frequency:"))
-    lines.append(f"  {'pattern':<32} {'fires':>5} {'block':>6} {'ask':>5}  recommendation")
-    lines.append("  " + "-" * 76)
+    lines.append(f"  {'':1} {'pattern':<32} {'fires':>5} {'block':>6} {'ask':>5}  recommendation")
+    lines.append("  " + "-" * 78)
     for stat in insights.top_patterns[:12]:
-        lines.append(
-            f"  {stat.pattern:<32} {stat.total_fires:>5} {stat.blocked_count:>6} "
-            f"{stat.asked_count:>5}  {stat.recommendation}",
-        )
+        if stat.total_fires == 0:
+            sev = "low"
+        elif stat.blocked_count >= max(1, stat.total_fires // 2):
+            sev = "critical"
+        elif stat.asked_count >= max(1, stat.total_fires // 2):
+            sev = "high"
+        else:
+            sev = "ok"
+        icn = _icon(sev)  # type: ignore[arg-type]
+        if plain:
+            row = (
+                f"  {icn} {stat.pattern:<32} {stat.total_fires:>5} "
+                f"{stat.blocked_count:>6} {stat.asked_count:>5}  {stat.recommendation}"
+            )
+        else:
+            col = _color(sev)  # type: ignore[arg-type]
+            row = (
+                f"  [{col}]{icn}[/{col}] {stat.pattern:<32} {stat.total_fires:>5} "
+                f"{stat.blocked_count:>6} {stat.asked_count:>5}  {stat.recommendation}"
+            )
+        lines.append(row)
     lines.append("")
 
     # Trust-path effectiveness

@@ -7,13 +7,11 @@ or revoked; they exist to exercise the regex set, not to leak anything.
 from __future__ import annotations
 
 from quill.secrets import (
-    SecretPattern,
     hit_summary,
     patterns,
     scan,
     scan_args,
 )
-
 
 # ---------------------------------------------------------------------------
 # detection: each pattern matches its vendor-shape sample

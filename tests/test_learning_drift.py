@@ -28,7 +28,6 @@ from quill.learning import (
     page_hinkley,
 )
 
-
 # ---------------------------------------------------------------------------
 # Test 1: Upward shift is detected.
 

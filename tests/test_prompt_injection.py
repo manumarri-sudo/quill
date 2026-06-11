@@ -12,12 +12,10 @@ on legitimate text; that's why the audit-log signal is observation-only.
 from __future__ import annotations
 
 from quill.prompt_injection import (
-    InjectionHit,
     hit_summary,
     patterns,
     scan,
 )
-
 
 # ---------------------------------------------------------------------------
 # pattern coverage

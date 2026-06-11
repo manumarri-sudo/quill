@@ -23,13 +23,10 @@ Four invariants under test:
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
 from pathlib import Path
-
-import pytest
 
 
 def _isolate(monkeypatch, tmp_path: Path) -> None:
@@ -70,7 +67,6 @@ def _worker_record(stats_path: str, n: int, pattern_id: str, decision: str) -> N
     _os.environ["QUILL_SUGGESTIONS"] = stats_path + ".sug"
     _os.environ["QUILL_LEARNING_LOG"] = stats_path + ".log"
     import importlib
-    import sys
     sys.path.insert(0, '/Users/manaswimarri/quill/src')
     if 'quill.learning' in sys.modules:
         importlib.reload(sys.modules['quill.learning'])
@@ -99,7 +95,7 @@ def test_8_concurrent_writers_lose_no_updates(
             try:
                 _worker_record(stats_path, n_per, pattern_id, "deny")
             finally:
-                os._exit(0)  # noqa: SLF001 - direct exit in fork-child
+                os._exit(0)
         pids.append(pid)
 
     # Wait for all children to finish.
@@ -138,7 +134,7 @@ def test_mixed_concurrent_approves_and_denies_balance(
             try:
                 _worker_record(stats_path, n_per, pattern_id, "approve")
             finally:
-                os._exit(0)  # noqa: SLF001
+                os._exit(0)
         pids.append(pid)
     for _ in range(n_deny_workers):
         pid = os.fork()
@@ -146,7 +142,7 @@ def test_mixed_concurrent_approves_and_denies_balance(
             try:
                 _worker_record(stats_path, n_per, pattern_id, "deny")
             finally:
-                os._exit(0)  # noqa: SLF001
+                os._exit(0)
         pids.append(pid)
 
     for pid in pids:

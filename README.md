@@ -1,6 +1,8 @@
 # quill
 
 > The pause button between your AI coding agent and the things you can't undo.
+>
+> Runtime policy, audit, and approval infrastructure for AI coding agents.
 
 <!-- mcp-name: io.github.manumarri-sudo/quill -->
 
@@ -37,7 +39,7 @@ Quill is the smallest version of one I could write. MIT, open source, single Pyt
 
 - **It refuses the things you can't undo, before they happen.** `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, `.env` reads, the CVE-2025-59536 subcommand-chain bypass, and 26 vendor-format secret patterns scanned against every file the agent writes. Default-critical. On macOS, the confirmation is hardware-attested through Touch ID on the Secure Enclave. **Don't take our word for it — read the regexes.** Every critical pattern lives in [`src/quill/policy.py`](src/quill/policy.py); you can grep them, fork them, and challenge them. Other tools in this space ship opaque heuristics; Quill ships inspectable rules.
 - **It defends against prompt injection by refusing the consequence, not detecting the cause.** Every published LLM-based prompt-injection defense was bypassed at >90% in 2025 (per the [November 2025 adaptive-attack paper](https://simonwillison.net/2025/Nov/2/new-prompt-injection-papers/)); that's a losing battle. Quill enforces Simon Willison's "Lethal Trifecta" deterministically: when the agent has, in one session, *seen untrusted input + read private data + has an exfiltration path*, the gate refuses the third action. Pair with model-level guardrails; never substitute. [Full prompt-injection defense story →](docs/marketing/prompt-injection-defense.md)
-- **The audit log is the artifact your auditor will accept on Monday morning.** HMAC-SHA256 chained per entry, mode `0o600`, tamper-evident, EU AI Act Article 12 + 14 + 19 shaped out of the box. **ISO/IEC 42001 control A.6.2.8 reads like it was specified for Quill** — the required fields (actor identification, synchronized tamper-evident timestamp, action in business terms, justification, anomaly flags) and the auditor-verification criteria (append-only storage, cryptographic hashing, immutable records) are exactly the audit log Quill produces. One command (`quill audit export --pack`) yields a real PDF covering AIUC-1, NIST AI RMF, ISO/IEC 42001, SOC 2 Common Criteria, and MITRE ATLAS in ~3 seconds. [AIUC-1 control mapping →](docs/marketing/aiuc-1-mapping.md)
+- **The audit log is auditor-reviewable evidence of what your agents actually did.** HMAC-SHA256 chained per entry, mode `0o600`, locally tamper-evident (and optionally externally anchored). It maps to the evidence requests behind EU AI Act Article 12 + 14 + 19, SOC 2 CC6/CC7/CC8, and ISO/IEC 42001 A.6.2.8 — the required fields (actor identification, synchronized timestamp, action in business terms, justification, anomaly flags) and verification criteria (append-only storage, cryptographic hashing) are exactly what Quill produces. Quill produces the machine-verifiable record; it does not certify compliance by itself. One command (`quill audit export --pack`) yields an auditor-reviewable evidence pack mapping to AIUC-1, NIST AI RMF, ISO/IEC 42001, SOC 2 Common Criteria, and MITRE ATLAS in ~3 seconds. [AIUC-1 control mapping →](docs/marketing/aiuc-1-mapping.md)
 
 > **The strategic position, in one sentence:** Quill is the gate that stops the agent from doing the thing you can't undo, on the only layer where that gate can actually fire deterministically. Vanta logs that you have FileVault on. Microsoft AGT runs in your enterprise observability stack. Cisco AI Defense inspects MCP traffic at the network appliance. **None of them stop the agent from typing `rm -rf $HOME` in your shell at 2am.** You can have all of them installed and still need Quill, because the gate has to live at the developer-laptop tool-dispatch layer, and that's where Quill runs.
 
@@ -48,6 +50,7 @@ Calibration matters more than marketing. Three lines worth repeating verbatim be
 - **Quill is not an AI safety system.** It does not predict whether an action is bad. It records, scope-checks, and asks a human on dangerous calls. There is no LLM in the gate, which is exactly what makes the gate not bypassable through prompt injection of the gate itself.
 - **Quill is not a replacement for OAuth or RBAC.** Identity says you are *allowed* to refund. Quill says *this specific refund, in this specific session, deserves a confirmation*. You need both. Stack Quill on top of Cerbos / Permit.io / WorkOS, don't choose between them.
 - **Quill is not a hosted service.** It is a single Python package. The audit log lives on your disk, you own the key, the log, and the verdict. No telemetry by default. No cloud round-trip on the gate's hot path.
+- **Quill is defense-in-depth, not a hard security boundary.** An application-layer gate raises the bar against careless agents, single-shot prompt injection, and the common destructive/exfiltration shapes; it is not a substitute for OS-level enforcement against a determined adversary actively trying to escape it. The full threat model — what Quill stops well, the known limits (semantic shell obfuscation, app-layer bypass, write-then-run, network egress), and the architectural roadmap to close them — is documented honestly in [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md).
 
 ## How it works in one paragraph
 
@@ -113,8 +116,8 @@ Quill ships a four-layer defense:
 `quill` is built around three pillars and the maturity of each is honestly different. This section exists because dogfooding evidence matters more than design intent.
 
 **Mature, with on-disk evidence in real-world dogfooding** (the gate + audit pillar):
-- Destructive-action gate: hundreds of critical blocks observed across `rm -rf`, `vercel --prod`, `git push --force`, `DROP TABLE`, `TRUNCATE`, `npm publish`, `sudo`, `.env` reads, and the CVE-2025-59536 subcommand-chain bypass. Zero false positives in the critical class.
-- HMAC-chained audit log: 22k+ entries verified end-to-end. Tamper-evident, mode `0o600`, EU AI Act Article 12 + 14 fields on every block, audit-log path resolves cleanly through `quill audit verify`.
+- Destructive-action gate: hundreds of critical blocks observed across `rm -rf`, `vercel --prod`, `git push --force`, `DROP TABLE`, `TRUNCATE`, `npm publish`, `sudo`, `.env` reads, and the CVE-2025-59536 subcommand-chain bypass. No false positives observed in the critical class during dogfooding.
+- HMAC-chained audit log: 22k+ entries verified end-to-end. Locally tamper-evident (optionally externally anchored), mode `0o600`, EU AI Act Article 12 + 14 fields on every block, audit-log path resolves cleanly through `quill audit verify`.
 - Out-of-band notification dispatch on real blocks: macOS banner, email, Slack, generic webhook. Synchronous-with-100ms-timeout on the hot path so the dispatch can't be killed mid-flight by the hook subprocess exiting.
 - One-shot approve tokens, Touch ID hardware-attested approval, anti-yes-fatigue, type-to-confirm: full block-to-approve cycle observed end-to-end with audit chain evidence.
 - Trust scope with trifecta enforcement priority: trusted directories suppress default-risk Edit/Write asks, but yield to trifecta enforcement when the session is at 2-of-3 flags and the call would close the third.

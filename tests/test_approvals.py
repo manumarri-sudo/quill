@@ -25,10 +25,11 @@ def test_args_digest_changes_on_value_diff() -> None:
     assert args_digest({"path": "/x"}) != args_digest({"path": "/y"})
 
 
-def test_issue_then_consume_flips_state(tmp_path: Path) -> None:
+def test_issue_then_approve_then_consume_flips_state(tmp_path: Path) -> None:
     p = tmp_path / "approvals.json"
     store = ApprovalStore(path=p)
-    store.issue("Bash", {"command": "rm -rf node_modules"})
+    ap = store.issue("Bash", {"command": "rm -rf node_modules"})
+    store.approve(ap.token)
     consumed = store.consume("Bash", {"command": "rm -rf node_modules"})
     assert consumed is not None
     assert consumed.consumed_at != ""
@@ -37,10 +38,29 @@ def test_issue_then_consume_flips_state(tmp_path: Path) -> None:
     assert again is None
 
 
+def test_issue_without_approve_is_not_consumable(tmp_path: Path) -> None:
+    """SECURITY: the gate auto-issues a token on every block so the
+    notification can offer `quill approve`. That token MUST NOT release the
+    call on its own - otherwise a denied command auto-allows its own retry,
+    defeating the gate against any agent that simply tries again.
+
+    Regression for the issuance==approval bug found 2026-06-10.
+    """
+    p = tmp_path / "approvals.json"
+    store = ApprovalStore(path=p)
+    store.issue("Bash", {"command": "rm -rf /"})
+    # No approve() step - the operator never confirmed.
+    assert store.consume("Bash", {"command": "rm -rf /"}) is None
+    # Still listable as pending (awaiting approval), just not consumable.
+    assert len(store.active()) == 1
+    assert not store.active()[0].is_consumable
+
+
 def test_consume_rejects_different_args(tmp_path: Path) -> None:
     p = tmp_path / "approvals.json"
     store = ApprovalStore(path=p)
-    store.issue("Bash", {"command": "rm -rf node_modules"})
+    ap = store.issue("Bash", {"command": "rm -rf node_modules"})
+    store.approve(ap.token)
     # Same tool, different command - must NOT match.
     consumed = store.consume("Bash", {"command": "rm -rf /"})
     assert consumed is None
@@ -49,7 +69,8 @@ def test_consume_rejects_different_args(tmp_path: Path) -> None:
 def test_consume_rejects_different_tool(tmp_path: Path) -> None:
     p = tmp_path / "approvals.json"
     store = ApprovalStore(path=p)
-    store.issue("Bash", {"command": "x"})
+    ap = store.issue("Bash", {"command": "x"})
+    store.approve(ap.token)
     consumed = store.consume("Edit", {"command": "x"})
     assert consumed is None
 
@@ -71,6 +92,7 @@ def test_revoke_drops_token(tmp_path: Path) -> None:
     p = tmp_path / "approvals.json"
     store = ApprovalStore(path=p)
     ap = store.issue("Bash", {"command": "ls"})
+    store.approve(ap.token)  # approved → would be consumable but for revoke
     assert store.revoke(ap.token) is True
     assert store.consume("Bash", {"command": "ls"}) is None
 
@@ -78,7 +100,8 @@ def test_revoke_drops_token(tmp_path: Path) -> None:
 def test_persistence_across_reload(tmp_path: Path) -> None:
     p = tmp_path / "approvals.json"
     s1 = ApprovalStore(path=p)
-    s1.issue("Bash", {"command": "rm -rf x"})
+    ap = s1.issue("Bash", {"command": "rm -rf x"})
+    s1.approve(ap.token)  # approval must persist across reload
     s2 = ApprovalStore.load(path=p)
     consumed = s2.consume("Bash", {"command": "rm -rf x"})
     assert consumed is not None
@@ -110,6 +133,7 @@ def test_approve_returns_none_for_unknown_token(tmp_path: Path) -> None:
 def test_active_excludes_consumed(tmp_path: Path) -> None:
     p = tmp_path / "approvals.json"
     store = ApprovalStore(path=p)
-    store.issue("Bash", {"command": "x"})
+    ap = store.issue("Bash", {"command": "x"})
+    store.approve(ap.token)
     store.consume("Bash", {"command": "x"})
     assert store.active() == []

@@ -47,7 +47,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-
 # ---------------------------------------------------------------------------
 # Constants - tunable but with defensible defaults from the research doc.
 # Changes here SHOULD be versioned in git and discussed; arbitrary tuning
@@ -77,6 +76,23 @@ LOOSEN_MIN_FIRES: int = 20           # don't suggest below 20 fires
 # Operator-anomaly thresholds (rate-based, no autoencoder).
 FATIGUE_INTER_ARRIVAL_SEC: float = 2.0
 FATIGUE_STREAK_LEN: int = 20
+
+# Auto-promote ("in-flow approval") thresholds. Simpler/stricter than
+# detect_loosen_candidate: a small absolute approval count with NO recent
+# denies, all within a recent window. This fires the in-flow promotion
+# prompt the moment the threshold is crossed - the operator gets one
+# chance to confirm without having to run `quill suggestions promote`.
+#
+# Why these numbers (NOT statutory; product judgement):
+#   - 5 approvals: low enough to feel responsive, high enough to filter
+#     noise. Below 5 there's not enough signal to claim a pattern.
+#   - 7 days: matches the typical "I came back to my codebase" cycle.
+#     A pattern approved 5x in a week is part of the working rhythm.
+#   - 0 denies in window: any deny resets the timer. If the operator
+#     EVER said "no" to this pattern lately, we don't suggest promotion.
+AUTOPROMOTE_MIN_APPROVALS: int = 5
+AUTOPROMOTE_WINDOW_SEC: float = 7 * 86400.0
+AUTOPROMOTE_MAX_DENIES_IN_WINDOW: int = 0
 COMPROMISE_BURST_PER_5MIN: int = 50  # 50 approvals in 5 min = suspect
 
 
@@ -477,6 +493,55 @@ def detect_loosen_candidate(p: PatternStats) -> dict[str, Any] | None:
     }
 
 
+def detect_auto_promote_candidate(p: PatternStats) -> dict[str, Any] | None:
+    """In-flow promotion prompt. Fires the FIRST time a pattern crosses
+    `AUTOPROMOTE_MIN_APPROVALS` approvals within the rolling window with
+    NO denies in that same window. The hook adapter renders this as a
+    one-shot "want to auto-allow this from now on?" prompt at the moment
+    of the next ask, instead of forcing the operator to run a separate
+    `quill suggestions promote` command later.
+
+    The bright line: bypass mode and critical-class events are NEVER
+    candidates for auto-promotion. That gating happens in the adapter,
+    not here - this detector just emits the candidate; the adapter
+    decides whether to show it. Pattern IDs that begin with `critical:`
+    or `secret:` are short-circuited here as defense in depth.
+
+    Why not extend detect_loosen_candidate: that one is Wilson-based
+    (20+ fires for statistical confidence) and surfaces to a queue.
+    This one is product-judgement based (5 fires for responsiveness)
+    and surfaces in-flow. Different jobs; both worth having.
+    """
+    pid = p.pattern_id or ""
+    if pid.startswith(("critical:", "secret:", "trifecta:")):
+        return None
+    if p.approvals < AUTOPROMOTE_MIN_APPROVALS:
+        return None
+    if p.denies > AUTOPROMOTE_MAX_DENIES_IN_WINDOW:
+        return None
+    # Window check: first approval inside the window. We use first_fire_ts
+    # as a cheap proxy - if the pattern's been around longer than the
+    # window we still fire IFF approvals are stacked in recent history,
+    # which `last_fire_ts - first_fire_ts <= window` approximates.
+    span = p.last_fire_ts - p.first_fire_ts
+    if span > AUTOPROMOTE_WINDOW_SEC:
+        return None
+    return {
+        "type": "policy.promotion_suggested",
+        "pattern_id": pid,
+        "evidence": (
+            f"{p.approvals} approvals in "
+            f"{max(1, int(span // 86400))} day(s), 0 denies"
+        ),
+        "proposal": (
+            "Auto-allow this pattern from now on? Press once to confirm. "
+            "Reverse anytime with `quill suggestions revoke`."
+        ),
+        "in_flow": True,
+        "expires_ts": time.time() + 7 * 86400,
+    }
+
+
 def detect_operator_fatigue(p: PatternStats) -> dict[str, Any] | None:
     """Fires when the operator has been rapid-fire approving a single
     pattern long enough to suggest they're not reading the prompts
@@ -536,6 +601,7 @@ def post_decision_update(
                 detect_tightening,
                 detect_loosen_candidate,
                 detect_operator_fatigue,
+                detect_auto_promote_candidate,
             ):
                 sug = detector(p)
                 if sug is None:
@@ -654,9 +720,7 @@ def aggregate_observations_for_session(
         payload = e.get("payload") or {}
         if not isinstance(payload, dict):
             continue
-        if etype == "verdict.blocked":
-            out.append(0.0)
-        elif etype == "verdict.ask":
+        if etype == "verdict.blocked" or etype == "verdict.ask":
             out.append(0.0)
         elif etype == "verdict.allowed":
             reason = str(payload.get("reason") or "")

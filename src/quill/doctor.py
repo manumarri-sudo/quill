@@ -401,7 +401,7 @@ def check_self_improvement_signals() -> CheckResult:
     return CheckResult(
         "self-improvement", PASS,
         f"{len(suggestions)} medium/low suggestion(s); top: {top.title}",
-        fix=f"see all: quill learn",
+        fix="see all: quill learn",
     )
 
 

@@ -52,6 +52,13 @@ APPROVE_BIOMETRIC_OK: Final[str] = "approve.biometric.ok"
 APPROVE_BIOMETRIC_DENY: Final[str] = "approve.biometric.deny"
 APPROVE_BIOMETRIC_SKIPPED: Final[str] = "approve.biometric.skipped"
 
+# Gate pause (`quill off` / `quill on`) - the bounded, audited off switch.
+# gate.paused / gate.resumed bracket a window during which the gate let
+# everything through; verdict.allowed entries inside the window carry
+# `gate_paused: true` so the window's contents are reconstructable.
+GATE_PAUSED: Final[str] = "gate.paused"
+GATE_RESUMED: Final[str] = "gate.resumed"
+
 # Set of all known event types - useful for validation / filtering.
 ALL_EVENT_TYPES: Final[frozenset[str]] = frozenset(
     {
@@ -62,5 +69,6 @@ ALL_EVENT_TYPES: Final[frozenset[str]] = frozenset(
         AGENT_HANDOFF_OUT, AGENT_HANDOFF_IN, AGENT_CASCADE_AFFECTED,
         AGENT_FLAG_UNCERTAIN, POLICY_DECAYED,
         APPROVE_BIOMETRIC_OK, APPROVE_BIOMETRIC_DENY, APPROVE_BIOMETRIC_SKIPPED,
+        GATE_PAUSED, GATE_RESUMED,
     },
 )

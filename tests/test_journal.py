@@ -7,8 +7,6 @@ regression cannot recur unnoticed.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 from quill.journal import (
     JournalSummary,
     save_from_transcript,

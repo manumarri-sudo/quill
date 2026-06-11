@@ -127,12 +127,57 @@ def _default_load_hmac_key() -> bytes:
     return key
 
 
-def classify_event(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[Risk, str, str]:
-    """Decide the risk + plain-English reason + safer-alternative suggestion."""
+def _detect_bypass_mode(hook_payload: Mapping[str, Any] | None = None) -> bool:
+    """True if the user is in Claude Code's --dangerously-skip-permissions mode.
+
+    Detection precedence:
+      1. Hook payload field if Anthropic ships one (permission_mode, bypass_mode,
+         dangerously_skip_permissions). Forward-compatible, no value as of June 2026
+         since Claude Code doesn't expose this in the PreToolUse payload yet.
+      2. Environment variable QUILL_BYPASS_MODE=1 — operator-set escape hatch.
+      3. CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1 — convention some users set.
+      4. Default: False (no bypass).
+
+    When bypass mode is active, classify_event downgrades high-risk verdicts to
+    silent log (medium with `verdict.allowed`) so the user who explicitly asked
+    NOT to be interrupted is not interrupted. Critical class still gates — the
+    bright line never softens. Audit log grows fully in both modes.
+    """
+    import os
+    if hook_payload:
+        for key in ("permission_mode", "bypass_mode", "dangerously_skip_permissions"):
+            v = hook_payload.get(key)
+            if v is True or (isinstance(v, str) and v.lower() in ("bypass", "skip", "true", "1")):
+                return True
+    if os.environ.get("QUILL_BYPASS_MODE", "").strip() in ("1", "true", "yes"):
+        return True
+    if os.environ.get("CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS", "").strip() in ("1", "true", "yes"):
+        return True
+    return False
+
+
+def classify_event(
+    tool_name: str,
+    tool_input: Mapping[str, Any],
+    *,
+    bypass_mode: bool = False,
+) -> tuple[Risk, str, str]:
+    """Decide the risk + plain-English reason + safer-alternative suggestion.
+
+    bypass_mode is the Claude Code --dangerously-skip-permissions signal. When
+    True, high-risk verdicts downgrade to low (silent log only); critical
+    verdicts still gate. See _detect_bypass_mode() for the source-of-truth
+    detection precedence.
+    """
     if tool_name == "Bash":
         cmd = str(tool_input.get("command", ""))
         c = classify_command(cmd)
-        return c.risk, c.reason, c.suggestion
+        risk = c.risk
+        reason = c.reason
+        # Bypass-mode downshift: high -> low. Critical never softens.
+        if bypass_mode and risk is Risk.HIGH:
+            return Risk.LOW, f"bypass mode: silent log (was high: {reason})", ""
+        return risk, reason, c.suggestion
 
     # Secret detection on file writes runs FIRST: an agent writing a hardcoded
     # AWS / OpenAI / Anthropic / GitHub / Stripe credential into source is
@@ -147,6 +192,24 @@ def classify_event(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[Risk,
             f"secret detected in write: {summary}",
             "move the value to a secrets manager / env var and reference it by name",
         )
+
+    # Gate self-tamper: an Edit/Write targeting Quill's own config or the
+    # host agent's hook settings is an attempt to disable the gate from the
+    # inside (second-review critique #2). Checked BEFORE the user policy
+    # override so a `[policy]` downgrade can't unlock it. Within the
+    # app-layer model this only catches writes that flow through a gated
+    # tool - a sandbox-escape direct write still bypasses it, which the
+    # threat model (docs/SECURITY-MODEL.md) states plainly.
+    if tool_name in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+        for key in ("file_path", "path", "notebook_path"):
+            target = tool_input.get(key)
+            if isinstance(target, str) and _is_gate_config_path(target):
+                return (
+                    Risk.CRITICAL,
+                    f"edit targets the gate's own config ({target})",
+                    "Changing the gate's config to disable it is a privilege-"
+                    "escalation shape. Use `quill` commands to change policy.",
+                )
 
     # User config can override per-tool risk via the [policy] table:
     # ["Bash"] = "high", ["Edit"] = "low", etc. Loaded best-effort: the hook
@@ -183,11 +246,53 @@ def classify_event(tool_name: str, tool_input: Mapping[str, Any]) -> tuple[Risk,
         return user_override, "user policy override", ""
 
     if tool_name in DEFAULT_BUILTIN_RISK:
-        return DEFAULT_BUILTIN_RISK[tool_name], f"default risk for {tool_name}", ""
+        default_risk = DEFAULT_BUILTIN_RISK[tool_name]
+        reason = f"default risk for {tool_name}"
+        # Bypass-mode downshift on default high-risk built-ins (Edit, Write, etc.)
+        # Critical never softens.
+        if bypass_mode and default_risk is Risk.HIGH:
+            return Risk.LOW, f"bypass mode: silent log (was high: {reason})", ""
+        if bypass_mode and default_risk is Risk.MEDIUM:
+            return Risk.LOW, f"bypass mode: silent log (was medium: {reason})", ""
+        return default_risk, reason, ""
 
     # Unknown tool name (custom MCP tool surfaced through Claude Code) - use
     # the namespace-based classifier as a last resort.
-    return classify(tool_name), f"namespace classifier for {tool_name}", ""
+    natural = classify(tool_name)
+    if bypass_mode and natural is Risk.HIGH:
+        return Risk.LOW, f"bypass mode: silent log (was high namespace: {tool_name})", ""
+    return natural, f"namespace classifier for {tool_name}", ""
+
+
+# Filenames that, if written/edited, would let an agent disable or weaken
+# the gate from the inside. Matched by path SUFFIX so it catches both
+# absolute (~/.claude/settings.json) and relative (.quill/config.toml)
+# forms, and project-local Claude/Cursor settings too.
+_GATE_CONFIG_SUFFIXES: Final[tuple[str, ...]] = (
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".cursor/hooks.json",
+    ".quill/config.toml",
+    ".quill/overrides.toml",
+    ".quill/key",
+)
+
+
+def _is_gate_config_path(raw: str) -> bool:
+    """True if `raw` points at Quill's own config or the host agent's hook
+    settings - the files an agent would rewrite to neuter the gate.
+
+    Compares on a normalised, forward-slashed path suffix so `~`, relative,
+    and absolute forms all match. Best-effort: any error → False (we never
+    want a path-parsing quirk to crash the gate)."""
+    if not raw or not isinstance(raw, str):
+        return False
+    try:
+        norm = str(Path(raw).expanduser()).replace("\\", "/")
+    except (OSError, ValueError):
+        norm = raw.replace("\\", "/")
+    norm = norm.rstrip("/")
+    return any(norm.endswith(suffix) for suffix in _GATE_CONFIG_SUFFIXES)
 
 
 def _summarize_call(tool_name: str, tool_input: Mapping[str, Any]) -> str:
@@ -208,7 +313,12 @@ def _summarize_call(tool_name: str, tool_input: Mapping[str, Any]) -> str:
     return tool_name
 
 
-def decide(tool_name: str, tool_input: Mapping[str, Any]) -> HookDecision:
+def decide(
+    tool_name: str,
+    tool_input: Mapping[str, Any],
+    *,
+    hook_payload: Mapping[str, Any] | None = None,
+) -> HookDecision:
     """Risk + decision for a single Claude Code PreToolUse event.
 
     Reasons are kept TIGHT. No "Quill blocked: " / "Quill allowed: "
@@ -222,7 +332,8 @@ def decide(tool_name: str, tool_input: Mapping[str, Any]) -> HookDecision:
     decision so the notification dispatcher can render it consistently
     across macOS Notification Center, email, Slack, and webhooks.
     """
-    risk, reason, suggestion = classify_event(tool_name, tool_input)
+    bypass = _detect_bypass_mode(hook_payload)
+    risk, reason, suggestion = classify_event(tool_name, tool_input, bypass_mode=bypass)
     what = _summarize_call(tool_name, tool_input)
     if risk is Risk.CRITICAL:
         body = reason
@@ -490,7 +601,8 @@ def _maybe_notify(
     hint_text = ""
     try:
         from quill import saves as _saves
-        from quill.hints import HintContext, select as _select_hint
+        from quill.hints import HintContext
+        from quill.hints import select as _select_hint
         ctx = HintContext(
             pattern=_saves.canonicalize_pattern(decision.reason or decision.why or ""),
             reason=decision.reason or decision.why or "",
@@ -500,8 +612,29 @@ def _maybe_notify(
         chosen = _select_hint(ctx)
         if chosen is not None:
             hint_text = chosen.text
-    except Exception:  # noqa: BLE001 - hints are decorative, never fail the gate
+    except Exception:
         hint_text = ""
+
+    # In-flow promotion prompt: if the learner has flagged this exact
+    # pattern as auto-promote-ready (5+ approvals in 7d, 0 denies), surface
+    # the prompt under the block message so the operator can confirm
+    # without leaving the flow. Decoration only - never auto-applies.
+    with contextlib.suppress(Exception):
+        from quill import learning as _learning
+        from quill.learn import _normalize_block_reason as _norm
+        head = _norm(decision.reason or "") or (decision.reason or "")
+        target_pid = f"{tool_name}:{head}"[:80]
+        for sug in _learning.read_suggestions(limit=200):
+            if sug.get("type") != "policy.promotion_suggested":
+                continue
+            if sug.get("pattern_id") != target_pid:
+                continue
+            promote = (
+                "Quill noticed you've approved this " + str(sug.get("evidence", ""))
+                + ". Run `quill suggestions promote` to auto-allow it."
+            )
+            hint_text = (hint_text + "\n" + promote).strip() if hint_text else promote
+            break
 
     msg = BlockMessage(
         risk=decision.risk.value,
@@ -711,7 +844,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     risk=Risk.LOW,
                     audit_event_type="verdict.allowed",
                     what=decision.what,
-                    why=f"operator promoted pattern via quill suggestions promote",
+                    why="operator promoted pattern via quill suggestions promote",
                     try_instead="",
                 )
 
@@ -739,6 +872,31 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     try_instead="",
                 )
 
+    # Session-scoped approval memory (#52): if THIS exact (session, tool,
+    # args) was already approved in this session, allow without re-asking.
+    # Critical/secret/trifecta classes never qualify - we re-check here as
+    # defense in depth even though session_approvals.remember() only fires
+    # on approved verdicts in the first place.
+    if (
+        decision.permission == "ask"
+        and session_id
+        and decision.risk is not Risk.CRITICAL
+        and "secret" not in (decision.reason or "").lower()
+        and "trifecta" not in (decision.reason or "").lower()
+    ):
+        with contextlib.suppress(Exception):
+            from quill import session_approvals as _sa
+            if _sa.recall(session_id, tool_name, tool_input):
+                decision = HookDecision(
+                    permission="allow",
+                    reason="session-memory: previously approved this exact call in this session",
+                    risk=Risk.LOW,
+                    audit_event_type="verdict.allowed",
+                    what=decision.what,
+                    why="session-scoped approval memory hit",
+                    try_instead="",
+                )
+
     # One-shot approval check: if the user ran `quill approve <token>` for
     # this exact (tool_name, args) within the TTL, consume the approval
     # and let the call through. This is the "go ahead" path the user
@@ -760,6 +918,18 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     why=f"user-approved (token {consumed.token[:8]})",
                     try_instead="",
                 )
+                # Remember this approval for the rest of the session so the
+                # operator isn't re-asked for the same exact call. Critical
+                # class is excluded - the bright line never softens.
+                if (
+                    session_id
+                    and decision.risk is not Risk.CRITICAL
+                    and "secret" not in (decision.reason or "").lower()
+                    and "trifecta" not in (decision.reason or "").lower()
+                ):
+                    with contextlib.suppress(Exception):
+                        from quill import session_approvals as _sa
+                        _sa.remember(session_id, tool_name, tool_input)
 
     # Trifecta enforcement: if THIS call would close the lethal trifecta
     # (untrusted input + private data + exfil) for the first time, escalate
@@ -1029,7 +1199,7 @@ def self_test() -> tuple[bool, str]:
     """
     if os.environ.get("QUILL_NO_SELF_TEST"):
         return True, "skipped via QUILL_NO_SELF_TEST"
-    global _SELF_TEST_DONE  # noqa: PLW0603 - module-level cache by design
+    global _SELF_TEST_DONE
     if _SELF_TEST_DONE:
         return True, "cached"
     try:
@@ -1059,6 +1229,98 @@ def self_test() -> tuple[bool, str]:
 _SELF_TEST_DONE: bool = False
 
 
+def _emit_resume_if_expired(log_path: Path) -> None:
+    """If a pause sits on disk but its window has expired, emit gate.resumed
+    (auto-expired) exactly once and clear the flag.
+
+    A pause auto-expires passively - is_paused() just starts returning False.
+    Without this, the audit log would show gate.paused with no matching
+    gate.resumed, leaving the "when did the gate come back on?" question
+    unanswerable. We close the bracket lazily on the next hook invocation
+    after expiry. Best-effort: never raises into the gate path.
+    """
+    from quill import pause as _pause
+
+    with contextlib.suppress(Exception):
+        state = _pause.load_state()
+        if not state.paused:
+            return
+        active, _ = _pause.is_paused(state)
+        if active:
+            return
+        # Flag still set on disk but window expired → close the bracket.
+        recap = state.allowed_count
+        _pause.resume()
+        with contextlib.suppress(Exception):
+            with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:
+                audit.emit(
+                    event_type="gate.resumed",
+                    session_id="quill-cli",
+                    agent_id="quill.pause",
+                    risk="low",
+                    payload={
+                        "trigger": "auto-expired",
+                        "reason": state.reason,
+                        "allowed_while_paused": recap,
+                    },
+                    force_fsync=True,
+                )
+
+
+def _handle_paused(stdin_text: str, log_path: Path, reason: str) -> dict[str, Any]:
+    """Let a tool call through while the gate is paused, but log it.
+
+    Every call allowed during a pause window is written to the audit log as
+    a verdict.allowed carrying `gate_paused: true` and the pause reason, so
+    the window's contents are reconstructable call-by-call after the fact.
+    The classifier is NOT consulted - this path stays alive even when the
+    classifier is broken, which is the whole point of pause-as-recovery-hatch.
+    """
+    from quill import pause as _pause
+
+    event: dict[str, Any] = {}
+    with contextlib.suppress(json.JSONDecodeError, TypeError):
+        parsed = json.loads(stdin_text or "{}")
+        if isinstance(parsed, dict):
+            event = parsed
+    tool_name = str(event.get("tool_name", ""))
+    tool_input = event.get("tool_input") or {}
+    if not isinstance(tool_input, Mapping):
+        tool_input = {}
+    session_id = str(event.get("session_id", "claude-code"))
+    cwd = str(event.get("cwd", "") or "")
+
+    _pause.record_allowed_while_paused()
+    with contextlib.suppress(Exception):
+        with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:
+            audit.emit(
+                event_type="verdict.allowed",
+                session_id=session_id,
+                agent_id="claude-code",
+                risk="low",
+                payload={
+                    "tool_name": tool_name,
+                    "what": _summarize_call(tool_name, tool_input),
+                    "args_preview": _redacted_input(tool_input),
+                    "by": "quill.adapters.claude_code",
+                    "permission": "allow",
+                    "gate_paused": True,
+                    "pause_reason": reason,
+                    "cwd": cwd,
+                },
+            )
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": (
+                f"quill gate paused ({reason}) - call allowed and logged "
+                "with gate_paused. Run `quill on` to re-enable the gate."
+            ),
+        },
+    }
+
+
 def main() -> int:
     """CLI entry: read stdin, write stdout, exit 0.
 
@@ -1067,32 +1329,15 @@ def main() -> int:
     per-project mode. ALSO lazily ensures the watch dashboard daemon is
     alive so users never need to re-type `quill watch` after a reboot.
 
-    Runs `self_test()` once per process. If the self-test fails, the
-    hook refuses to render a verdict (fails closed). The operator sees
-    the error on stderr and Claude Code surfaces it.
+    Order of operations is load-bearing:
+      1. Read stdin + resolve the per-project log path.
+      2. PAUSE CHECK - if the operator ran `quill off`, let the call
+         through (logged with gate_paused) and return BEFORE self_test.
+         This is deliberate: pause must work as a recovery hatch even when
+         the classifier is broken (the exact lockout that motivated it).
+      3. self_test() - only on the gated path. If it fails, fail closed.
+      4. run_hook() - normal classification.
     """
-    ok, reason = self_test()
-    if not ok:
-        sys.stderr.write(
-            f"quill claude-hook: self-test failed: {reason}\n"
-            f"  Refusing to start. The classifier may be misconfigured.\n"
-            f"  Run `quill doctor` to investigate.\n"
-            f"  Override (NOT RECOMMENDED): QUILL_NO_SELF_TEST=1\n"
-        )
-        # Fail closed: deny the call. Operator-friendly reason.
-        response = {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "deny",
-                "permissionDecisionReason": (
-                    f"quill self-test failed: {reason}. "
-                    "Run `quill doctor`."
-                ),
-            },
-        }
-        sys.stdout.write(json.dumps(response))
-        sys.stdout.flush()
-        return 1
     stdin_text = sys.stdin.read()
     # Peek at cwd from the payload so we can route the log per-project.
     cwd_for_routing = ""
@@ -1104,6 +1349,43 @@ def main() -> int:
         pass
     log_path, _ = _resolve_project_paths(cwd_for_routing)
     log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Step 2: pause check, BEFORE self_test, so a paused gate is a working
+    # escape hatch even with a broken classifier.
+    from quill import pause as _pause
+
+    _emit_resume_if_expired(log_path)
+    paused, pause_reason = _pause.is_paused()
+    if paused:
+        response = _handle_paused(stdin_text, log_path, pause_reason)
+        sys.stdout.write(json.dumps(response))
+        sys.stdout.flush()
+        return 0
+
+    # Step 3: self-test (gated path only).
+    ok, reason = self_test()
+    if not ok:
+        sys.stderr.write(
+            f"quill claude-hook: self-test failed: {reason}\n"
+            f"  Refusing to start. The classifier may be misconfigured.\n"
+            f"  Run `quill doctor` to investigate, or `quill off` to pause "
+            f"the gate (bounded + logged) if you need to keep working.\n"
+            f"  Override (NOT RECOMMENDED): QUILL_NO_SELF_TEST=1\n"
+        )
+        # Fail closed: deny the call. Operator-friendly reason.
+        response = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    f"quill self-test failed: {reason}. "
+                    "Run `quill doctor`, or `quill off` to pause the gate."
+                ),
+            },
+        }
+        sys.stdout.write(json.dumps(response))
+        sys.stdout.flush()
+        return 1
 
     # Lazily ensure the dashboard daemon is alive. Cheap (PID-file probe +
     # localhost bind-check) when it's already running, idempotent re-spawn

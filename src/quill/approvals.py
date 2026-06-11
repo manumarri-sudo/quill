@@ -59,7 +59,17 @@ def _now_iso() -> str:
 
 @dataclass(slots=True)
 class Approval:
-    """One pending approval. Single-use; consumed on first match."""
+    """One pending approval. Single-use; consumed on first match.
+
+    Lifecycle: issued (pending) → approved → consumed. Issuance does NOT
+    grant the call - a token only becomes consumable once the operator
+    explicitly approves it (`quill approve <token>`, Touch-ID-gated where
+    available). This separation is load-bearing: the gate auto-issues a
+    token on every block so the notification can offer `quill approve`,
+    and if issuance alone were consumable, a denied call would silently
+    auto-allow its own immediate retry, defeating the gate against any
+    retrying agent.
+    """
 
     token: str
     tool_name: str
@@ -68,6 +78,7 @@ class Approval:
     issued_at: str
     reason: str = ""           # human-readable note about what was approved
     consumed_at: str = ""      # set when the approval is used; persisted for audit
+    approved_at: str = ""      # set when the operator confirms; gate of consumability
 
     @property
     def is_expired(self) -> bool:
@@ -78,7 +89,21 @@ class Approval:
 
     @property
     def is_active(self) -> bool:
+        """Issued, not yet consumed, not expired - i.e. still listable.
+
+        Includes pending (un-approved) tokens; used by `active()` so the
+        operator can see what's awaiting their approval.
+        """
         return not self.consumed_at and not self.is_expired
+
+    @property
+    def is_consumable(self) -> bool:
+        """Approved by the operator, not yet consumed, not expired.
+
+        This - NOT is_active - is what consume() gates on. A token the gate
+        merely issued (pending) is never consumable until approved.
+        """
+        return bool(self.approved_at) and not self.consumed_at and not self.is_expired
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -89,6 +114,7 @@ class Approval:
             "issued_at": self.issued_at,
             "reason": self.reason,
             "consumed_at": self.consumed_at,
+            "approved_at": self.approved_at,
         }
 
 
@@ -122,6 +148,7 @@ class ApprovalStore:
                 issued_at=str(raw.get("issued_at") or ""),
                 reason=str(raw.get("reason") or ""),
                 consumed_at=str(raw.get("consumed_at") or ""),
+                approved_at=str(raw.get("approved_at") or ""),
             )
             # Garbage-collect expired+consumed entries on load.
             if ap.is_expired and ap.consumed_at:
@@ -161,14 +188,16 @@ class ApprovalStore:
     def approve(self, token: str) -> Approval | None:
         """Mark a pending token approved (the user ran `quill approve <token>`).
 
-        We don't actually need to flip a bit - issuance == approval. This
-        method exists for symmetry with future flows that might separate
-        issuance (gate auto-creates) from confirmation (user approves).
-        For now: confirm the token exists and isn't expired/consumed.
+        Flips `approved_at`, which is what makes the token consumable. Until
+        this runs, the token the gate auto-issued on a block is inert - it
+        exists only so the notification can name it. Returns the approval on
+        success, or None if the token is unknown / expired / already consumed.
         """
         ap = self.approvals.get(token)
         if ap is None or not ap.is_active:
             return None
+        ap.approved_at = _now_iso()
+        self.save()
         return ap
 
     def consume(
@@ -183,7 +212,11 @@ class ApprovalStore:
         """
         digest = args_digest(args)
         for ap in self.approvals.values():
-            if not ap.is_active:
+            # is_consumable (not is_active): a token must have been
+            # explicitly approved by the operator. A merely-issued (pending)
+            # token never releases a call - that would let a denied call
+            # auto-allow its own retry.
+            if not ap.is_consumable:
                 continue
             if ap.tool_name != tool_name:
                 continue

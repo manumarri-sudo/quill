@@ -20,9 +20,6 @@ rather than at first-tool-call.
 from __future__ import annotations
 
 import time
-from pathlib import Path
-
-import pytest
 
 
 def _reset_self_test_cache(monkeypatch) -> None:
@@ -64,7 +61,7 @@ def test_self_test_detects_misconfigured_classifier_that_fails_open(
     from quill.adapters.claude_code import HookDecision
     from quill.policy import Risk
 
-    def broken_decide(tool_name, tool_input):  # noqa: ARG001
+    def broken_decide(tool_name, tool_input):
         return HookDecision(
             permission="allow", reason="STUB", risk=Risk.LOW,
             audit_event_type="verdict.allowed",
@@ -90,7 +87,7 @@ def test_self_test_detects_classifier_that_denies_everything(
     from quill.adapters.claude_code import HookDecision
     from quill.policy import Risk
 
-    def deny_everything(tool_name, tool_input):  # noqa: ARG001
+    def deny_everything(tool_name, tool_input):
         return HookDecision(
             permission="deny", reason="STUB-DENY",
             risk=Risk.CRITICAL, audit_event_type="verdict.blocked",
