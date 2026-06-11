@@ -1011,38 +1011,24 @@ def start(
         out.print(f"  [green]✓[/green] hook installed in [dim]{settings_path}[/dim]")
         out.print("        [yellow]→ restart Claude Code to pick up the new hook[/yellow]")
 
-    # 2. Notifications wizard: pick channels + offer a self-test.
-    # Idempotent - re-running detects an existing [notify] block and
-    # prints status instead of re-asking.
-    if not yes:
-        _wizard_notifications(out)
+    # 1b. Compile the kernel-layer (Seatbelt/ESF) protected-path ruleset so the
+    # floor is ready the first time the operator runs `quill shell`. Best-effort.
+    try:
+        from quill import esf as _esf
+        _esf.write_ruleset()
+        out.print("  [green]✓[/green] kernel-layer ruleset compiled "
+                  "[dim](run `quill shell` to confine a session at the kernel)[/dim]")
+    except Exception:
+        pass
 
-    # 3. Telemetry one-time prompt
-    state = tel.TelemetryState.load()
-    if not state.asked and not yes:
-        out.print()
-        out.print("  [bold]help shape quill v0.2?[/bold]  share anonymous "
-                  "aggregate stats - counts, risk distribution, namespaces.")
-        out.print("  [dim]nothing personally identifiable. inspect what would "
-                  "ship: [bold]quill telemetry show[/bold][/dim]")
-        try:
-            ans = typer.prompt(
-                "  share? (y/N)", default="N", show_default=False,
-            ).strip().lower()
-        except (KeyboardInterrupt, EOFError):
-            ans = "n"
-        if ans == "y":
-            tel.opt_in()
-            out.print(f"  [green]✓[/green] telemetry on   [dim]install_id "
-                      f"{tel.TelemetryState.load().install_id}[/dim]")
-        else:
-            tel.opt_out()
-            out.print("  [dim]✓ telemetry off (default). turn on later: "
-                      "quill telemetry on[/dim]")
-    else:
-        on = state.opted_in
-        out.print(f"  [green]✓[/green] telemetry: "
-                  f"[{'green' if on else 'dim'}]{'on' if on else 'off'}[/]")
+    # Setup is non-interactive by design (the one-command model): safe defaults
+    # now, configure later. The interactive walk-through - notification channels,
+    # agent auto-detection, risk presets - lives in `quill onboard`. Telemetry
+    # stays OFF unless you explicitly run `quill telemetry on`.
+    tel_on = tel.TelemetryState.load().opted_in
+    out.print(f"  [green]✓[/green] telemetry: "
+              f"[{'green' if tel_on else 'dim'}]{'on' if tel_on else 'off (default)'}[/]")
+    _ = yes  # retained for compatibility; start is now non-interactive
 
     # 3. Doctor sanity-check (silent unless something's wrong)
     report = run_doctor()
@@ -1077,10 +1063,15 @@ def start(
               f"dashboard: [bold]{url}[/bold]  [dim](pid {pid})[/dim]")
     out.print(f"  [dim]audit log: {log} · {n_events} entries[/dim]")
     out.print()
-    out.print("  [green]you're done.[/green] open Claude Code in any project; "
-              "every Bash / Edit / Write goes through the gate.")
-    out.print("  [dim]bookmark the dashboard URL - daemon survives terminal "
-              "close. stop with: quill stop[/dim]")
+    out.print("  [bold green]you're covered.[/bold green] every agent action now clears quill first:")
+    out.print("    [green]✓[/green] risk gate          [dim]allow, ask, or deny on every Bash / Edit / Write / MCP call[/dim]")
+    out.print("    [green]✓[/green] secret scanning    [dim]credentials caught before they are written[/dim]")
+    out.print("    [green]✓[/green] lethal trifecta    [dim]untrusted input + private data + exfil path = blocked[/dim]")
+    out.print("    [green]✓[/green] self-tamper guard  [dim]edits to the gate's own config, key, and off-switch refused[/dim]")
+    out.print("    [green]✓[/green] tamper-evident log [dim]signed and chained, verify with `quill audit verify`[/dim]")
+    out.print("    [dim]○ kernel floor        run `quill shell` to confine the session at the syscall (`--seal` locks writes + egress)[/dim]")
+    out.print()
+    out.print("  [dim]watch live: quill watch  ·  pause: quill off  ·  review: quill saves  ·  daemon survives close, stop with quill stop[/dim]")
 
     if not no_browser:
         try:
@@ -1253,6 +1244,37 @@ def _emit_gate_event(event_type: str, payload: dict[str, Any]) -> None:
             )
 
 
+def _require_disable_auth(console) -> None:
+    """Require Touch ID before turning the gate OFF, when biometry is available.
+
+    Closes the self-disable hole: an agent that runs `quill off` to neuter the
+    gate now needs a live human fingerprint. No-lockout fallback by design - on
+    a machine without Touch ID (no sensor, SSH), we do NOT trap the operator
+    away from their own recovery hatch; the pause proceeds but is flagged loudly
+    and stays on the audit record. Bypass for tests / CI: QUILL_SKIP_DISABLE_AUTH=1.
+    """
+    if os.environ.get("QUILL_SKIP_DISABLE_AUTH", "").strip().lower() in ("1", "true", "yes"):
+        return
+    try:
+        from quill import touchid
+    except Exception:
+        return
+    if not touchid.is_available():
+        console.print(
+            "[yellow]Touch ID unavailable - turning the gate off without biometric "
+            "confirmation (this is logged). On a Mac with Touch ID, this needs your "
+            "fingerprint.[/yellow]"
+        )
+        return
+    result = touchid.authenticate(reason="turn the Quill gate OFF")
+    if not result.success:
+        console.print(
+            f"[red]Touch ID required to turn the gate off ({result.reason}). "
+            "The gate stays ON.[/red]"
+        )
+        raise typer.Exit(1)
+
+
 @app.command("off")
 def off_cmd(
     action: Annotated[
@@ -1304,6 +1326,10 @@ def off_cmd(
     if hours is None:
         console.print(f"[red]could not parse --for {for_!r}.[/red] use e.g. 30m, 2h, 90m.")
         raise typer.Exit(2)
+
+    # Self-disable defense: turning the gate OFF needs a human fingerprint when
+    # Touch ID is available, so a hijacked agent can't neuter Quill via its own CLI.
+    _require_disable_auth(console)
 
     state = _pause.pause(duration_hours=hours, reason=reason)
     _emit_gate_event(

@@ -86,6 +86,10 @@ dev = [
 
 [project.scripts]
 quill = "quill.cli:app"
+# Mirror entry point so `uvx quillx start` resolves: uvx runs the executable
+# named after the package, and the dist name is `quillx`. Installed users still
+# get the canonical `quill` binary; both point at the same CLI.
+quillx = "quill.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/manumarri-sudo/quill"

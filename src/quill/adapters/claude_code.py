@@ -275,6 +275,7 @@ _GATE_CONFIG_SUFFIXES: Final[tuple[str, ...]] = (
     ".quill/config.toml",
     ".quill/overrides.toml",
     ".quill/key",
+    ".quill/pause.json",   # the gate-off state; agent must not flip it directly
 )
 
 

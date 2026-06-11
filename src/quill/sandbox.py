@@ -57,6 +57,7 @@ _PROTECTED_FILES = (
     "~/.quill/config.toml",
     "~/.quill/overrides.toml",
     "~/.quill/key",
+    "~/.quill/pause.json",   # the gate-off state; agent must not flip it directly
 )
 _PROTECTED_TREES = (
     "~/.claude/hooks",          # the firewall / trust-ladder hook scripts
