@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The restricted Endpoint Security client entitlement. Apple grants this
+	     out-of-band via the System Extension request form; until granted, this
+	     entitlement only works on a SIP-disabled machine with an ad-hoc
+	     signature. See apple-request/REQUEST.md. -->
+	<key>com.apple.developer.endpoint-security.client</key>
+	<true/>
+</dict>
+</plist>

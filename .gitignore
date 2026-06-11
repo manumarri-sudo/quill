@@ -50,6 +50,9 @@ coverage.xml
 *.audit.log.jsonl
 audit.log.jsonl
 
+# Claude Code session logs - may contain transcripts / tokens; never commit.
+.claude-logs/
+
 # --- Local secrets ---
 .env
 .env.local
@@ -69,3 +72,7 @@ Thumbs.db
 
 # Local-only PDF renders of markdown launch material
 web/pdfs/
+
+# Internal strategy / research / critique drafts and their binary renders.
+# Keep local; the public threat model lives at docs/SECURITY-MODEL.md.
+docs/research/

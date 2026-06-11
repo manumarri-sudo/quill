@@ -18,7 +18,7 @@ import re
 import secrets
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -136,6 +136,18 @@ suggestions_app = typer.Typer(
     help="review and promote learner-surfaced suggestions. Auto-tightenings already applied; loosenings stay pending until the operator promotes.",
 )
 app.add_typer(suggestions_app, name="suggestions")
+
+sandbox_app = typer.Typer(
+    no_args_is_help=True,
+    help="kernel-layer Seatbelt floor - inspect/regenerate the sandbox profile that confines the agent below the interpreter.",
+)
+app.add_typer(sandbox_app, name="sandbox")
+
+esf_app = typer.Typer(
+    no_args_is_help=True,
+    help="always-on Endpoint Security layer - compile the protected-path ruleset the ES extension enforces system-wide.",
+)
+app.add_typer(esf_app, name="esf")
 
 
 @app.command(
@@ -1206,6 +1218,322 @@ def day_cmd() -> None:
 
 
 # --------------------------------------------------------------------------
+# pause / resume - the bounded, audited off switch
+# --------------------------------------------------------------------------
+
+def _parse_duration_hours(s: str) -> float | None:
+    """Parse a human duration like '30m', '2h', '90m', '1.5h', '45' (minutes
+    assumed when bare) into hours. Returns None on malformed input."""
+    raw = (s or "").strip().lower()
+    if not raw:
+        return None
+    try:
+        if raw.endswith("h"):
+            return float(raw[:-1])
+        if raw.endswith("m"):
+            return float(raw[:-1]) / 60.0
+        # bare number → minutes (the friendlier default for a quick pause)
+        return float(raw) / 60.0
+    except ValueError:
+        return None
+
+
+def _emit_gate_event(event_type: str, payload: dict[str, Any]) -> None:
+    """Write a gate.paused / gate.resumed event to the audit log now, so the
+    transition is on the record immediately (not only on the next hook call)."""
+    with contextlib.suppress(Exception):
+        with AuditLog(path=default_audit_path(), hmac_key=_hmac_key()) as audit:
+            audit.emit(
+                event_type=event_type,
+                session_id="quill-cli",
+                agent_id="quill.pause",
+                risk="low",
+                payload=payload,
+                force_fsync=True,
+            )
+
+
+@app.command("off")
+def off_cmd(
+    action: Annotated[
+        str,
+        typer.Argument(
+            help="leave blank to pause, or 'status' to check current state",
+            metavar="[status]",
+        ),
+    ] = "",
+    for_: Annotated[
+        str,
+        typer.Option(
+            "--for",
+            "-f",
+            help="how long to stay off, e.g. 30m, 2h, 90m (default 1h, max 24h)",
+        ),
+    ] = "1h",
+    reason: Annotated[
+        str,
+        typer.Option("--reason", "-r", help="why you're pausing (goes in the audit log)"),
+    ] = "",
+) -> None:
+    """pause the gate - one command to turn quill OFF, bounded and logged.
+
+    Every pause auto-expires (default 1h, max 24h) so a forgotten toggle
+    self-heals. The pause itself, the resume, and every tool call let
+    through while paused are all written to the audit log, so turning the
+    gate off never creates a silent gap - just a bounded, on-the-record one.
+
+    Unlike `quill night` (which auto-approves HIGH but still gates CRITICAL),
+    `quill off` turns the gate FULLY off, including the destructive class.
+    That is intentional: a half-off switch is what pushes people to
+    --dangerously-skip-permissions, which leaves no trail at all.
+
+      pause 1 hour:        quill off
+      pause 30 minutes:    quill off --for 30m --reason "noisy refactor"
+      turn back on:        quill on
+      check state:         quill off status
+    """
+    from quill import pause as _pause
+
+    console = Console()
+
+    if action.strip().lower() == "status":
+        _print_pause_status(console)
+        return
+
+    hours = _parse_duration_hours(for_)
+    if hours is None:
+        console.print(f"[red]could not parse --for {for_!r}.[/red] use e.g. 30m, 2h, 90m.")
+        raise typer.Exit(2)
+
+    state = _pause.pause(duration_hours=hours, reason=reason)
+    _emit_gate_event(
+        "gate.paused",
+        {
+            "reason": reason or "(none given)",
+            "expires_at": state.expires_at,
+            "duration_hours": round(hours, 4),
+            "set_via": "quill off",
+        },
+    )
+    console.print("[bold yellow]quill gate OFF[/bold yellow] - all tool calls will be allowed and logged.")
+    console.print(f"auto-resumes at [bold]{state.expires_at}[/bold] (in {for_}).")
+    if reason:
+        console.print(f"reason logged: [dim]{reason}[/dim]")
+    console.print(
+        "[dim]every call while paused is written to the audit log with "
+        "gate_paused=true. run `quill on` to re-enable now.[/dim]"
+    )
+
+
+@app.command("on")
+def on_cmd() -> None:
+    """resume the gate - turn quill back ON. Logs a gate.resumed event with a
+    recap of how many calls were let through while it was off."""
+    from quill import pause as _pause
+
+    console = Console()
+    was_paused, _ = _pause.is_paused()
+    state = _pause.resume()
+    _emit_gate_event(
+        "gate.resumed",
+        {
+            "trigger": "manual",
+            "reason": state.reason,
+            "allowed_while_paused": state.allowed_count,
+        },
+    )
+    if not was_paused:
+        console.print("[dim]gate was already on. nothing to resume.[/dim]")
+        return
+    console.print("[bold green]quill gate ON[/bold green] - full gating restored.")
+    if state.allowed_count:
+        console.print(
+            f"recap: [bold]{state.allowed_count}[/bold] call(s) were allowed while paused. "
+            "review them: [dim]quill audit show --since 24h[/dim] (look for gate_paused)."
+        )
+
+
+# Memorable aliases: `quill pause` / `quill resume` do the same as off / on.
+@app.command("pause")
+def pause_cmd(
+    for_: Annotated[
+        str,
+        typer.Option("--for", "-f", help="how long, e.g. 30m, 2h (default 1h, max 24h)"),
+    ] = "1h",
+    reason: Annotated[
+        str,
+        typer.Option("--reason", "-r", help="why (goes in the audit log)"),
+    ] = "",
+) -> None:
+    """alias for `quill off` - pause the gate (bounded + logged)."""
+    off_cmd(for_=for_, reason=reason)
+
+
+@app.command("resume")
+def resume_cmd() -> None:
+    """alias for `quill on` - resume the gate."""
+    on_cmd()
+
+
+@app.command("shell")
+def shell_cmd(
+    command: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help="command to run confined (default: your $SHELL). "
+            "Everything it spawns inherits the sandbox.",
+        ),
+    ] = None,
+    seal: Annotated[
+        bool,
+        typer.Option(
+            "--seal",
+            help="high assurance: also confine ALL writes to the trust-path "
+            "allowlist and seal network egress to localhost. May break tools "
+            "that write outside your projects.",
+        ),
+    ] = False,
+    no_network: Annotated[
+        bool,
+        typer.Option("--no-network", help="seal egress to localhost without full write confinement."),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="print the generated profile and the launch command, then exit."),
+    ] = False,
+) -> None:
+    """launch a kernel-confined session (macOS Seatbelt floor).
+
+    Quill's PreToolUse hook is an application-layer gate - it sees the tool
+    calls the agent routes through the framework. This command adds the layer
+    BELOW that: a Seatbelt profile the macOS kernel enforces on the real
+    syscall, inherited by every interpreter and subprocess the agent spawns.
+    It closes what the text classifier structurally cannot - the write-then-run
+    loophole, raw network exfil, and edits to the gate's own hook scripts.
+
+    Default (floor): allow-default plus a kernel deny on the gate-disable and
+    persistence surface (~/.claude/hooks, settings.json, ~/.quill/config.toml,
+    the key, shell rc files). Does not break dev tooling.
+
+      confined shell:       quill shell
+      run one command:      quill shell -- python3 risky.py
+      high assurance:       quill shell --seal
+      launch a coding agent: quill shell -- cc      # or: quill shell -- claude
+    """
+    from quill import sandbox as _sb
+
+    console = Console()
+
+    if not _sb.sandbox_exec_available():
+        console.print(
+            "[red]sandbox-exec not found.[/red] The Seatbelt floor is macOS-only "
+            "(it ships with every Mac). On other platforms use the kernel floor "
+            "for your OS (Linux: Landlock/seccomp)."
+        )
+        raise typer.Exit(1)
+
+    cwd = os.getcwd()
+    spec = _sb.build_spec(cwd=cwd, confine_writes=seal, seal_network=seal or no_network)
+    profile = _sb.write_profile(spec)
+
+    inner = command or [os.environ.get("SHELL", "/bin/zsh")]
+    argv = _sb.launch_argv(profile, inner)
+
+    posture = "SEAL (writes confined + egress sealed)" if seal else (
+        "FLOOR + egress sealed" if no_network else "FLOOR (gate-disable surface denied)"
+    )
+    if dry_run:
+        console.print(f"[bold]profile[/bold] -> {profile}\n")
+        console.print(profile.read_text())
+        console.print(f"[bold]posture[/bold]: {posture}")
+        console.print(f"[bold]launch[/bold] : {' '.join(argv)}")
+        return
+
+    console.print(f"[bold green]quill shell[/bold green] - kernel floor on [{posture}]")
+    console.print(f"[dim]profile: {profile} · confining: {' '.join(inner)}[/dim]")
+    _emit_gate_event(
+        "sandbox.session.open",
+        {"posture": posture, "cwd": cwd, "command": inner, "profile": str(profile)},
+    )
+    # Replace this process with the confined session so the user gets a normal
+    # interactive shell whose children are all sandboxed.
+    os.execvp(argv[0], argv)
+
+
+@sandbox_app.command("profile")
+def sandbox_profile_cmd(
+    seal: Annotated[bool, typer.Option("--seal", help="render the high-assurance profile.")] = False,
+    write: Annotated[bool, typer.Option("--write", help="write to <QUILL_HOME>/quill.sb instead of stdout.")] = False,
+) -> None:
+    """print (or write) the generated Seatbelt profile for the current directory."""
+    from quill import sandbox as _sb
+
+    console = Console()
+    spec = _sb.build_spec(cwd=os.getcwd(), confine_writes=seal, seal_network=seal)
+    if write:
+        p = _sb.write_profile(spec)
+        console.print(f"[green]wrote[/green] {p}")
+    else:
+        console.print(_sb.build_profile(spec))
+
+
+@esf_app.command("compile")
+def esf_compile_cmd(
+    show: Annotated[bool, typer.Option("--show", help="print the ruleset instead of writing it.")] = False,
+) -> None:
+    """compile the protected-path policy into the ES extension's ruleset JSON.
+
+    The ES client reads this at ~/.quill/esf-rules.json and matches it
+    natively - policy is never evaluated by Python on the deadline-critical
+    auth path. Same protected paths as the Seatbelt floor, so the two layers
+    cannot drift.
+    """
+    from quill import esf as _esf
+
+    console = Console()
+    if show:
+        import json as _json
+        console.print(_json.dumps(_esf.compile_ruleset(), indent=2))
+        return
+    p = _esf.write_ruleset()
+    rs = _esf.compile_ruleset()
+    n = len(rs["protected_files"]) + len(rs["protected_prefixes"])
+    console.print(f"[green]wrote[/green] {p}  [dim]({n} protected paths, fail_closed={rs['fail_closed']})[/dim]")
+
+
+@esf_app.command("status")
+def esf_status_cmd() -> None:
+    """show whether the ES ruleset is compiled and where the extension lives."""
+    from quill import esf as _esf
+
+    console = Console()
+    p = _esf.ruleset_path()
+    if p.exists():
+        import json as _json
+        rs = _json.loads(p.read_text())
+        n = len(rs.get("protected_files", [])) + len(rs.get("protected_prefixes", []))
+        console.print(f"ruleset: [green]compiled[/green] at {p} ({n} protected paths)")
+    else:
+        console.print(f"ruleset: [yellow]not compiled[/yellow] - run `quill esf compile` (would write {p})")
+    console.print("[dim]extension source: native/quill-esf/ · build/test: native/quill-esf/build.sh test[/dim]")
+
+
+def _print_pause_status(console: Console) -> None:
+    from quill import pause as _pause
+
+    state = _pause.load_state()
+    paused, reason = _pause.is_paused(state)
+    if paused:
+        remaining = state.remaining()
+        mins = int(remaining.total_seconds() // 60) if remaining else 0
+        console.print(f"[bold yellow]gate is OFF[/bold yellow] (paused) - reason: {reason}")
+        console.print(f"auto-resumes in ~{mins} min (at {state.expires_at}).")
+        console.print(f"calls allowed so far this window: [bold]{state.allowed_count}[/bold]")
+    else:
+        console.print("[bold green]gate is ON[/bold green] - normal gating active.")
+
+
+# --------------------------------------------------------------------------
 # init
 # --------------------------------------------------------------------------
 
@@ -1677,7 +2005,6 @@ def _try_headless_browser_pdf(html_path: Path, pdf_path: Path) -> tuple[bool, st
     """First-choice PDF path: headless Chrome / Brave / Edge / Chromium."""
     import platform
     import subprocess
-
     from shutil import which as _which
 
     candidates: list[Path] = []
@@ -1728,7 +2055,7 @@ def _try_weasyprint_pdf(html_path: Path, pdf_path: Path) -> tuple[bool, str]:
         return False, "weasyprint not installed (pip install quillx[pdf])"
     try:
         HTML(filename=str(html_path)).write_pdf(str(pdf_path))
-    except Exception as e:  # noqa: BLE001 - report any rendering error verbatim
+    except Exception as e:
         return False, f"weasyprint failed: {e}"
     if not pdf_path.exists():
         return False, "weasyprint completed without writing PDF"
@@ -3474,9 +3801,8 @@ def _load_or_init_config_toml() -> tuple[Path, dict[str, object]]:
     p = default_config_path()
     data: dict[str, object] = {}
     if p.exists():
-        with contextlib.suppress(OSError, _tomllib.TOMLDecodeError):
-            with p.open("rb") as f:
-                data = _tomllib.load(f) or {}
+        with contextlib.suppress(OSError, _tomllib.TOMLDecodeError), p.open("rb") as f:
+            data = _tomllib.load(f) or {}
     if "session" not in data:
         # Minimum viable session block so load_config() validation passes
         # after our write. Operator can edit the intent later.
@@ -3928,7 +4254,7 @@ def suggestions_promote(
     block = (
         f"\n[overrides.{section}]\n"
         f'pattern_id = "{pattern_id}"\n'
-        f'promoted_at = "{datetime.now(timezone.utc).isoformat()}"\n'
+        f'promoted_at = "{datetime.now(UTC).isoformat()}"\n'
         f"ttl_days = {ttl_days}\n"
         f'evidence = "{s.get("evidence", "")[:200].replace(chr(34), chr(39))}"\n'
     )
