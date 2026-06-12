@@ -139,9 +139,11 @@ def test_run_hook_fail_open_on_malformed_input() -> None:
     assert "agent_message" in out
 
 
-def test_run_hook_emits_one_shot_approval_token_on_block() -> None:
-    """When a call is denied, the audit log records the approve_token so
-    `quill approve <token>` can release the next retry."""
+def test_run_hook_emits_one_shot_approval_token_id_on_block() -> None:
+    """When a call is denied, the audit log records a token ID (sha256
+    prefix), NOT the raw approve token. The raw token only goes out-of-band
+    via the notification, so an agent reading the log cannot replay it.
+    """
     import tempfile
 
     with tempfile.TemporaryDirectory() as d:
@@ -150,7 +152,11 @@ def test_run_hook_emits_one_shot_approval_token_on_block() -> None:
             run_hook(_payload(command="rm -rf node_modules"), audit=audit)
         lines = [json.loads(l) for l in log.read_text().splitlines()]
         blocked = next(e for e in lines if e["type"] == "verdict.blocked")
-        assert blocked["payload"]["approve_token"]
+        # The new (safe) field is present:
+        assert blocked["payload"]["approve_token_id"]
+        assert len(blocked["payload"]["approve_token_id"]) == 16
+        # And the old (unsafe) field is gone:
+        assert "approve_token" not in blocked["payload"]
 
 
 def test_run_hook_consumes_existing_approval_and_allows(tmp_path: Path) -> None:

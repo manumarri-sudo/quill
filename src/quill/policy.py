@@ -108,7 +108,9 @@ DEFAULT_HIGH_PATTERNS: Final[tuple[str, ...]] = (
 CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     # Filesystem destruction
     (
-        r"\brm\s+(?:-[a-zA-Z]*[rRf][a-zA-Z]*\s+)+(?!\s*$)",
+        # Short flags (-r/-R/-f), long flags (--recursive/--force/--no-preserve-root),
+        # in any combination. Without this the long form classifies as a single-file rm.
+        r"\brm\s+(?:(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force|--no-preserve-root)\s+)+(?!\s*$)",
         "rm -rf",
         "Move to a quarantine dir instead so you can recover: "
         "`mv <target> /tmp/quarantine_$(date +%s)`",
@@ -277,7 +279,7 @@ CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     # Pipe credential read to network sink (the bare exfil shape, independent
     # of trifecta tracking - if it's this shape, it's critical on its own).
     (
-        r"\b(?:cat|head|tail|xxd|tar|base64)\b[^|;]*(?:credential|secret|token|\.env|\.ssh|\.aws|\.kube|\.netrc|\.npmrc|id_rsa|id_ed25519)[^|;]*\|\s*(?:curl|wget|nc|netcat|httpie?|http)\b",
+        r"\b(?:cat|head|tail|xxd|tar|base64|env|printenv)\b[^|;]*(?:credential|secret|token|\.env|\.ssh|\.aws|\.kube|\.netrc|\.npmrc|id_rsa|id_ed25519|id_ecdsa|id_dsa)?[^|;]*\|\s*(?:curl|wget|nc|netcat|httpie?|http|socat)\b",
         "credential read piped to network sink",
         "Refuse. This is the credential-exfiltration shape: do not pipe "
         "credentials or .env into curl/wget/nc",
@@ -368,13 +370,18 @@ PRIVATE_READ_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
         "exposure shape",
     ),
     (
-        r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b\s+(?:[^|;]*\s)?(?:~|\$\{?HOME\}?)/?\.(?:config/gh|docker|gnupg|kube|aws|ssh)\b",
+        # Non-greedy `[^|;]*?` between the verb and the home marker matches
+        # quoted forms like `cat "$HOME/.aws/credentials"` that the original
+        # `\s+(?:[^|;]*\s)?` shape rejected (no required trailing space).
+        r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b[^|;]*?(?:~|\$\{?HOME\}?|/root)/?\.(?:config/gh|docker|gnupg|kube|aws|ssh)\b",
         "read credential directory",
         "Use the tool's auth helper (gh auth status, aws sts get-caller-identity) "
         "instead of cat'ing the raw config",
     ),
     (
-        r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b[^|;]*(?:\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519|id_ecdsa|id_dsa)\b",
+        # `.env` added: previously only `.npmrc/.pypirc/.netrc/id_*` were caught
+        # by the file form, which left `cat .env` / `cat '.env'` classifying LOW.
+        r"\b(?:cat|head|tail|less|more|xxd|od|strings|base64)\b[^|;]*(?:\.env|\.npmrc|\.pypirc|\.netrc|id_rsa|id_ed25519|id_ecdsa|id_dsa)\b",
         "read credential file",
         "Use the package manager's auth helper rather than reading the raw token",
     ),
@@ -778,9 +785,12 @@ def classify_command(command: str) -> CommandClassification:
             return CommandClassification(Risk.CRITICAL, reason, suggestion)
 
     # Gate 3: private-data reads classify as HIGH and carry a sentinel
-    # reason. The adapter parses the reason prefix to set trifecta taint.
+    # reason. Scan BOTH masked AND raw forms: quote-masking erases the
+    # credential filename inside `cat '.env'` or `cat "$HOME/.aws/credentials"`,
+    # which would otherwise demote a credential read to LOW. Scanning raw too
+    # closes that bypass.
     for rex, reason, suggestion in _PRIVATE_READ_RE:
-        if rex.search(masked):
+        if rex.search(masked) or rex.search(cmd):
             return CommandClassification(
                 Risk.HIGH,
                 f"private_data_read: {reason}",

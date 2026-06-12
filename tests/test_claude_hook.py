@@ -115,14 +115,18 @@ def test_run_hook_response_includes_hook_event_name(tmp_path: Path) -> None:
 
 
 def test_run_hook_malformed_input_still_includes_hook_event_name(tmp_path: Path) -> None:
-    """The malformed-input fail-open path must also include hookEventName.
-    Without it, every malformed-stdin payload (rare but possible) trips
-    Claude Code's validator instead of fail-opening cleanly."""
+    """The malformed-input fail-closed path must still include hookEventName.
+
+    Without hookEventName, every malformed-stdin payload trips Claude Code's
+    validator with a less actionable error. SECURITY: this used to fail-open;
+    it now fails-CLOSED (deny) so an agent that can crash the parser can't
+    extract a free pass.
+    """
     log = tmp_path / "audit.jsonl"
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         out = run_hook("this is not json", audit=audit)
     assert out["hookSpecificOutput"].get("hookEventName") == "PreToolUse"
-    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_run_hook_asks_on_high_risk(
@@ -171,15 +175,19 @@ def test_run_hook_redacts_long_string_args(tmp_path: Path) -> None:
     assert "truncated" in preview
 
 
-def test_run_hook_fails_open_on_malformed_input() -> None:
-    """A garbled hook payload must not trap the user - we must allow.
+def test_run_hook_fails_closed_on_malformed_input() -> None:
+    """A garbled hook payload must DENY, not allow.
 
-    Rationale: if the parser bug is in our adapter, denying everything
-    would lock the user out of their own tools.
+    SECURITY: this previously fail-OPENED on malformed input, which was a
+    self-service bypass: a prompt-injected agent that could make the hook
+    see broken JSON would get an unconditional allow. Now matches the
+    classifier self-test's posture (fail-closed); the recovery hatch is
+    the bounded, audited `quill off`.
     """
     out = run_hook("not json at all", audit=None)
-    assert out["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "malformed" in out["hookSpecificOutput"]["permissionDecisionReason"].lower()
+    assert "fail-closed" in out["hookSpecificOutput"]["permissionDecisionReason"].lower()
 
 
 # ---- classification helper -----------------------------------------------

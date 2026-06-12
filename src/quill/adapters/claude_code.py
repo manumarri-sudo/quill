@@ -762,12 +762,18 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     try:
         event: dict[str, Any] = json.loads(stdin_text)
     except json.JSONDecodeError as e:
+        # SECURITY: fail-CLOSED on malformed input. An agent that can make the
+        # hook see malformed JSON should not get a free pass; matching the
+        # classifier self-test's posture, a broken gate refuses rather than
+        # allowing. Operators recover via `quill off` (bounded + logged).
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",  # fail-open on malformed input;
-                # the alternative (deny) would trap users behind a parser bug.
-                "permissionDecisionReason": f"quill: malformed hook input: {e}",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    f"quill: malformed hook input ({e}); fail-closed. "
+                    "Run `quill doctor` to investigate."
+                ),
             },
         }
 
@@ -1123,6 +1129,18 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     )
                     issued_token = ap.token
 
+            # SECURITY: NEVER write the full approve token to the audit log.
+            # The agent reads the log (Read is LOW), so storing the token there
+            # was a self-approval gateway: the agent could `cat audit.log.jsonl`,
+            # find the token for the call it was just blocked on, and run
+            # `quill approve <token>` (or write approvals.json directly). We
+            # record only a short hash for human correlation against the
+            # out-of-band notification, never the recoverable value.
+            import hashlib as _hashlib
+            token_id = (
+                _hashlib.sha256(issued_token.encode("utf-8")).hexdigest()[:16]
+                if issued_token else ""
+            )
             audit.emit(
                 event_type=decision.audit_event_type,
                 session_id=session_id,
@@ -1135,7 +1153,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     "permission": decision.permission,
                     "parent_session_id": parent_session_id,
                     "cwd": cwd,
-                    "approve_token": issued_token,
+                    "approve_token_id": token_id,
                     "what": decision.what,
                     "why": decision.why,
                     "try_instead": decision.try_instead,
@@ -1433,12 +1451,19 @@ def main() -> int:
         with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:
             response = run_hook(stdin_text, audit=audit)
     except Exception as e:
-        sys.stderr.write(f"quill claude-hook: internal error, allowing fail-open: {e}\n")
+        # SECURITY: fail-CLOSED on internal error. An agent that can deliberately
+        # crash the hook (large/malformed input, oversized payload) was previously
+        # rewarded with an unconditional allow. The classifier self-test already
+        # fails closed; this matches. Operators recover via `quill off`.
+        sys.stderr.write(f"quill claude-hook: internal error, denying fail-closed: {e}\n")
         response = {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-                "permissionDecisionReason": f"quill internal error (fail-open): {e}",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    f"quill internal error ({e}); fail-closed. "
+                    "Investigate with `quill doctor` or `quill off` to pause."
+                ),
             },
         }
     sys.stdout.write(json.dumps(response))

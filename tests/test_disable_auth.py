@@ -25,14 +25,28 @@ class _Console:
         self.messages.append(" ".join(str(a) for a in args))
 
 
-def test_bypass_env_skips_auth(monkeypatch) -> None:
+def test_env_bypass_var_is_removed(monkeypatch) -> None:
+    """QUILL_SKIP_DISABLE_AUTH must NOT bypass the prompt.
+
+    The agent controls its own environment; an env-var skip in the production
+    code path was a real self-disable vector. Setting it must not weaken the
+    gate; the Touch ID path still fires (and we fail the test if the prompt
+    silently passes when biometry is mocked-fail).
+    """
     monkeypatch.setenv("QUILL_SKIP_DISABLE_AUTH", "1")
-    _require_disable_auth(_Console())  # must not raise
+    monkeypatch.setattr(touchid, "is_available", lambda: True)
+    monkeypatch.setattr(
+        touchid,
+        "authenticate",
+        lambda **_k: touchid.TouchIDResult(False, "user_canceled"),
+    )
+    # If the env var still bypassed, this would NOT raise. It must raise:
+    with pytest.raises(typer.Exit):
+        _require_disable_auth(_Console())
 
 
 def test_no_biometry_falls_open_with_warning(monkeypatch) -> None:
     """No sensor / SSH: do not lock the operator out, but warn loudly."""
-    monkeypatch.delenv("QUILL_SKIP_DISABLE_AUTH", raising=False)
     monkeypatch.setattr(touchid, "is_available", lambda: False)
     c = _Console()
     _require_disable_auth(c)  # must not raise
@@ -40,8 +54,7 @@ def test_no_biometry_falls_open_with_warning(monkeypatch) -> None:
 
 
 def test_blocks_when_touchid_fails(monkeypatch) -> None:
-    """Touch ID present but the fingerprint is canceled/failed: gate stays ON."""
-    monkeypatch.delenv("QUILL_SKIP_DISABLE_AUTH", raising=False)
+    """Touch ID present but the fingerprint is canceled/failed: refused."""
     monkeypatch.setattr(touchid, "is_available", lambda: True)
     monkeypatch.setattr(
         touchid,
@@ -53,7 +66,6 @@ def test_blocks_when_touchid_fails(monkeypatch) -> None:
 
 
 def test_passes_on_touchid_success(monkeypatch) -> None:
-    monkeypatch.delenv("QUILL_SKIP_DISABLE_AUTH", raising=False)
     monkeypatch.setattr(touchid, "is_available", lambda: True)
     monkeypatch.setattr(
         touchid,

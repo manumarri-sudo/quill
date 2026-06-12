@@ -1209,6 +1209,9 @@ def night_cmd(
                 "safety contract requires a bounded window.[/red]"
             )
             raise typer.Exit(2)
+        # Self-disable defense: overnight auto-approves HIGH for 12h, which is a
+        # partial gate-disable, so it requires a human fingerprint same as `off`.
+        _require_disable_auth(console, action="enable overnight auto-approve")
         state = ovn.turn_on(duration_hours=hours)
         console.print("[bold green]overnight mode ON[/bold green]")
         console.print(
@@ -1334,33 +1337,33 @@ def _emit_gate_event(event_type: str, payload: dict[str, Any]) -> None:
             )
 
 
-def _require_disable_auth(console: Console) -> None:
-    """Require Touch ID before turning the gate OFF, when biometry is available.
+def _require_disable_auth(console: Console, *, action: str = "turn the Quill gate OFF") -> None:
+    """Require Touch ID before disabling any layer of the gate.
 
-    Closes the self-disable hole: an agent that runs `quill off` to neuter the
-    gate now needs a live human fingerprint. No-lockout fallback by design - on
-    a machine without Touch ID (no sensor, SSH), we do NOT trap the operator
-    away from their own recovery hatch; the pause proceeds but is flagged loudly
-    and stays on the audit record. Bypass for tests / CI: QUILL_SKIP_DISABLE_AUTH=1.
+    Closes the self-disable family: an agent that runs `quill off`/`night` to
+    neuter the gate now needs a live human fingerprint. The earlier
+    QUILL_SKIP_DISABLE_AUTH bypass has been removed - it lived in the production
+    code path and an agent that controls its own environment could set it. Tests
+    inject their verdict by monkeypatching `quill.touchid.authenticate`.
+
+    No-lockout policy: on a Mac without Touch ID (SSH session, no sensor), we do
+    NOT trap the operator away from their own recovery hatch; the action
+    proceeds with a loud warning that goes into the audit log.
     """
-    if os.environ.get("QUILL_SKIP_DISABLE_AUTH", "").strip().lower() in ("1", "true", "yes"):
-        return
-    try:
-        from quill import touchid
-    except Exception:
-        return
+    from quill import touchid
+
     if not touchid.is_available():
         console.print(
-            "[yellow]Touch ID unavailable - turning the gate off without biometric "
-            "confirmation (this is logged). On a Mac with Touch ID, this needs your "
-            "fingerprint.[/yellow]"
+            "[yellow]Touch ID unavailable - proceeding without biometric "
+            "confirmation (this is logged). On a Mac with Touch ID, this would "
+            "require your fingerprint.[/yellow]"
         )
         return
-    result = touchid.authenticate(reason="turn the Quill gate OFF")
+    result = touchid.authenticate(reason=action)
     if not result.success:
         console.print(
-            f"[red]Touch ID required to turn the gate off ({result.reason}). "
-            "The gate stays ON.[/red]"
+            f"[red]Touch ID required for: {action} ({result.reason}). "
+            "Refused.[/red]"
         )
         raise typer.Exit(1)
 
