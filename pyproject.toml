@@ -46,6 +46,12 @@ dependencies = [
     "typer>=0.12",
     "mcp>=1.0",
     "textual>=0.85",
+    # Touch ID is a headline security control (gate-disable + approve), so the
+    # binding ships in the BASE install on macOS rather than an opt-in extra -
+    # the platform marker makes it a no-op on Linux/Windows. Keeping it optional
+    # silently degraded every Mac install to "Touch ID unavailable", which after
+    # the self-disable hardening meant `quill off` refused outright. (audit #1/#2)
+    "pyobjc-framework-LocalAuthentication>=12.0,<13; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
@@ -124,7 +130,6 @@ select = [
     "TID",           # tidy-imports
 ]
 ignore = [
-    "ANN101", "ANN102",   # self / cls annotations (deprecated)
     "ANN002", "ANN204", "ANN401",  # *args / dunder / Any - not actually bugs
     "PLR0911", "PLR0913", # too many returns / args
     "S101",               # asserts in tests are fine
@@ -166,7 +171,10 @@ quote-style = "double"
 strict = true
 warn_unreachable = true
 warn_return_any = true
-disallow_any_explicit = true
+# disallow_any_explicit intentionally OFF: this is an MCP/typer/hook codebase
+# whose boundaries (arbitrary hook JSON, MCP tool args) are correctly typed
+# `Any`. Forbidding explicit Any there produced ~180 false-positive errors that
+# buried the real ones and forced CI to `|| true`. (audit 2026-06-12, #47)
 files = ["src/quill"]
 python_version = "3.11"
 

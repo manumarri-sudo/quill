@@ -340,9 +340,11 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
             # the agent reads the log and would replay it. Only a short hash
             # for operator correlation against the out-of-band notification.
             import hashlib as _hashlib
+
             _token_id = (
                 _hashlib.sha256(issued_token.encode("utf-8")).hexdigest()[:16]
-                if issued_token else ""
+                if issued_token
+                else ""
             )
             audit.emit(
                 event_type=decision.audit_event_type,

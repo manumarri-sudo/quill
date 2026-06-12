@@ -68,6 +68,7 @@ from typing import TYPE_CHECKING, Any, Final
 if TYPE_CHECKING:
     from quill.taint import TaintState
 
+from quill import secrets as _secrets
 from quill.audit import AuditLog
 from quill.config import default_audit_path, load_config
 from quill.errors import ConfigError
@@ -311,11 +312,15 @@ def _summarize_call(tool_name: str, tool_input: Mapping[str, Any]) -> str:
     """
     if tool_name == "Bash":
         cmd = str(tool_input.get("command", ""))
-        return cmd[:200]
+        # The command line itself can carry inline credentials
+        # (`mysql -phunter2`, `curl -H 'Authorization: Bearer ...'`); the
+        # WHAT field lands in the audit log AND the auditor export, so
+        # redact before truncating.
+        return _secrets.redact(cmd)[:200]
     for key in ("file_path", "path", "filename", "url", "uri"):
         v = tool_input.get(key)
         if isinstance(v, str) and v:
-            return f"{tool_name} {v[:160]}"
+            return f"{tool_name} {_secrets.redact(v)[:160]}"
     return tool_name
 
 
@@ -1137,9 +1142,11 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
             # record only a short hash for human correlation against the
             # out-of-band notification, never the recoverable value.
             import hashlib as _hashlib
+
             token_id = (
                 _hashlib.sha256(issued_token.encode("utf-8")).hexdigest()[:16]
-                if issued_token else ""
+                if issued_token
+                else ""
             )
             audit.emit(
                 event_type=decision.audit_event_type,

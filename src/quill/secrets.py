@@ -13,9 +13,11 @@ pattern is documented with its source provider format so a future
 maintainer can verify against the vendor's published key shape.
 
 The pattern set is intentionally smaller than truffleHog's 700+ -
-this module ships the 18 highest-confidence patterns that cover
-the bulk of agent-leaked credentials seen in the wild, with room
-to grow via the optional `extra_patterns` argument to `scan`.
+this module ships the 26 highest-confidence vendor-format patterns
+that cover the bulk of agent-leaked credentials seen in the wild,
+with room to grow via the optional `extra_patterns` argument to
+`scan`. `redact()` reuses the same patterns to strip secrets from
+audit-logged / exported text without persisting the matched value.
 """
 
 from __future__ import annotations
@@ -242,6 +244,95 @@ def scan(
                 ),
             )
     return hits
+
+
+# Inline-credential CLI / connection-string shapes the vendor-prefix
+# patterns above do not catch: password flags, bearer headers, secret env
+# assignments, and DSN passwords. Each captures the credential VALUE in a
+# named group `secret` so redact() can remove just the value and keep the
+# surrounding command legible (`mysql -u root -p[REDACTED:mysql-pflag]`).
+# False positives here only cost a little evidentiary legibility in the
+# log; false negatives leak a credential, so these lean toward redaction.
+_INLINE_CRED_PATTERNS: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
+    (
+        "bearer-token",
+        re.compile(r"(?i)\bauthorization:\s*bearer\s+(?P<secret>[A-Za-z0-9._~+/-]+=*)"),
+    ),
+    (
+        "aws-secret-key",
+        re.compile(r"(?i)\baws_secret_access_key\s*[=:]\s*(?P<secret>(?!\[REDACTED:)\S+)"),
+    ),
+    (
+        "password-flag",
+        re.compile(
+            r"(?i)(?:--password|--pass|--pwd|--token|--secret|--api[-_]?key)"
+            r"[=\s]+(?P<secret>(?!\[REDACTED:)\S+)",
+        ),
+    ),
+    # mysql / mariadb / redis style attached short flag: -p<value>. Require
+    # >=6 chars with at least one non-lowercase char so plain long flags
+    # like `-print` / `-parse` are not corrupted.
+    (
+        "mysql-pflag",
+        re.compile(r"(?<!\S)-p(?P<secret>(?!\[REDACTED:)(?=\S*[^a-z])\S{6,})"),
+    ),
+    # Connection-string password: scheme://user:PASSWORD@host
+    (
+        "dsn-password",
+        re.compile(r"://[^:/@\s]+:(?P<secret>(?!\[REDACTED:)[^@/\s]+)@"),
+    ),
+    # FOO_PASSWORD=... / DB_SECRET=... / X_TOKEN=... inline env assignment.
+    # The `(?!\[REDACTED:)` guard keeps redact() idempotent: an already-
+    # redacted marker (which contains a space) is not re-matched.
+    (
+        "env-secret",
+        re.compile(
+            r"(?i)\b[A-Z_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API[-_]?KEY|PWD)[A-Z_]*"
+            r"\s*=\s*(?P<secret>(?!\[REDACTED:)\S+)",
+        ),
+    ),
+)
+
+
+def redact(text: str, *, extra_patterns: Iterable[SecretPattern] = ()) -> str:
+    """Return `text` with detected secrets replaced by ``[REDACTED:<type>]``.
+
+    Two classes are removed:
+      1. Vendor-format tokens from the SecretPattern set (whole match).
+      2. Inline-credential shapes (password flags, bearer headers, DSN
+         passwords, secret env assignments) - only the VALUE is removed so
+         the surrounding command stays legible for the audit reader.
+
+    Deterministic and value-free, so the result is safe to write to the
+    audit log or hand to an auditor. Idempotent on already-redacted text
+    (the ``[REDACTED:...]`` marker matches none of the patterns).
+    """
+    if not text:
+        return text
+    spans: list[tuple[int, int, str]] = []
+    for pat in (*_PATTERNS, *extra_patterns):
+        for m in pat.regex.finditer(text):
+            spans.append((m.start(), m.end(), f"[REDACTED:{pat.name}]"))
+    for label, pat in _INLINE_CRED_PATTERNS:
+        for m in pat.finditer(text):
+            s, e = m.span("secret")
+            if e > s:
+                spans.append((s, e, f"[REDACTED:{label}]"))
+    if not spans:
+        return text
+    # Apply left-to-right but drop spans overlapping an earlier-kept one,
+    # then splice right-to-left so offsets stay valid.
+    spans.sort(key=lambda t: (t[0], -t[1]))
+    kept: list[tuple[int, int, str]] = []
+    last_end = -1
+    for s, e, r in spans:
+        if s >= last_end:
+            kept.append((s, e, r))
+            last_end = e
+    out = text
+    for s, e, r in reversed(kept):
+        out = out[:s] + r + out[e:]
+    return out
 
 
 # Which Claude Code / Cursor tool-call args carry file content that

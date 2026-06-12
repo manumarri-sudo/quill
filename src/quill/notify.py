@@ -347,9 +347,11 @@ class NotifyDispatcher:
                 # for operator correlation. The notification itself (slack/email/
                 # macOS banner) still carries the live token out-of-band.
                 import hashlib as _h
+
                 token_id = (
                     _h.sha256(msg.approve_token.encode("utf-8")).hexdigest()[:16]
-                    if msg.approve_token else ""
+                    if msg.approve_token
+                    else ""
                 )
                 self.audit_emit(
                     "notify.dispatched",
@@ -373,16 +375,18 @@ class NotifyDispatcher:
         msg: BlockMessage,
         results: dict[str, bool],
     ) -> None:
-        from quill.paths import default_path
-
         # SECURITY: notify.log lives under $QUILL_HOME (agent-readable by default),
         # so a raw token here is a self-approval gateway. Store only a short hash
         # for correlation; the live token only goes out-of-band via slack/email/
         # macOS banner, which the agent cannot intercept.
         import hashlib as _h
+
+        from quill.paths import default_path
+
         token_id = (
             _h.sha256(msg.approve_token.encode("utf-8")).hexdigest()[:16]
-            if msg.approve_token else ""
+            if msg.approve_token
+            else ""
         )
         line = json.dumps(
             {

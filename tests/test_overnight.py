@@ -462,10 +462,16 @@ class TestCounters:
 
 
 class TestCliSmoke:
-    def test_quill_night_on_works(self) -> None:
+    def test_quill_night_on_works(self, monkeypatch) -> None:
         from typer.testing import CliRunner
 
+        import quill.cli as cli
         from quill.cli import app
+
+        # Enabling overnight mode is a partial gate-disable, so it now requires a
+        # human (Touch ID / tty challenge). Simulate the human for this smoke
+        # test; the auth ladder itself is covered by test_disable_auth.py.
+        monkeypatch.setattr(cli, "_require_disable_auth", lambda *_a, **_k: None)
 
         runner = CliRunner()
         result = runner.invoke(app, ["night", "on", "--hours", "8"])

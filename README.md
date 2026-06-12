@@ -10,7 +10,6 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/quillx.svg)](https://pypi.org/project/quillx/)
 [![CI](https://img.shields.io/github/actions/workflow/status/manumarri-sudo/quill/ci.yml?branch=main&label=ci)](https://github.com/manumarri-sudo/quill/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Typed](https://img.shields.io/badge/typed-strict-brightgreen.svg)](https://peps.python.org/pep-0561/)
 
 ![Quill in action: real recent BLOCK decisions from a dogfooding session](web/quill_demo.gif)
 
@@ -37,7 +36,7 @@ Quill is the smallest version of one I could write. MIT, open source, single Pyt
 
 ## Three reasons to install Quill in 30 seconds
 
-- **It refuses the things you can't undo, before they happen.** `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, `.env` reads, the CVE-2025-59536 subcommand-chain bypass, and 26 vendor-format secret patterns scanned against every file the agent writes. Default-critical. On macOS, the confirmation is hardware-attested through Touch ID on the Secure Enclave. **Don't take our word for it — read the regexes.** Every critical pattern lives in [`src/quill/policy.py`](src/quill/policy.py); you can grep them, fork them, and challenge them. Other tools in this space ship opaque heuristics; Quill ships inspectable rules.
+- **It refuses the things you can't undo, before they happen.** `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, `.env` reads, the CVE-2025-59536 subcommand-chain bypass, and 26 vendor-format secret patterns scanned against every file the agent writes. Default-critical. On macOS, the confirmation is hardware-attested through Touch ID on the Secure Enclave. **Don't take our word for it — read the regexes.** The command-risk patterns live in [`src/quill/policy.py`](src/quill/policy.py) and the secret patterns in [`src/quill/secrets.py`](src/quill/secrets.py); you can grep them, fork them, and challenge them. Other tools in this space ship opaque heuristics; Quill ships inspectable rules.
 - **It defends against prompt injection by refusing the consequence, not detecting the cause.** Every published LLM-based prompt-injection defense was bypassed at >90% in 2025 (per the [November 2025 adaptive-attack paper](https://simonwillison.net/2025/Nov/2/new-prompt-injection-papers/)); that's a losing battle. Quill enforces Simon Willison's "Lethal Trifecta" deterministically: when the agent has, in one session, *seen untrusted input + read private data + has an exfiltration path*, the gate refuses the third action. Pair with model-level guardrails; never substitute. [Full prompt-injection defense story →](docs/marketing/prompt-injection-defense.md)
 - **The audit log is auditor-reviewable evidence of what your agents actually did.** HMAC-SHA256 chained per entry, mode `0o600`, locally tamper-evident (and optionally externally anchored). It maps to the evidence requests behind EU AI Act Article 12 + 14 + 19, SOC 2 CC6/CC7/CC8, and ISO/IEC 42001 A.6.2.8 — the required fields (actor identification, synchronized timestamp, action in business terms, justification, anomaly flags) and verification criteria (append-only storage, cryptographic hashing) are exactly what Quill produces. Quill produces the machine-verifiable record; it does not certify compliance by itself. One command (`quill audit export --pack`) yields an auditor-reviewable evidence pack mapping to AIUC-1, NIST AI RMF, ISO/IEC 42001, SOC 2 Common Criteria, and MITRE ATLAS in ~3 seconds. [AIUC-1 control mapping →](docs/marketing/aiuc-1-mapping.md)
 
@@ -58,7 +57,7 @@ Calibration matters more than marketing. Three lines worth repeating verbatim be
 
 1. **camera** — every call gets a signed JSONL line, HMAC-chained for tamper evidence
 2. **badge** — the call's namespace and resource must match a scope you declared at session start, or it's refused before the agent attempts
-3. **bank manager** — low/medium-risk auto-allows, high-risk pauses for a y/N, critical-risk requires you to type the action name back so muscle-memory yes-spamming cannot ship a $50,000 mistake
+3. **bank manager** — low/medium-risk auto-allows, high-risk pauses for a y/N, critical-risk requires you to type the action name back so muscle-memory yes-spamming cannot ship the irreversible thing
 
 When the gate refuses a critical call, Quill ships you a notification on whatever channel you opted in to (macOS banner, email, Slack, generic webhook) carrying *what was tried*, *why it was blocked*, *what to try instead*, and a paste-able `quill approve <token>` you can run from your phone if you actually meant it.
 
@@ -111,21 +110,21 @@ Quill ships a four-layer defense:
 
 **For agents that scour the internet a lot** (research agents, scrapers, news summarizers, RAG-driven retrieval bots), the prompt-injection surface is the widest. Every fetched web page is potentially adversarial. Quill's taint tracking marks every `WebFetch` / `WebSearch` / `fetch` / `curl http*` call as ingesting untrusted content, and the gate's downstream-action behavior becomes correspondingly stricter for the rest of the session. Set `[session] research_mode = true` in `~/.quill/config.toml` to upgrade the enforcement threshold from "trifecta closes" to "two of three closes for the first time after web ingestion."
 
-## What's mature vs framework-prepared (as of v0.3-prep)
+## What's mature vs framework-prepared (as of v0.2.0a5)
 
 `quill` is built around three pillars and the maturity of each is honestly different. This section exists because dogfooding evidence matters more than design intent.
 
 **Mature, with on-disk evidence in real-world dogfooding** (the gate + audit pillar):
 - Destructive-action gate: hundreds of critical blocks observed across `rm -rf`, `vercel --prod`, `git push --force`, `DROP TABLE`, `TRUNCATE`, `npm publish`, `sudo`, `.env` reads, and the CVE-2025-59536 subcommand-chain bypass. No false positives observed in the critical class during dogfooding.
-- HMAC-chained audit log: 22k+ entries verified end-to-end. Locally tamper-evident (optionally externally anchored), mode `0o600`, EU AI Act Article 12 + 14 fields on every block, audit-log path resolves cleanly through `quill audit verify`.
+- HMAC-chained audit log: 24k+ entries verified end-to-end over ~45 days of dogfooding. Locally tamper-evident (optionally externally anchored), mode `0o600`, EU AI Act Article 12 + 14 fields on every block, audit-log path resolves cleanly through `quill audit verify`.
 - Out-of-band notification dispatch on real blocks: macOS banner, email, Slack, generic webhook. Synchronous-with-100ms-timeout on the hot path so the dispatch can't be killed mid-flight by the hook subprocess exiting.
 - One-shot approve tokens, Touch ID hardware-attested approval, anti-yes-fatigue, type-to-confirm: full block-to-approve cycle observed end-to-end with audit chain evidence.
 - Trust scope with trifecta enforcement priority: trusted directories suppress default-risk Edit/Write asks, but yield to trifecta enforcement when the session is at 2-of-3 flags and the call would close the third.
 - Self-improving classifier: drift detection, suggestions CLI, learner persistence.
-- **`quill onboard`** interactive first-run setup (new in v0.3-prep): auto-detects Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed; prompts for log location, notification channels, risk preset, intent + scope, and trusted directories; installs hooks for chosen agents; idempotent. Replaces the placeholder-filled `quill init` flow.
-- **Secret detection on file writes** (new in v0.3-prep): 18 vendor-format patterns (AWS / OpenAI legacy + project / Anthropic / GitHub classic + fine-grained + OAuth + App / Stripe live + test + restricted / Slack bot + user + webhook / Google / JWT / PEM private keys / HuggingFace) scanned against every Edit / MultiEdit / Write / NotebookEdit; hits escalate to `Risk.CRITICAL` with line numbers in the verdict reason. Also exposed as a standalone `quill scan-secrets` CLI that respects `.gitignore` when run inside a git repo.
-- **`quill audit export --pack`** (new in v0.3-prep): one-command compliance PDF covering EU AI Act (Art 12 + 14 + 19), AIUC-1 (E015.2, D003.1/3/4, C007.3), NIST AI RMF + GenAI Profile, ISO/IEC 42001 A.6.2.8, SOC 2 Common Criteria (CC6 / CC7 / CC8.1 / CC9), MITRE ATLAS. 39 controls across 12 standard families. Renders via headless Chrome / Brave / Edge / Chromium (no LaTeX dep). Verified end-to-end against the live audit log: 22,143 events → 39 controls → 483KB PDF in ~3s.
-- **Prepare-commit-msg git hook** (new in v0.3-prep): `quill commit-hook-install` wires a hook that appends the active agent session's summary (calls, blocks, asks, Touch ID approvals, top changed dir, TDR, block reasons) as `#`-prefixed comment lines to every commit message buffer. Skips merge / squash / amend. Idempotent. Refuses to overwrite non-Quill existing hooks. Bakes the absolute path to the venv's `quill` binary so the hook works even from a non-venv shell.
+- **`quill onboard`** interactive first-run setup (new in v0.2.0a5): auto-detects Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed; prompts for log location, notification channels, risk preset, intent + scope, and trusted directories; installs hooks for chosen agents; idempotent. Replaces the placeholder-filled `quill init` flow.
+- **Secret detection on file writes** (new in v0.2.0a5): 26 vendor-format patterns (AWS / OpenAI / Anthropic / GitHub / Stripe / Slack / Google / JWT / PEM private keys / HuggingFace / Twilio / SendGrid / Mailgun / Discord / Notion) scanned against every Edit / MultiEdit / Write / NotebookEdit; hits escalate to `Risk.CRITICAL` with line numbers in the verdict reason. Also exposed as a standalone `quill scan-secrets` CLI that respects `.gitignore` when run inside a git repo.
+- **`quill audit export --pack`** (new in v0.2.0a5): one command renders an auditor-reviewable evidence pack that **maps to** (does not certify) the evidence requests behind EU AI Act (Art 12 + 14 + 19), AIUC-1, NIST AI RMF + GenAI Profile, ISO/IEC 42001 A.6.2.8, SOC 2 Common Criteria (CC6 / CC7 / CC8.1 / CC9), and MITRE ATLAS. As `docs/SECURITY-MODEL.md` states, this is evidence your auditor will want to review, not the artifact they will accept on its own, and Quill does not certify compliance by itself. Renders via headless Chrome / Brave / Edge / Chromium (no LaTeX dep), verified end-to-end against the live audit log (~24k events → PDF in ~3s).
+- **Prepare-commit-msg git hook** (new in v0.2.0a5): `quill commit-hook-install` wires a hook that appends the active agent session's summary (calls, blocks, asks, Touch ID approvals, top changed dir, TDR, block reasons) as `#`-prefixed comment lines to every commit message buffer. Skips merge / squash / amend. Idempotent. Refuses to overwrite non-Quill existing hooks. Bakes the absolute path to the venv's `quill` binary so the hook works even from a non-venv shell.
 
 **Framework-prepared, with thinner dogfooded evidence** (the Trust Infrastructure pillar):
 - Lethal-trifecta detection AND enforcement: detection observed across dozens of sessions; enforcement (escalate allow → deny when a call would close the trifecta) verified end-to-end on a synthetic test. Real-world enforcement triggers depend on operator workflow.
@@ -251,13 +250,13 @@ quill trifecta show            # per-session three-flag matrix + verdict
 quill trifecta show --closed   # only sessions where all three closed
 ```
 
-Trifecta in v0.2.0a2 is **observation AND enforcement**. The classifier surfaces the exposure on every tool call, and when a call would close the lethal trifecta (untrusted + private + exfil all in one session) for the first time, the gate escalates an otherwise-allow decision to a deny with a paste-able approve token. Trust scope yields to this enforcement so trusted directories can't silently bypass the trifecta gate. Verified end-to-end with on-disk evidence on 2026-05-17 (audit log entries at `verdict.blocked` with reason `trifecta close · ...`).
+Trifecta in v0.2.0a5 is **observation AND enforcement**. The classifier surfaces the exposure on every tool call, and when a call would close the lethal trifecta (untrusted + private + exfil all in one session) for the first time, the gate escalates an otherwise-allow decision to a deny with a paste-able approve token. Trust scope yields to this enforcement so trusted directories can't silently bypass the trifecta gate. Verified end-to-end with on-disk evidence on 2026-05-17 (audit log entries at `verdict.blocked` with reason `trifecta close · ...`).
 
 ### A2A Bridge handoff edges
 
 When agent A spawns agent B as a sub-task, the handoff itself is an event with a contract. The A2A Bridge tracks those edges, flags orphans (handoff-out with no matching handoff-in), and detects cascade failures (one bad handoff propagating downstream).
 
-**Adapter maturity as of v0.2.0a2**: full handoff capture works for the **Cursor adapter** (Cursor 1.7+ surfaces subagent session_ids in its hook payload). For **Claude Code**, subagent spawns currently audit-log under the parent session because Claude Code's `PreToolUse` hook doesn't expose subagent session_ids; bridge capture there is **pending hook-API support from Anthropic**. See the "What's mature vs framework-prepared" section near the top of this README for the full breakdown.
+**Adapter maturity as of v0.2.0a5**: full handoff capture works for the **Cursor adapter** (Cursor 1.7+ surfaces subagent session_ids in its hook payload). For **Claude Code**, subagent spawns currently audit-log under the parent session because Claude Code's `PreToolUse` hook doesn't expose subagent session_ids; bridge capture there is **pending hook-API support from Anthropic**. See the "What's mature vs framework-prepared" section near the top of this README for the full breakdown.
 
 ```bash
 quill bridge show              # all handoff edges, status (ok / orphan / cascade)
@@ -313,7 +312,7 @@ Each entry's `mac` is `HMAC-SHA256(prev_mac || canonical(payload))` under your i
 
 ```bash
 quill audit verify
-# chain intact: 472 entries verified.
+# chain intact: 24,478 entries verified.
 ```
 
 If you have a log broken by the pre-0.1.1 concurrent-write defect:
@@ -379,7 +378,7 @@ Quill aims for invisible: P50 overhead < 2ms on the policy-allow path, P99 < 10m
 - Not a replacement for OAuth or RBAC. Identity says you are *allowed* to refund. Quill says *this specific* refund, in *this specific* session, deserves a confirmation.
 - Not a hosted service. It is a single Python package. The audit log lives on your disk. You own the key, the log, the verdict.
 
-## Known gaps for v0.2.0a2
+## Known gaps for v0.2.0a5
 
 Honest list of what is shipped vs. observation-only vs. not yet wired. See also the "What's mature vs framework-prepared" section near the top of this README for the dogfooding-evidence breakdown.
 

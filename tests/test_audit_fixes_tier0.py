@@ -16,9 +16,10 @@ that re-opens one shows up immediately. References to the audit reports:
 - Fail-closed: malformed input / internal error returned allow. Fix: deny.
 - QUILL_SKIP_DISABLE_AUTH: was a live bypass var. Fix: removed.
 """
+
 from __future__ import annotations
 
-from quill.policy import classify_command, Risk
+from quill.policy import Risk, classify_command
 
 
 def test_cat_dotenv_quoted_is_at_least_high() -> None:
@@ -72,17 +73,20 @@ def test_audit_log_never_contains_raw_approve_token(tmp_path) -> None:
     `cat audit.log.jsonl | grep approve_token` and recover anything that
     `quill approve <X>` would consume."""
     import json
-    from quill.audit import AuditLog
+
     from quill.adapters.claude_code import run_hook
+    from quill.audit import AuditLog
 
     log = tmp_path / "audit.jsonl"
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
         run_hook(
-            json.dumps({
-                "session_id": "test",
-                "tool_name": "Bash",
-                "tool_input": {"command": "rm -rf node_modules"},
-            }),
+            json.dumps(
+                {
+                    "session_id": "test",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "rm -rf node_modules"},
+                }
+            ),
             audit=audit,
         )
     for line in log.read_text().splitlines():
@@ -111,11 +115,13 @@ def test_no_quill_skip_disable_auth_runtime_check() -> None:
     read by `os.environ.get` in the production helper. Tests inject by
     monkeypatching `touchid`, not by setting this env var.
     """
-    import pathlib, re
+    import pathlib
+    import re
+
     src = (pathlib.Path(__file__).parent.parent / "src" / "quill" / "cli.py").read_text()
     # Look for any environ-read of the var anywhere in the file.
     pattern = re.compile(
-        r'(os\.environ\.get|environ\[).{0,40}QUILL_SKIP_DISABLE_AUTH',
+        r"(os\.environ\.get|environ\[).{0,40}QUILL_SKIP_DISABLE_AUTH",
         re.DOTALL,
     )
     assert pattern.search(src) is None, (

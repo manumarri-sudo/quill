@@ -23,6 +23,9 @@ reply-block pattern fires without requiring a separate NSRunLoop pump.
 
 from __future__ import annotations
 
+import functools
+import subprocess
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Final
@@ -43,13 +46,55 @@ class TouchIDResult:
     reason: str  # "ok" | "user_canceled" | "lockout" | "not_available" | "error:<code>"
 
 
+@functools.lru_cache(maxsize=1)
+def can_present_ui() -> bool:
+    """True iff the running interpreter can actually PRESENT the biometric sheet.
+
+    `canEvaluatePolicy` returns True on any Mac with enrolled Touch ID, but the
+    system UI agent (coreauthd / LocalAuthentication UIAgent) only DRAWS the
+    prompt for a process carrying a real, stable code-signing identity (a Team
+    Identifier). An ad-hoc / linker-signed interpreter - uv's
+    python-build-standalone, which is the common pip/uv install - has
+    `TeamIdentifier=not set`, so `evaluatePolicy` never presents a dialog and
+    hangs until timeout. We detect that cheaply (once, cached) by inspecting the
+    interpreter's signature, so callers can skip the doomed ~30s wait and fall
+    straight to the typed-phrase human-presence fallback.
+
+    Conservative: any error, or an ad-hoc signature, returns False (prefer the
+    instant typed challenge over a hang). A genuinely signed build with a Team
+    Identifier returns True and gets real Touch ID.
+    """
+    try:
+        proc = subprocess.run(
+            ["codesign", "--display", "--verbose=2", sys.executable],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    blob = (proc.stderr or "") + (proc.stdout or "")
+    if "Signature=adhoc" in blob:
+        return False
+    return any(
+        line.startswith("TeamIdentifier=") and line.strip() != "TeamIdentifier=not set"
+        for line in blob.splitlines()
+    )
+
+
 def is_available() -> bool:
-    """True iff Touch ID can fire RIGHT NOW on this machine.
+    """True iff Touch ID hardware can EVALUATE on this machine.
 
     Checks: macOS LocalAuthentication framework loads, hardware sensor is
     present, user has enrolled fingerprints, the current process context can
     reach the prompter (SSH sessions and launchd-spawned daemons return
     False here, which is correct).
+
+    NOTE: this is hardware/enrollment availability, NOT whether the biometric
+    sheet can actually PRESENT for this process - see `can_present_ui` for that
+    (an ad-hoc-signed uv/pip interpreter can evaluate but cannot present).
+    Callers that must not hang on a dialog that never draws should gate on
+    `is_available() and can_present_ui()`.
     """
     try:
         import LocalAuthentication  # type: ignore[import-not-found]

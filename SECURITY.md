@@ -42,7 +42,7 @@ In rough priority order:
 
 ## What we do NOT protect against
 
-- **Compromise of a user with code execution.** If an attacker has shell as the user running Quill, they can read the HMAC key and forge entries. Userspace Python cannot fully defend against this. For hardening, run Quill under `bubblewrap`/`firejail` (Linux), `sandbox-exec` (macOS), or AppContainer (Windows). A starter systemd unit with `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp=true` is shipped under [`contrib/quill.service`](contrib/) (post-1.0).
+- **Compromise of a user with code execution.** If an attacker has shell as the user running Quill, they can read the HMAC key and forge entries. Userspace Python cannot fully defend against this. For hardening, run Quill under `bubblewrap`/`firejail` (Linux), `sandbox-exec` (macOS), or AppContainer (Windows). A starter systemd unit with `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp=true` will ship under `contrib/` post-1.0.
 - **Compromised upstream MCP servers.** Quill governs *what* the agent calls. If your upstream server has an RCE itself, Quill's role ends at "logged that the call happened." Pin upstream server versions and prefer those distributed via `pipx`/signed npm packages over `npx -y @latest/foo`.
 - **Model-side prompt-injection bypass.** If the model is tricked into not calling a tool at all (e.g. simulates output instead), Quill has nothing to gate. Pair with a model-level guardrail.
 - **Network attacks against the JSON-RPC transport.** v1 supports stdio (local-only) primarily. Network transports inherit OS-level network security; we make no claims beyond TLS verification on streamable-HTTP upstreams.

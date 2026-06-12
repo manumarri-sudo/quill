@@ -1,9 +1,17 @@
-"""Tests for the Touch-ID gate on turning the Quill gate OFF.
+"""Tests for the human-presence gate on turning the Quill gate OFF.
 
-Verifies the self-disable defense without a real fingerprint or touching the
-real gate state: an agent running `quill off` must clear Touch ID when it's
-available, but the operator is never locked out of their own recovery hatch
-when biometry is unavailable.
+Verifies the self-disable defense without a real fingerprint, a real tty, or
+touching the real gate state. The defense is two-layered:
+
+  - The HARD guarantee is the hook-layer CRITICAL classification of
+    `quill off|pause|night` (see test_self_disable_classifier.py): an AGENT's
+    Bash call is denied before it ever reaches the CLI.
+  - This module covers the HUMAN path - `_require_disable_auth`'s tiered ladder
+    (Touch ID -> /dev/tty typed challenge -> --no-biometric opt-in / refuse) -
+    which only runs for a human in their own terminal.
+
+`_human_tty_challenge` is monkeypatched everywhere so the suite never blocks on
+/dev/tty, and `_emit_gate_event` is stubbed so tests never write the real log.
 """
 
 from __future__ import annotations
@@ -11,6 +19,7 @@ from __future__ import annotations
 import pytest
 import typer
 
+import quill.cli as cli
 import quill.touchid as touchid
 from quill.cli import _require_disable_auth
 
@@ -25,31 +34,40 @@ class _Console:
         self.messages.append(" ".join(str(a) for a in args))
 
 
-def test_env_bypass_var_is_removed(monkeypatch) -> None:
-    """QUILL_SKIP_DISABLE_AUTH must NOT bypass the prompt.
+@pytest.fixture(autouse=True)
+def _isolate(monkeypatch) -> None:
+    """Never write the real audit log; default the UI-can-present probe to True
+    so Touch-ID-tier tests exercise Tier 1 (the real `codesign` probe would say
+    False on the ad-hoc test interpreter). Tests that want the skip set it
+    False explicitly."""
+    monkeypatch.setattr(cli, "_emit_gate_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(touchid, "can_present_ui", lambda: True)
 
-    The agent controls its own environment; an env-var skip in the production
-    code path was a real self-disable vector. Setting it must not weaken the
-    gate; the Touch ID path still fires (and we fail the test if the prompt
-    silently passes when biometry is mocked-fail).
-    """
+
+def _set_tty(monkeypatch, *, passes: bool) -> None:
+    monkeypatch.setattr(cli, "_human_tty_challenge", lambda *_a, **_k: passes)
+
+
+def test_env_bypass_var_is_removed(monkeypatch) -> None:
+    """QUILL_SKIP_DISABLE_AUTH must NOT bypass the prompt. An explicit Touch ID
+    cancel refuses outright and must not fall through to the tty challenge."""
     monkeypatch.setenv("QUILL_SKIP_DISABLE_AUTH", "1")
     monkeypatch.setattr(touchid, "is_available", lambda: True)
     monkeypatch.setattr(
-        touchid,
-        "authenticate",
-        lambda **_k: touchid.TouchIDResult(False, "user_canceled"),
+        touchid, "authenticate", lambda **_k: touchid.TouchIDResult(False, "user_canceled")
     )
-    # If the env var still bypassed, this would NOT raise. It must raise:
+    # If the cancel fell through to the tty tier, this would pass; it must not.
+    _set_tty(monkeypatch, passes=True)
     with pytest.raises(typer.Exit):
         _require_disable_auth(_Console())
 
 
-def test_no_biometry_refuses_by_default(monkeypatch) -> None:
-    """SECURITY: no sensor (e.g. an agent's own process) REFUSES by default,
-    so a hijacked agent can't self-disable the gate. Regression for the
-    `quill off` fall-open hole (audit 2026-06-12, same class as c9b522a)."""
+def test_no_biometry_no_tty_refuses_by_default(monkeypatch) -> None:
+    """No sensor AND no controlling tty (an agent's own piped process) REFUSES
+    by default - a hijacked agent can't self-disable. Regression for the
+    `quill off` fall-open hole (audit #1, same class as c9b522a)."""
     monkeypatch.setattr(touchid, "is_available", lambda: False)
+    _set_tty(monkeypatch, passes=False)
     with pytest.raises(typer.Exit):
         _require_disable_auth(_Console())
 
@@ -58,30 +76,69 @@ def test_no_biometric_opt_in_proceeds(monkeypatch) -> None:
     """A genuine headless operator can opt in explicitly with --no-biometric;
     it proceeds (and is logged loudly)."""
     monkeypatch.setattr(touchid, "is_available", lambda: False)
+    _set_tty(monkeypatch, passes=False)
     c = _Console()
     _require_disable_auth(c, no_biometric=True)  # must not raise
     assert any("--no-biometric" in m for m in c.messages)
 
 
-def test_blocks_when_touchid_fails(monkeypatch) -> None:
-    """Touch ID present but the fingerprint is canceled/failed: refused."""
+def test_tty_challenge_success_proceeds(monkeypatch) -> None:
+    """The human-path fallback: no Touch ID dialog, but a human at a real tty
+    types the phrase correctly -> the disable proceeds. This is the case that
+    makes `quill off` usable on an ad-hoc-signed uv install where Touch ID
+    cannot present a dialog."""
+    monkeypatch.setattr(touchid, "is_available", lambda: False)
+    _set_tty(monkeypatch, passes=True)
+    _require_disable_auth(_Console())  # must not raise
+
+
+def test_adhoc_interpreter_skips_touchid_to_tty(monkeypatch) -> None:
+    """The real-world case: hardware can evaluate (is_available True) but the
+    ad-hoc-signed uv interpreter can't PRESENT the sheet (can_present_ui False),
+    so we skip Touch ID entirely and go straight to the tty challenge - no 30s
+    hang. authenticate() must NOT be called."""
+    monkeypatch.setattr(touchid, "is_available", lambda: True)
+    monkeypatch.setattr(touchid, "can_present_ui", lambda: False)
+
+    def _explode(**_k):  # pragma: no cover - must never be called
+        raise AssertionError("authenticate() called despite can_present_ui False")
+
+    monkeypatch.setattr(touchid, "authenticate", _explode)
+    _set_tty(monkeypatch, passes=True)
+    _require_disable_auth(_Console())  # must not raise
+
+
+def test_touchid_timeout_falls_through_to_tty(monkeypatch) -> None:
+    """is_available() True but evaluatePolicy never presented (timeout/not_
+    available): fall through to the tty challenge rather than hard-refuse a
+    human who simply can't get a dialog on this build."""
     monkeypatch.setattr(touchid, "is_available", lambda: True)
     monkeypatch.setattr(
-        touchid,
-        "authenticate",
-        lambda **_k: touchid.TouchIDResult(False, "user_canceled"),
+        touchid, "authenticate", lambda **_k: touchid.TouchIDResult(False, "timeout")
     )
+    _set_tty(monkeypatch, passes=True)
+    _require_disable_auth(_Console())  # must not raise
+
+
+def test_touchid_cancel_does_not_fall_through(monkeypatch) -> None:
+    """An EXPLICIT Touch ID deny (cancel/auth_failed/lockout) refuses outright
+    and must NOT reach the weaker tty challenge."""
+    monkeypatch.setattr(touchid, "is_available", lambda: True)
+    monkeypatch.setattr(
+        touchid, "authenticate", lambda **_k: touchid.TouchIDResult(False, "auth_failed")
+    )
+
+    def _explode(*_a, **_k):  # pragma: no cover - must never be called
+        raise AssertionError("tty challenge reached after an explicit Touch ID deny")
+
+    monkeypatch.setattr(cli, "_human_tty_challenge", _explode)
     with pytest.raises(typer.Exit):
         _require_disable_auth(_Console())
 
 
 def test_passes_on_touchid_success(monkeypatch) -> None:
     monkeypatch.setattr(touchid, "is_available", lambda: True)
-    monkeypatch.setattr(
-        touchid,
-        "authenticate",
-        lambda **_k: touchid.TouchIDResult(True, "ok"),
-    )
+    monkeypatch.setattr(touchid, "authenticate", lambda **_k: touchid.TouchIDResult(True, "ok"))
     _require_disable_auth(_Console())  # must not raise
 
 

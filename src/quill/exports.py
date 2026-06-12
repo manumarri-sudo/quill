@@ -250,13 +250,25 @@ def aggregate(
     )
 
 
+# Free-text payload fields that can embed a raw command line (and therefore
+# an inline credential). The args_preview map is already dropped wholesale;
+# these survive into the export, so each is run through the secret redactor.
+_FREETEXT_EXPORT_FIELDS = ("reason", "what", "why", "try_instead")
+
+
 def _redact_for_export(evt: Mapping[str, Any]) -> dict[str, Any]:
     """Strip arg values; keep arg keys + identity-bearing fields.
 
-    Same redaction stance as the audit log itself. The customer's auditor
-    sees what was attempted (tool name, risk, reason) but never the raw
-    secrets in the args.
+    Same redaction stance as the audit log itself. The auditor sees what was
+    attempted (tool name, risk, reason) but never raw secret material. The
+    args_preview map is dropped entirely; the surviving free-text fields
+    (``what`` / ``why`` / ``reason`` / ``try_instead``) can each carry a raw
+    command line, so they are passed through ``secrets.redact`` and home
+    paths in ``what`` are normalised to ``~`` to avoid leaking the username.
+    The raw ``approve_token`` is never exported - only a short hash id.
     """
+    from quill import secrets as _secrets
+
     p = evt.get("payload") or {}
     if not isinstance(p, Mapping):
         p = {}
@@ -267,7 +279,6 @@ def _redact_for_export(evt: Mapping[str, Any]) -> dict[str, Any]:
         "reason",
         "permission",
         "risk",
-        "approve_token",
         "what",
         "why",
         "try_instead",
@@ -277,6 +288,10 @@ def _redact_for_export(evt: Mapping[str, Any]) -> dict[str, Any]:
     ):
         v = p.get(k)
         if isinstance(v, (str, int, float, bool)) and v != "":
+            if isinstance(v, str) and k in _FREETEXT_EXPORT_FIELDS:
+                v = _secrets.redact(v)
+                if k == "what":
+                    v = v.replace(str(Path.home()), "~")
             safe_payload[k] = v
     if "arg_keys" in p and isinstance(p["arg_keys"], list):
         safe_payload["arg_keys"] = list(p["arg_keys"])

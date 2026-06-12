@@ -1347,49 +1347,113 @@ def _emit_gate_event(event_type: str, payload: dict[str, Any]) -> None:
             )
 
 
+def _human_tty_challenge(console: Console, action: str) -> bool:
+    """Human-presence fallback for when Touch ID cannot present a dialog.
+
+    Writes a random phrase to /dev/tty and reads the reply from /dev/tty (NOT
+    stdout/stdin): a piped/redirected/headless invocation has no controlling
+    tty and fails with OSError, and the phrase goes to the terminal device
+    rather than to the stdout/stderr pipes a host harness captures into an
+    agent's context.
+
+    This is DEFENSE-IN-DEPTH, not a hard agent/human boundary - an agent in its
+    own PTY-backed shell could in principle scrape the tty. The HARD self-
+    disable guarantee is the hook-layer CRITICAL classification of
+    `quill off|pause|night` (policy.CRITICAL_COMMAND_PATTERNS), which denies an
+    agent's call before it reaches this code. This challenge only ever runs for
+    a human typing in their own terminal (the human path is never hooked).
+    """
+    phrase = "-".join(secrets.token_hex(2) for _ in range(3))  # e.g. 1a2b-3c4d-5e6f
+    try:
+        with open("/dev/tty", "r+", buffering=1) as tty:
+            tty.write(
+                f"\n  Confirm you are a human present at this terminal.\n"
+                f"  To {action}, type this phrase exactly:\n\n"
+                f"      {phrase}\n\n  > "
+            )
+            tty.flush()
+            typed = tty.readline().strip()
+    except OSError:
+        return False  # no controlling tty: piped / headless / agent-redirected
+    return secrets.compare_digest(typed, phrase)
+
+
 def _require_disable_auth(
     console: Console,
     *,
     action: str = "turn the Quill gate OFF",
     no_biometric: bool = False,
 ) -> None:
-    """Require Touch ID before disabling any layer of the gate.
+    """Require a live human before disabling any layer of the gate.
 
-    Closes the self-disable family: an agent that runs `quill off`/`night` to
-    neuter the gate now needs a live human fingerprint. The earlier
-    QUILL_SKIP_DISABLE_AUTH bypass has been removed - it lived in the production
-    code path and an agent that controls its own environment could set it. Tests
-    inject their verdict by monkeypatching `quill.touchid.authenticate`.
+    Defense ladder:
+      1. Real Touch ID, IF it can actually present a dialog (works on a build
+         where the LocalAuthentication UIAgent presents for this process -
+         today's ad-hoc-signed uv interpreter cannot, see SECURITY.md).
+      2. TTY + typed-phrase challenge via /dev/tty, when Touch ID can't present
+         (the ad-hoc-signing / macOS-26 case). Rejects piped/headless calls.
+      3. No controlling tty at all -> REFUSE unless --no-biometric is passed
+         explicitly (logged loudly), for genuine headless operators.
 
-    SECURITY: when Touch ID is UNAVAILABLE we REFUSE by default rather than fall
-    open. An agent's own process has no GUI/Secure-Enclave session, so
-    `touchid.is_available()` is always False there - falling open would have let
-    a hijacked agent run `quill off --for 24h` in its own context and neuter the
-    ENTIRE gate (incl. CRITICAL) with no human. Same bug class as the approve
-    hole closed in c9b522a. A genuine headless operator passes the explicit,
-    logged `--no-biometric` opt-in.
+    The HARD self-disable guarantee does NOT live here. It lives in the hook:
+    `quill off|pause|night` is CRITICAL (policy.CRITICAL_COMMAND_PATTERNS), so an
+    agent's Bash call is denied before reaching this code. This CLI check only
+    ever runs for the human, who is not subject to the hook. The earlier design
+    hard-refused every human when `touchid.is_available()` was False, which made
+    `quill off` unusable on every normal uv/pip install (the binding never
+    presents a dialog), so the gate could not be turned off at all without the
+    --no-biometric escape. (audit #1/#3, self-disable closure 2026-06-12.)
+
+    Tests inject their verdict by monkeypatching `quill.touchid.authenticate`
+    and/or `quill.cli._human_tty_challenge`.
     """
     from quill import touchid
 
-    if not touchid.is_available():
-        if no_biometric:
-            console.print(
-                "[yellow]Touch ID unavailable - proceeding via explicit "
-                "--no-biometric opt-in (this is logged loudly).[/yellow]"
-            )
+    # Tier 1: hardware biometrics, ONLY when the dialog can actually present.
+    # `is_available()` (hardware/enrollment) is True even on an ad-hoc-signed
+    # uv interpreter, but the sheet never draws there and would hang 30s; gating
+    # on `can_present_ui()` too means we skip straight to the typed challenge on
+    # those builds and only attempt Touch ID where it can really show.
+    if touchid.is_available() and touchid.can_present_ui():
+        result = touchid.authenticate(reason=action)
+        if result.success:
+            _emit_gate_event("gate.disable_auth", {"method": "touchid", "action": action})
             return
+        # An EXPLICIT human deny (cancel / failed / lockout) refuses outright -
+        # we do NOT fall through to the weaker check on a real "no".
+        if result.reason in ("user_canceled", "auth_failed", "lockout"):
+            console.print(f"[red]Touch ID denied for: {action} ({result.reason}). Refused.[/red]")
+            raise typer.Exit(1)
+        # is_available() was True but evaluatePolicy never presented a dialog
+        # (ad-hoc-signed interpreter / presentation bug): reason is "timeout" /
+        # "not_available" / "error:*". Fall through to the TTY challenge rather
+        # than hard-refusing a human who simply can't get a dialog on this build.
+
+    # Tier 2: TTY + typed-phrase human-presence challenge.
+    if _human_tty_challenge(console, action):
+        _emit_gate_event("gate.disable_auth", {"method": "tty_challenge", "action": action})
+        return
+
+    # Tier 3: no biometrics AND no human at a controlling tty.
+    if no_biometric:
         console.print(
-            f"[red]Touch ID unavailable in this context - {action} REFUSED.[/red]\n"
-            "  An agent's own process can't reach the sensor, so allowing this "
-            "would let it disable the gate itself. Run from a GUI Terminal "
-            "session where Touch ID fires, or pass --no-biometric to opt into "
-            "an unauthenticated disable on a genuine headless box."
+            "[yellow]No biometrics and no interactive terminal - proceeding via "
+            "explicit --no-biometric opt-in (this is logged loudly).[/yellow]"
         )
-        raise typer.Exit(1)
-    result = touchid.authenticate(reason=action)
-    if not result.success:
-        console.print(f"[red]Touch ID required for: {action} ({result.reason}). Refused.[/red]")
-        raise typer.Exit(1)
+        _emit_gate_event(
+            "gate.disable_auth",
+            {"method": "no_biometric_optin", "action": action, "downgraded": True},
+        )
+        return
+
+    console.print(
+        f"[red]Cannot confirm a human for: {action}. Refused.[/red]\n"
+        "  Touch ID could not present a dialog and there is no interactive "
+        "terminal to challenge. Run this from a terminal where you can type the "
+        "confirmation phrase, or pass --no-biometric to opt into an "
+        "unauthenticated disable on a genuine headless box (logged)."
+    )
+    raise typer.Exit(1)
 
 
 @app.command("off")

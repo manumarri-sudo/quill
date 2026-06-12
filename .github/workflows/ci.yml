@@ -39,7 +39,7 @@ jobs:
         run: pytest --no-cov tests/
 
       - name: Audit dependencies
-        run: pip-audit --strict || true   # warn-level until we pin everything
+        run: pip-audit --strict   # blocking: a dependency CVE must fail the build
 
   build:
     runs-on: ubuntu-latest

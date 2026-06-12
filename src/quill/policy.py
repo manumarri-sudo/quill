@@ -379,6 +379,23 @@ CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
         "Disabling hooks via an env var routes around the gate. Pause "
         "deliberately and on the record with `quill pause`, not a hidden export",
     ),
+    # Gate self-disable via the CLI itself. An agent running `quill off` /
+    # `quill pause` / `quill night` through its gated Bash tool is neutering the
+    # gate from inside. CRITICAL (not HIGH) so it is DENIED even under bypass
+    # mode, where HIGH downshifts to a silent allow. Runs at Gate 2 of
+    # classify_command, before the user bash allowlist, so an over-broad
+    # allowlist can't downgrade it. A HUMAN typing `quill off` in their own
+    # terminal is NOT subject to this hook, so this never blocks a real
+    # operator - it only blocks the agent's tool call. This is the load-bearing
+    # half of the self-disable defense; Touch ID / the TTY challenge in
+    # cli._require_disable_auth is the human-path layer. (Self-disable closure
+    # 2026-06-12, audit #1/#3.)
+    (
+        r"\bquill\s+(?:off|pause|night)\b",
+        "agent attempting to disable/pause the Quill gate via the CLI",
+        "Disabling the gate is a human-only action. If you are the human, run "
+        "`quill off` yourself in your own terminal - it is not gated there.",
+    ),
 )
 
 # Private-data-read shapes. These DON'T classify to critical by themselves

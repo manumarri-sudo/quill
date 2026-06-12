@@ -290,3 +290,60 @@ def test_classify_event_normal_write_unaffected():
     risk, reason, suggestion = classify_event("Write", args)
     # Without secrets, Write keeps its default classification
     assert "secret" not in reason.lower()
+
+
+# ---------------------------------------------------------------------------
+# redact(): strip secrets from audit-logged / exported text (audit #17, #18)
+# ---------------------------------------------------------------------------
+
+
+def test_redact_vendor_token_value_gone():
+    from quill.secrets import redact
+
+    tok = "ghp_" + "A" * 36
+    out = redact(f"echo {tok} >> ~/.netrc")
+    assert tok not in out
+    assert "[REDACTED:GitHub Personal Access Token (classic)]" in out
+
+
+def test_redact_inline_credential_shapes():
+    from quill.secrets import redact
+
+    assert "hunter2x" not in redact("mysql -u root -phunter2x")
+    assert "Bearer sk-live-abc123" not in redact("curl -H 'Authorization: Bearer sk-live-abc123'")
+    assert "wJalrXUt" not in redact("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI7MDENGbAB")
+    assert "p4ssw0rd" not in redact("psql postgres://u:p4ssw0rd@db:5432/app")
+
+
+def test_redact_keeps_command_shape_legible():
+    from quill.secrets import redact
+
+    out = redact("mysql -u root -phunter2x")
+    # Command stays readable: only the password value is removed.
+    assert out.startswith("mysql -u root -p[REDACTED:")
+
+
+def test_redact_idempotent_and_noop_on_clean_text():
+    from quill.secrets import redact
+
+    clean = "rm -rf node_modules && git status"
+    assert redact(clean) == clean
+    once = redact("token=ghp_" + "B" * 36)
+    assert redact(once) == once  # re-redacting changes nothing
+
+
+def test_redact_does_not_corrupt_plain_short_flags():
+    from quill.secrets import redact
+
+    # `-print` / `-parse` look like the mysql `-p<pw>` shape but are plain
+    # lowercase flags; they must survive untouched.
+    assert redact("find . -print") == "find . -print"
+
+
+def test_audit_what_field_is_redacted_end_to_end():
+    """The `what` summary that lands in the audit log must carry no secret."""
+    from quill.adapters.claude_code import _summarize_call
+
+    what = _summarize_call("Bash", {"command": "deploy --token=ghp_" + "C" * 36})
+    assert "ghp_" not in what
+    assert "REDACTED" in what
