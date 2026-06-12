@@ -45,12 +45,22 @@ def test_env_bypass_var_is_removed(monkeypatch) -> None:
         _require_disable_auth(_Console())
 
 
-def test_no_biometry_falls_open_with_warning(monkeypatch) -> None:
-    """No sensor / SSH: do not lock the operator out, but warn loudly."""
+def test_no_biometry_refuses_by_default(monkeypatch) -> None:
+    """SECURITY: no sensor (e.g. an agent's own process) REFUSES by default,
+    so a hijacked agent can't self-disable the gate. Regression for the
+    `quill off` fall-open hole (audit 2026-06-12, same class as c9b522a)."""
+    monkeypatch.setattr(touchid, "is_available", lambda: False)
+    with pytest.raises(typer.Exit):
+        _require_disable_auth(_Console())
+
+
+def test_no_biometric_opt_in_proceeds(monkeypatch) -> None:
+    """A genuine headless operator can opt in explicitly with --no-biometric;
+    it proceeds (and is logged loudly)."""
     monkeypatch.setattr(touchid, "is_available", lambda: False)
     c = _Console()
-    _require_disable_auth(c)  # must not raise
-    assert any("Touch ID unavailable" in m for m in c.messages)
+    _require_disable_auth(c, no_biometric=True)  # must not raise
+    assert any("--no-biometric" in m for m in c.messages)
 
 
 def test_blocks_when_touchid_fails(monkeypatch) -> None:

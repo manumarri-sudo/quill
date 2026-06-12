@@ -1185,6 +1185,14 @@ def night_cmd(
             help="auto-expiry in hours (default 12). only applies to `on`.",
         ),
     ] = 12.0,
+    no_biometric: Annotated[
+        bool,
+        typer.Option(
+            "--no-biometric",
+            help="explicit opt-in to enable without Touch ID on a genuine "
+            "headless box (logged); without it, an unavailable sensor refuses",
+        ),
+    ] = False,
 ) -> None:
     """toggle overnight mode - auto-approve HIGH-risk actions so unattended agents do not stall.
 
@@ -1211,7 +1219,9 @@ def night_cmd(
             raise typer.Exit(2)
         # Self-disable defense: overnight auto-approves HIGH for 12h, which is a
         # partial gate-disable, so it requires a human fingerprint same as `off`.
-        _require_disable_auth(console, action="enable overnight auto-approve")
+        _require_disable_auth(
+            console, action="enable overnight auto-approve", no_biometric=no_biometric
+        )
         state = ovn.turn_on(duration_hours=hours)
         console.print("[bold green]overnight mode ON[/bold green]")
         console.print(
@@ -1337,7 +1347,12 @@ def _emit_gate_event(event_type: str, payload: dict[str, Any]) -> None:
             )
 
 
-def _require_disable_auth(console: Console, *, action: str = "turn the Quill gate OFF") -> None:
+def _require_disable_auth(
+    console: Console,
+    *,
+    action: str = "turn the Quill gate OFF",
+    no_biometric: bool = False,
+) -> None:
     """Require Touch ID before disabling any layer of the gate.
 
     Closes the self-disable family: an agent that runs `quill off`/`night` to
@@ -1346,19 +1361,31 @@ def _require_disable_auth(console: Console, *, action: str = "turn the Quill gat
     code path and an agent that controls its own environment could set it. Tests
     inject their verdict by monkeypatching `quill.touchid.authenticate`.
 
-    No-lockout policy: on a Mac without Touch ID (SSH session, no sensor), we do
-    NOT trap the operator away from their own recovery hatch; the action
-    proceeds with a loud warning that goes into the audit log.
+    SECURITY: when Touch ID is UNAVAILABLE we REFUSE by default rather than fall
+    open. An agent's own process has no GUI/Secure-Enclave session, so
+    `touchid.is_available()` is always False there - falling open would have let
+    a hijacked agent run `quill off --for 24h` in its own context and neuter the
+    ENTIRE gate (incl. CRITICAL) with no human. Same bug class as the approve
+    hole closed in c9b522a. A genuine headless operator passes the explicit,
+    logged `--no-biometric` opt-in.
     """
     from quill import touchid
 
     if not touchid.is_available():
+        if no_biometric:
+            console.print(
+                "[yellow]Touch ID unavailable - proceeding via explicit "
+                "--no-biometric opt-in (this is logged loudly).[/yellow]"
+            )
+            return
         console.print(
-            "[yellow]Touch ID unavailable - proceeding without biometric "
-            "confirmation (this is logged). On a Mac with Touch ID, this would "
-            "require your fingerprint.[/yellow]"
+            f"[red]Touch ID unavailable in this context - {action} REFUSED.[/red]\n"
+            "  An agent's own process can't reach the sensor, so allowing this "
+            "would let it disable the gate itself. Run from a GUI Terminal "
+            "session where Touch ID fires, or pass --no-biometric to opt into "
+            "an unauthenticated disable on a genuine headless box."
         )
-        return
+        raise typer.Exit(1)
     result = touchid.authenticate(reason=action)
     if not result.success:
         console.print(f"[red]Touch ID required for: {action} ({result.reason}). Refused.[/red]")
@@ -1386,6 +1413,14 @@ def off_cmd(
         str,
         typer.Option("--reason", "-r", help="why you're pausing (goes in the audit log)"),
     ] = "",
+    no_biometric: Annotated[
+        bool,
+        typer.Option(
+            "--no-biometric",
+            help="explicit opt-in to disable without Touch ID on a genuine "
+            "headless box (logged); without it, an unavailable sensor refuses",
+        ),
+    ] = False,
 ) -> None:
     """pause the gate - one command to turn quill OFF, bounded and logged.
 
@@ -1417,9 +1452,10 @@ def off_cmd(
         console.print(f"[red]could not parse --for {for_!r}.[/red] use e.g. 30m, 2h, 90m.")
         raise typer.Exit(2)
 
-    # Self-disable defense: turning the gate OFF needs a human fingerprint when
-    # Touch ID is available, so a hijacked agent can't neuter Quill via its own CLI.
-    _require_disable_auth(console)
+    # Self-disable defense: turning the gate OFF needs a human fingerprint;
+    # when Touch ID is unavailable (e.g. an agent's own process) it refuses by
+    # default, so a hijacked agent can't neuter Quill via its own CLI.
+    _require_disable_auth(console, no_biometric=no_biometric)
 
     state = _pause.pause(duration_hours=hours, reason=reason)
     _emit_gate_event(
@@ -4022,6 +4058,8 @@ def _emit_approve_audit(
 @approvals_app.command("list")
 def approvals_list() -> None:
     """List pending one-shot approval tokens (issued, unconsumed, unexpired)."""
+    import hashlib
+
     from quill.approvals import ApprovalStore
 
     store = ApprovalStore.load()
@@ -4029,21 +4067,30 @@ def approvals_list() -> None:
     if not active:
         console.print("[dim]no pending approvals[/dim]")
         return
+    # SECURITY: show a HASHED id, never the raw token. The raw token is what
+    # `quill approve <token>` consumes; printing it here let an agent read its
+    # own pending token and self-approve (esp. with --no-biometric). The
+    # operator confirms with `quill approve --latest` (Touch-ID gated) and never
+    # needs to copy a token string.
     table = Table(title="pending approvals")
-    table.add_column("token", no_wrap=True, width=12)
+    table.add_column("id (hashed)", no_wrap=True, width=14)
     table.add_column("tool", no_wrap=True, width=18)
     table.add_column("issued", style="dim", width=20)
     table.add_column("expires", style="dim", width=20)
     table.add_column("reason", overflow="fold")
     for ap in active:
         table.add_row(
-            ap.token,
+            hashlib.sha256(ap.token.encode()).hexdigest()[:12],
             ap.tool_name,
             ap.issued_at[:19],
             ap.expires_at[:19],
             ap.reason[:80],
         )
     Console().print(table)
+    Console().print(
+        "[dim]approve the most recent with [bold]quill approve --latest[/bold] "
+        "(Touch ID); raw tokens are no longer printed.[/dim]"
+    )
 
 
 @approvals_app.command("revoke")
