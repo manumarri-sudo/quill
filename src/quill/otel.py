@@ -9,7 +9,7 @@ Phoenix / Honeycomb ingest Quill data without inventing a new format.
 Spec: https://opentelemetry.io/docs/specs/semconv/gen-ai/
         https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/
 
-Decisions (from `docs/research/polish-and-launch-2026-05.md` §3):
+Decisions (from the internal polish-and-launch design notes §3):
 
 - Optional extra (`quill[otel]`), not default-on. Footprint: 3
   Apache-2.0 packages, ~450 KB total. The audit log remains the

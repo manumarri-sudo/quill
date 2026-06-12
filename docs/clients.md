@@ -188,9 +188,3 @@ args = ["serve"]
 - **AutoGen:** in maintenance mode; users moving to MS Agent Framework. The MAF middleware adapter is on the v0.3 ship list instead.
 - **n8n / Make / Zapier:** orchestration vendors, not coding-agent runtimes, and n8n's Sustainable Use License is not OSI-compatible so vendoring is blocked. n8n's own HITL panel covers most of what Quill would do at that layer; if a community n8n node ("Quill review channel") gets built, we'll feature it.
 - **Vellum / Langfuse / Phoenix / Arize:** observability-only. They trace what happened; Quill prevents what's about to happen. Different layer of the stack. Quill emits OTel and Langfuse can ingest those traces if you want the verdicts in your existing dashboard. That's a bridge, not an adapter.
-
----
-
-## Reference
-
-The full coverage matrix, integration shape derivation, and per-target LOC budgets live in [`docs/research/universal-adapter-strategy-2026-05.md`](research/universal-adapter-strategy-2026-05.md). This page is the user-facing config sheet; that doc is the build plan behind it.

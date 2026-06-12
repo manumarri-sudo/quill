@@ -1,8 +1,8 @@
 """Autonomous learning loop. Quill reads its own audit data and updates
 its behaviour, within safety bounds.
 
-Design constraints from `docs/research/quill-autonomous-learning-2026-05.md`
-(saved to vault). The non-negotiable architectural rules:
+Design constraints from the internal autonomous-learning design notes.
+The non-negotiable architectural rules:
 
   1. Auto-tightening (block more) auto-applies. Auto-loosening (allow
      more) NEVER auto-applies; it surfaces as a suggestion the operator

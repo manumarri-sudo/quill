@@ -1028,8 +1028,8 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
             # out is recorded under the parent's session_id, the in under
             # the sub-agent's. The pair is matched by payload_hash;
             # `from_event_mac` ties the in to the specific out for
-            # cryptographic edge integrity (see
-            # docs/research/agent-trust-infra-2026-05.md S6.1).
+            # cryptographic edge integrity (see the internal A2A
+            # event-schema design notes S6.1).
             if is_new_sub:
                 handoff_payload = {
                     "to_agent_id": session_id,

@@ -15,7 +15,7 @@ Receipts are *derived* from the existing audit log; nothing new is written
 unless the user explicitly runs `quill receipts emit` to write a session.receipt
 event back to the chain.
 
-Schema source: docs/research/agent-trust-infra-2026-05.md §6.1.
+Schema source: internal A2A event-schema design notes §6.1.
 """
 
 from __future__ import annotations

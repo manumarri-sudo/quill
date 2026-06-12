@@ -386,13 +386,12 @@ Honest list of what is shipped vs. observation-only vs. not yet wired. See also 
 - **Claude Code subagent capture in A2A Bridge** depends on Anthropic shipping subagent session_ids in the `PreToolUse` hook payload. Until then, subagent spawns audit-log under the parent session; the bridge sees no edge. The Cursor adapter is unaffected and gets full A2A capture today.
 - **Per-tool sampling adjudication.** Upstream-initiated `sampling/createMessage` calls are observed in the audit log as `upstream.request` but not yet adjudicated. Default behavior: forward to client unmodified. Will land before 0.2 final.
 - **WebAuthn-attested confirmation is not wired.** Touch ID (macOS) is the hardware-attested option today; WebAuthn for cross-platform hardware attestation is on the v0.3 roadmap.
-- **Telemetry pipeline.** Supabase ingest + analyze functions exist in `infra/supabase/` but are not deployed. Opt-in only; default off.
+- **Telemetry pipeline.** Opt-in only, default off; the ingest/analyze backend is not deployed and is maintained outside this repo. The client side is in `src/quill/telemetry.py` so you can see exactly what would be sent.
 - **Schema-passthrough proxy is end-to-end** for tool calls and the gate sees real arguments. Resources, prompts, and notifications all forward; full lifecycle test coverage is in progress.
-- **PyPI / Homebrew / npm wrapper / MCP registries**: not yet submitted. Distribution plan in [docs/distribution.md](docs/distribution.md).
+- **PyPI / Homebrew / npm wrapper / MCP registries**: not yet submitted.
 
 ## Further reading
 
-- [`docs/marketing/messaging-guide.md`](docs/marketing/messaging-guide.md) — canonical hooks, three concentric circles of buyers, what-not-to-claim, provenance-label discipline. Read before drafting any public-facing content.
 - [`docs/marketing/aiuc-1-mapping.md`](docs/marketing/aiuc-1-mapping.md) — Quill ↔ AIUC-1 control crosswalk for AIUC-1 auditors and AI insurance underwriters
 - [`docs/marketing/eu-ai-act-august-2026-readiness.md`](docs/marketing/eu-ai-act-august-2026-readiness.md) — what the August 2, 2026 EU AI Act high-risk obligations actually require, and how Quill produces the evidence
 - [`docs/marketing/cve-2025-59536-mitigation.md`](docs/marketing/cve-2025-59536-mitigation.md) — CVE-2025-59536 Claude Code subcommand-chain bypass, mitigated by `policy.py:333`

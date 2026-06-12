@@ -33,7 +33,7 @@ What this doesn't cover: tool calls your agent dispatches *directly* (a Python `
 
 ## Path 2: wrap each tool dispatch in `quill.gate()` (coming in v0.3)
 
-If your loop dispatches tool calls directly in Python rather than going through MCP, the v0.3 ship target is a single `quill.gate()` library entry point you call before dispatching. Designed in [`docs/research/universal-adapter-strategy-2026-05.md`](research/universal-adapter-strategy-2026-05.md) §4 and on the Day-4 deliverable list of the v0.3 plan. The contract:
+If your loop dispatches tool calls directly in Python rather than going through MCP, the v0.3 ship target is a single `quill.gate()` library entry point you call before dispatching. The contract:
 
 ```python
 from quill import gate, HookDecision
@@ -134,5 +134,4 @@ Once Quill is in the loop:
 
 ## Reference
 
-- Full design rationale and matrix of every supported runtime: [`docs/research/universal-adapter-strategy-2026-05.md`](research/universal-adapter-strategy-2026-05.md) §3 and §4.
 - Per-client MCP-proxy config snippets for IDEs and desktop agents: [`docs/clients.md`](clients.md).

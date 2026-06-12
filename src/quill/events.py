@@ -4,7 +4,7 @@ Each event written to ~/.quill/audit.log.jsonl carries a `type` field whose
 value comes from this module. Centralizing the constants prevents string-typo
 drift across writers and readers.
 
-Schema lives in docs/research/agent-trust-infra-2026-05.md §6. The split:
+Schema follows the internal A2A event-schema design notes §6. The split:
 
   Existing (already shipped):
     tool.attempted   tool.executed   verdict.allowed   verdict.blocked

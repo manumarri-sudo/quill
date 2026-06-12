@@ -7,7 +7,7 @@ Records the cryptographic edge between agents on a handoff:
 The framework (LangGraph, CrewAI, AutoGen) routes the message; Quill records
 the handoff edge so orphans and cascades become tractable downstream.
 
-Schema source: docs/research/agent-trust-infra-2026-05.md §6.1 + §6.4.
+Schema source: internal A2A event-schema design notes §6.1 + §6.4.
 """
 
 from __future__ import annotations
