@@ -76,3 +76,18 @@ web/pdfs/
 # Internal strategy / research / critique drafts and their binary renders.
 # Keep local; the public threat model lives at docs/SECURITY-MODEL.md.
 docs/research/
+
+# Internal launch / go-to-market / business material. Kept local, not public.
+LAUNCH.md
+docs/distribution.md
+docs/marketing/messaging-guide.md
+docs/marketing/coding-agent-incident-recovery.md
+docs/marketing/engagement-terms-template.md
+docs/marketing/substack-draft-disaster-to-deadline.md
+docs/marketing/future-loomiq-saas/
+docs/marketing/outreach/
+
+# Internal experiment harness and backend infra (telemetry/analysis).
+# The client-side telemetry code stays public at src/quill/telemetry.py.
+experiments/
+infra/
