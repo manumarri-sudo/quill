@@ -1361,10 +1361,7 @@ def _require_disable_auth(console: Console, *, action: str = "turn the Quill gat
         return
     result = touchid.authenticate(reason=action)
     if not result.success:
-        console.print(
-            f"[red]Touch ID required for: {action} ({result.reason}). "
-            "Refused.[/red]"
-        )
+        console.print(f"[red]Touch ID required for: {action} ({result.reason}). Refused.[/red]")
         raise typer.Exit(1)
 
 
@@ -3832,7 +3829,20 @@ def pins_revoke(
 
 @app.command("approve")
 def approve_token(
-    token: Annotated[str, typer.Argument(help="approval token from a Quill notification")],
+    token: Annotated[
+        str | None,
+        typer.Argument(
+            help="approval token from a Quill notification "
+            "(omit and use --latest to approve the most recent block)"
+        ),
+    ] = None,
+    latest: Annotated[
+        bool,
+        typer.Option(
+            "--latest",
+            help="approve the most recently blocked call without copying its token",
+        ),
+    ] = False,
     no_biometric: Annotated[
         bool,
         typer.Option(
@@ -3869,6 +3879,25 @@ def approve_token(
     from quill.approvals import ApprovalStore
 
     store = ApprovalStore.load()
+
+    # --latest (or a bare `quill approve`) resolves to the most recently issued
+    # pending block, so the operator never has to copy the exact token string -
+    # they just confirm "yes, the thing I was just asked about" with Touch ID.
+    if latest or token is None:
+        chosen = store.latest_pending()
+        if chosen is None:
+            console.print(
+                "[red]no pending approvals to confirm.[/red]\n"
+                "  nothing is currently blocked and awaiting your go-ahead."
+            )
+            raise typer.Exit(code=1)
+        token = chosen.token
+        console.print(
+            f"  [dim]approving the most recent block: "
+            f"[bold]{chosen.tool_name}[/bold] · "
+            f"{chosen.reason or 'tool call'}[/dim]"
+        )
+
     ap = store.approve(token)
     if ap is None:
         console.print(
@@ -3880,7 +3909,11 @@ def approve_token(
 
     biometric_reason = ""
     biometric_event: str | None = None
-    if not no_biometric:
+    # --require-biometric overrides --no-biometric (paranoid mode): you may opt
+    # out of Touch ID, but not while also demanding it. Default (neither flag):
+    # biometric is attempted, and an unavailable sensor REFUSES (see below).
+    skip_biometric = no_biometric and not require_biometric
+    if not skip_biometric:
         from quill import touchid
 
         if touchid.is_available():
@@ -3910,12 +3943,24 @@ def approve_token(
                     biometric_reason,
                 )
                 raise typer.Exit(code=2)
-        elif require_biometric:
+        else:
+            # Touch ID unavailable in THIS context (the agent's own process has
+            # no GUI/Secure-Enclave session; SSH and headless daemons too).
+            # REFUSE by default - this is load-bearing. Allowing a no-biometric
+            # approval when the sensor can't fire is exactly the self-approval
+            # hole an agent walks through: it can read the token from
+            # `quill approvals list` and run `quill approve` in its own context,
+            # which has no Touch ID, so a skip-on-unavailable default lets it
+            # release its own blocked call with zero human involvement. The
+            # operator must approve from a session where Touch ID works, or pass
+            # --no-biometric to explicitly opt into typed-token-only approval.
             store.revoke(token)
             console.print(
-                "[red]Touch ID is required (--require-biometric) but "
-                "not available on this machine/session.[/red]\n"
-                "  approval REVOKED.",
+                "[red]Touch ID unavailable in this context - approval REFUSED.[/red]\n"
+                "  An agent's own process can't reach the sensor, so approving\n"
+                "  here would let it self-approve. Approve from a Terminal in\n"
+                "  your GUI login session (where Touch ID works), or pass\n"
+                "  --no-biometric to opt into typed-token-only approval.",
             )
             _emit_approve_audit(
                 ev.APPROVE_BIOMETRIC_DENY,
@@ -3924,9 +3969,6 @@ def approve_token(
                 "not_available",
             )
             raise typer.Exit(code=2)
-        else:
-            biometric_event = ev.APPROVE_BIOMETRIC_SKIPPED
-            biometric_reason = "not_available"
     else:
         biometric_event = ev.APPROVE_BIOMETRIC_SKIPPED
         biometric_reason = "user_opted_out"

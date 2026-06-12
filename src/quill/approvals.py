@@ -187,6 +187,18 @@ class ApprovalStore:
         self.save()
         return ap
 
+    def latest_pending(self) -> Approval | None:
+        """The most recently issued token awaiting operator approval (issued,
+        unconsumed, unexpired, not yet approved).
+
+        Backs `quill approve --latest`, so the operator can confirm the most
+        recent block with Touch ID without copying the exact token string.
+        """
+        pending = [ap for ap in self.approvals.values() if ap.is_active and not ap.approved_at]
+        if not pending:
+            return None
+        return max(pending, key=lambda a: a.issued_at)
+
     def approve(self, token: str) -> Approval | None:
         """Mark a pending token approved (the user ran `quill approve <token>`).
 

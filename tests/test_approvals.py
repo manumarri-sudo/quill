@@ -9,11 +9,103 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from quill.approvals import (
     DEFAULT_TTL_SECONDS,
+    Approval,
     ApprovalStore,
     args_digest,
 )
+
+
+def _mk_approval(
+    token: str, mins_ago: int, *, approved: bool = False, expired: bool = False
+) -> Approval:
+    now = datetime.now(UTC)
+    issued = now - timedelta(minutes=mins_ago)
+    exp = (issued - timedelta(minutes=20)) if expired else (now + timedelta(minutes=10))
+    return Approval(
+        token=token,
+        tool_name="Bash",
+        args_digest="d",
+        expires_at=exp.isoformat(),
+        issued_at=issued.isoformat(),
+        approved_at=now.isoformat() if approved else "",
+    )
+
+
+def test_latest_pending_picks_newest_unapproved(tmp_path: Path) -> None:
+    """`quill approve --latest` resolves to the most recent block still
+    awaiting approval - skipping already-approved and expired ones even if
+    they are newer."""
+    store = ApprovalStore(path=tmp_path / "approvals.json")
+    store.approvals = {
+        "old": _mk_approval("old", 5),
+        "newest": _mk_approval("newest", 1),
+        "approved_but_newer": _mk_approval("approved_but_newer", 0, approved=True),
+        "expired": _mk_approval("expired", 2, expired=True),
+    }
+    chosen = store.latest_pending()
+    assert chosen is not None
+    assert chosen.token == "newest"
+
+
+def test_latest_pending_none_when_nothing_pending(tmp_path: Path) -> None:
+    store = ApprovalStore(path=tmp_path / "approvals.json")
+    assert store.latest_pending() is None
+    store.approvals = {"a": _mk_approval("a", 1, approved=True)}
+    assert store.latest_pending() is None  # only an already-approved token remains
+
+
+def test_approve_refuses_when_touchid_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The self-approval fix: when Touch ID can't fire (the agent's own process,
+    SSH, no hardware), `quill approve` REFUSES by default instead of silently
+    approving via the typed-token fallback. Otherwise an agent reads its own
+    token from `quill approvals list` and releases its own blocked call."""
+    from typer.testing import CliRunner
+
+    import quill.touchid as touchid
+    from quill.cli import app
+
+    monkeypatch.setenv("QUILL_HOME", str(tmp_path))
+    monkeypatch.setattr(touchid, "is_available", lambda: False)
+
+    store = ApprovalStore.load()
+    ap = store.issue("Bash", {"command": "git push --force origin main"})
+
+    result = CliRunner().invoke(app, ["approve", ap.token])
+    assert result.exit_code != 0, "must refuse approval when Touch ID unavailable"
+
+    reloaded = ApprovalStore.load()
+    assert ap.token not in reloaded.approvals or not reloaded.approvals[ap.token].approved_at, (
+        "the token must NOT be left approved after a refusal"
+    )
+
+
+def test_approve_no_biometric_is_explicit_opt_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--no-biometric stays the explicit, operator-chosen escape hatch for
+    genuine headless use, and still approves when Touch ID is unavailable."""
+    from typer.testing import CliRunner
+
+    import quill.touchid as touchid
+    from quill.cli import app
+
+    monkeypatch.setenv("QUILL_HOME", str(tmp_path))
+    monkeypatch.setattr(touchid, "is_available", lambda: False)
+
+    store = ApprovalStore.load()
+    ap = store.issue("Bash", {"command": "echo hi"})
+
+    result = CliRunner().invoke(app, ["approve", ap.token, "--no-biometric"])
+    assert result.exit_code == 0, "explicit --no-biometric opt-in should approve"
+
+    reloaded = ApprovalStore.load()
+    assert reloaded.approvals[ap.token].approved_at, "token should be approved"
 
 
 def test_args_digest_stable_across_orderings() -> None:
