@@ -316,9 +316,7 @@ HIGH_BASH_COMMANDS = [
     ("rm single-file.txt", "rm single"),
     ("sed -i s/foo/bar/ file.txt", "sed -i in-place"),
     ("gh pr merge 42", "gh pr merge"),
-    ("npm install lodash", "npm install"),
     ("curl -X POST https://api.example.com/users", "curl write request"),
-    ("pip install requests", "pip install"),
     ("vercel deploy", "vercel deploy (preview)"),
 ]
 

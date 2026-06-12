@@ -76,18 +76,34 @@ def test_critical_commands(cmd: str, expected_reason_substr: str) -> None:
         "rm tmpfile.txt",
         "sed -i 's/foo/bar/' README.md",
         "gh pr merge 42",
-        "npm install lodash",
-        "npm install --global typescript",
         "vercel deploy",
         "curl -X POST https://api.example.com/v1/widgets -d 'x=1'",
-        "pip install rich",
-        "brew install ripgrep",
     ],
 )
 def test_high_commands(cmd: str) -> None:
     result = classify_command(cmd)
     assert result.risk is Risk.HIGH, (
         f"expected HIGH for {cmd!r}, got {result.risk.value} ({result.reason})"
+    )
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        # Package installs are intentionally MEDIUM (auto-allowed), not HIGH:
+        # gating every install trains yes-spam. (FP sweep 2026-06-12.)
+        "npm install lodash",
+        "npm install --global typescript",
+        "pip install rich",
+        "pip install -r requirements.txt",
+        "brew install ripgrep",
+        "open https://example.com",
+    ],
+)
+def test_package_installs_and_open_url_are_medium(cmd: str) -> None:
+    result = classify_command(cmd)
+    assert result.risk is Risk.MEDIUM, (
+        f"expected MEDIUM for {cmd!r}, got {result.risk.value} ({result.reason})"
     )
 
 

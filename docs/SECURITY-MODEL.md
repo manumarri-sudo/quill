@@ -75,11 +75,19 @@ These are the second-review critique's points, restated honestly. They are
 real. We do not close them with more regex.
 
 1. **Semantic shell obfuscation is unbounded.** Regex enumerates the common
-   evasions; it cannot enumerate all of them. Single-variable reconstruction
-   (`x=rm; $x -rf`), `printf`-assembled strings, `${IFS}` games, novel
-   encodings, and tricks not yet seen can evade the classifier. Catching
-   "what a command *does*" rather than "what it *looks like*" needs a shell
-   AST parser or a syscall-level view, not a pattern list.
+   evasions; it cannot enumerate all of them. The Tier-1 and Tier-2 audits
+   (2026-06-12) closed the cheapest named shapes - single-variable
+   reconstruction (`x=rm; $x -rf`), `printf`-assembled strings piped to a
+   shell, `${IFS}` whitespace games, ANSI-C escape reconstruction
+   (`$'\x72\x6d'`, decoded before matching), command-substitution binary
+   resolution (`$(echo rm) -rf`), and `eval` of a destructive literal are now
+   caught (see `tests/test_audit_fixes_tier1.py` and `_tier2.py`) - but the
+   *class* remains open: glob-expanded binary paths (`/bin/[r]m -rf`), deeper
+   string-splitting, novel encodings, and importance-unknown truncation
+   (`: > important.db`) still evade, and are kept on the record as xfail-marked
+   residual tests. Catching "what a command *does*" rather than "what it
+   *looks like*" needs a shell AST parser or a syscall-level view, not a
+   pattern list.
 
 2. **Application-layer hooks can be bypassed by the layer below them.** Quill
    relies on the agent framework to call the hook. If the framework has a bug
@@ -97,8 +105,16 @@ real. We do not close them with more regex.
    not close the loophole.
 
 4. **Network egress is not gated.** Blocking `curl` does nothing against a
-   Python `requests.post`. Quill tracks the lethal trifecta heuristically but
-   does not inspect or block outbound connections.
+   Python `requests.post`. The Tier-2 audit (2026-06-12) added classification
+   for the common *credential-exfil shapes* - `scp`/`curl -F @cred`/
+   `nc < cred`/`openssl < cred`, wget request-body posts, and interpreter
+   one-liners that read a file/env and POST it - so the cheap exfil patterns
+   are now caught at the command layer. This is a partial mitigation, not
+   egress gating: a novel script, an already-running interpreter, or any
+   channel the classifier does not enumerate still exfiltrates freely. Quill
+   tracks the lethal trifecta heuristically but does not inspect or block the
+   outbound connection itself; only a network-egress proxy (roadmap) closes
+   this.
 
 5. **Local key + local log.** The audit log is tamper-*evident*, not
    tamper-*proof*. A fully compromised machine can rewrite both the log and
