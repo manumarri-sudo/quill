@@ -95,6 +95,14 @@ real. We do not close them with more regex.
    PreToolUse hooks), or if an attacker writes to the hook config *without
    going through a gated tool*, Quill never fires. The gate self-tamper
    detection above only covers tampering that flows through a gated tool.
+   Relatedly, `QUILL_BYPASS_MODE` / `CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS` in the
+   *inherited* environment downshift HIGH verdicts to a silent allow (the
+   operator opted out of HIGH prompts); the CRITICAL class never softens. An
+   agent that *sets* those vars through a gated tool is classified self-tamper
+   and denied, but one that inherits them already-exported (from the operator's
+   shell or a parent process) is not caught, because there is no gated tool call
+   to intercept. Treat a pre-exported bypass var as equivalent to running
+   without the gate for the HIGH class.
 
 3. **The write-then-run loophole.** An agent can use the (allowed) Write tool
    to create `deploy.py`, put `DROP TABLE` or a `requests.post` exfiltration
@@ -120,6 +128,18 @@ real. We do not close them with more regex.
    tamper-*proof*. A fully compromised machine can rewrite both the log and
    the HMAC key. The right framing is "locally tamper-evident, optionally
    externally anchored," not "immutable."
+
+6. **Trailing truncation is not detected by the chain alone.** Deleting the
+   last N lines of the log leaves a shorter but *valid* chain - each remaining
+   entry still links to its predecessor - so `quill audit verify` passes on a
+   truncated log. This is a weaker prerequisite than the limit-5 case: it needs
+   only write access to the log file, not the HMAC key. Mitigation: `seal_head`
+   records a high-water-mark (entry count + last mac) to a `<log>.head` sidecar,
+   and a later verify against it (`expected_count`) flags a shortfall; but
+   truncation *before* any seal, or deletion of the sidecar on a compromised
+   host, stays undetected. Per-write detection (a head pointer updated under the
+   emit flock) would close it but is deferred rather than risk the audited
+   tamper-evidence write path.
 
 ## What the limits mean for the claims
 
