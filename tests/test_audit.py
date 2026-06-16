@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from quill.audit import AuditLog, verify_chain
+from quill.audit import AuditLog, read_head, seal_head, verify_chain
+from quill.errors import AuditError
 
 
 def test_emits_signed_event(tmp_path: Path) -> None:
@@ -208,3 +209,65 @@ def test_chain_intact_under_concurrent_multiprocess_writers(tmp_path: Path) -> N
         f"chain broke under concurrent writers: {len(failures)} of {total} "
         f"failures at lines {failures[:10]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Trailing-truncation detection (#4/#16). The chain alone CANNOT see that the
+# last N lines were deleted - a shorter valid chain verifies clean. seal_head
+# records a high-water-mark so a later verify against it flags the shortfall.
+# ---------------------------------------------------------------------------
+
+
+def _emit_n(p: Path, key: bytes, n: int) -> None:
+    with AuditLog(path=p, hmac_key=key) as log:
+        for i in range(n):
+            log.emit(event_type="t", session_id="s", payload={"i": i})
+
+
+def test_truncation_passes_verify_without_a_sealed_head(tmp_path: Path) -> None:
+    # Documents the residual limit: with no high-water-mark, a shortened log
+    # still verifies clean.
+    p = tmp_path / "audit.jsonl"
+    key = b"k" * 32
+    _emit_n(p, key, 10)
+    lines = p.read_text().splitlines()
+    p.write_text("\n".join(lines[:6]) + "\n")  # drop the last 4 entries
+    total, failures = verify_chain(p, key)
+    assert total == 6
+    assert failures == []  # invisible to the bare chain
+
+
+def test_seal_head_then_shorten_is_detected(tmp_path: Path) -> None:
+    p = tmp_path / "audit.jsonl"
+    key = b"k" * 32
+    _emit_n(p, key, 10)
+
+    head = seal_head(p, key)
+    assert head["count"] == 10
+    assert read_head(p)["count"] == 10
+
+    lines = p.read_text().splitlines()
+    p.write_text("\n".join(lines[:6]) + "\n")  # drop the last 4 entries
+
+    sealed = read_head(p)["count"]
+    total, failures = verify_chain(p, key, expected_count=sealed)
+    assert total == 6
+    assert 0 in failures, "a shortfall past the sealed count must be flagged"
+
+
+def test_seal_head_refuses_a_broken_chain(tmp_path: Path) -> None:
+    p = tmp_path / "audit.jsonl"
+    key = b"k" * 32
+    _emit_n(p, key, 3)
+    # Corrupt a middle line so the chain no longer verifies.
+    lines = p.read_text().splitlines()
+    obj = json.loads(lines[1])
+    obj["payload"] = {"i": 999}
+    lines[1] = json.dumps(obj, separators=(",", ":"))
+    p.write_text("\n".join(lines) + "\n")
+    with pytest.raises(AuditError):
+        seal_head(p, key)
+
+
+def test_read_head_absent_returns_none(tmp_path: Path) -> None:
+    assert read_head(tmp_path / "nope.jsonl") is None

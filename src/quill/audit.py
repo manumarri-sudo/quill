@@ -22,6 +22,7 @@ risk >= HIGH so a power loss never drops a critical-risk row.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -248,11 +249,24 @@ class AuditLog:
         self.close()
 
 
-def verify_chain(path: Path, hmac_key: bytes) -> tuple[int, list[int]]:
+def verify_chain(
+    path: Path,
+    hmac_key: bytes,
+    *,
+    expected_count: int | None = None,
+) -> tuple[int, list[int]]:
     """Verify the HMAC chain over an existing log file.
 
     Returns (total_events, list of 1-based line numbers that failed verify).
     Empty failure list means the chain is intact.
+
+    `expected_count` closes the trailing-TRUNCATION gap. The chain alone can't
+    detect that the last N lines were deleted: each remaining entry still links
+    to its predecessor, so a truncated-but-valid shorter log verifies clean.
+    Pass the high-water-mark from a prior `seal_head` (see `read_head`) and a
+    shortfall (`total < expected_count`) is reported as a failure at line 0
+    (the "missing trailing entries" marker), so `if failures:` callers treat
+    the chain as broken.
     """
     failures: list[int] = []
     prev_mac_hex = ""
@@ -273,4 +287,52 @@ def verify_chain(path: Path, hmac_key: bytes) -> tuple[int, list[int]]:
                 prev_mac_hex = claimed_mac
             except (json.JSONDecodeError, KeyError, ValueError):
                 failures.append(i)
+    if expected_count is not None and total < expected_count:
+        failures.insert(0, 0)  # line 0 == trailing truncation vs sealed count
     return total, failures
+
+
+def _head_path(path: Path) -> Path:
+    """Sidecar path holding the sealed high-water-mark for `path`."""
+    return path.with_name(path.name + ".head")
+
+
+def seal_head(path: Path, hmac_key: bytes) -> dict[str, Any]:
+    """Record a high-water-mark (verified entry count + last mac) to a
+    `<log>.head` sidecar (mode 0o600), so later truncation is detectable.
+
+    Refuses to seal a chain that does not currently verify clean. This is an
+    EXPLICIT, off-write operation (e.g. invoked by `quill audit verify`); it is
+    deliberately NOT on the per-event hot path, so the gate's audited write path
+    is unchanged. Per-write truncation detection (a head pointer updated under
+    the emit flock) is the stronger form and is intentionally deferred rather
+    than risk the tamper-evidence write path.
+    """
+    total, failures = verify_chain(path, hmac_key)
+    if failures:
+        msg = f"refusing to seal: chain has {len(failures)} broken link(s)"
+        raise AuditError(msg)
+    last_mac = ""
+    if path.stat().st_size > 0:
+        lines = path.read_bytes().splitlines()
+        if lines:
+            with contextlib.suppress(json.JSONDecodeError, ValueError):
+                last_mac = json.loads(lines[-1]).get("mac", "")
+    head = {"count": total, "mac": last_mac, "ts": _now()}
+    hp = _head_path(path)
+    hp.write_text(json.dumps(head))
+    with contextlib.suppress(OSError):
+        hp.chmod(0o600)
+    return head
+
+
+def read_head(path: Path) -> dict[str, Any] | None:
+    """Read the sealed high-water-mark sidecar, or None if absent/unreadable."""
+    hp = _head_path(path)
+    if not hp.exists():
+        return None
+    with contextlib.suppress(OSError, json.JSONDecodeError, ValueError):
+        data = json.loads(hp.read_text())
+        if isinstance(data, dict):
+            return data
+    return None
