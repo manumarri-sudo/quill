@@ -63,7 +63,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 if TYPE_CHECKING:
     from quill.taint import TaintState
@@ -114,6 +114,14 @@ class HookDecision:
     what: str = ""  # human-readable: "rm -rf node_modules"
     why: str = ""  # human-readable: "matches `rm -rf` rule"
     try_instead: str = ""  # paste-able alternative
+    # Structured classification SOURCE. The run_hook downshift guards (trust
+    # scope, promoted override, bypass mode) gate on THIS field, never on a
+    # substring of the human-readable `reason`. Only "default" is eligible for
+    # downshift; "pattern"/"secret"/"namespace"/"self_tamper"/"override" are
+    # not, so a reason-wording change can't silently broaden a guard. (audit #21)
+    classified_by: Literal[
+        "default", "pattern", "secret", "namespace", "self_tamper", "override"
+    ] = "default"
 
 
 def _default_load_hmac_key() -> bytes:
@@ -324,6 +332,28 @@ def _summarize_call(tool_name: str, tool_input: Mapping[str, Any]) -> str:
     return tool_name
 
 
+def _classification_source(tool_name: str, reason: str) -> str:
+    """Map a classify_event verdict to its structured SOURCE for HookDecision.
+
+    Centralised here, next to where the reason is produced, instead of being
+    re-derived by sniffing the display `reason` string in each of the three
+    run_hook downshift guards. Only "default" is downshift-eligible. (audit #21)
+
+    (The canonical fix would have classify_event itself return the source, but
+    that changes its tuple arity and every unpack site across both adapters and
+    the test-suite; this localised map is the safe, behaviour-preserving form.)
+    """
+    if "secret detected" in reason:
+        return "secret"
+    if tool_name == "Bash":
+        return "pattern"
+    if "." in tool_name:  # namespace tool, e.g. "postgres.drop_table"
+        return "namespace"
+    if reason == f"default risk for {tool_name}":
+        return "default"
+    return "pattern"
+
+
 def decide(
     tool_name: str,
     tool_input: Mapping[str, Any],
@@ -345,6 +375,7 @@ def decide(
     """
     bypass = _detect_bypass_mode(hook_payload)
     risk, reason, suggestion = classify_event(tool_name, tool_input, bypass_mode=bypass)
+    classified_by = _classification_source(tool_name, reason)
     what = _summarize_call(tool_name, tool_input)
     if risk is Risk.CRITICAL:
         body = reason
@@ -367,6 +398,7 @@ def decide(
             what=what,
             why=reason,
             try_instead=suggestion,
+            classified_by=classified_by,
         )
     if risk is Risk.HIGH:
         body = f"high risk: {reason}"
@@ -397,6 +429,7 @@ def decide(
                 what=what,
                 why=f"auto-approved by overnight mode ({ovn_reason}): {reason}",
                 try_instead=suggestion,
+                classified_by=classified_by,
             )
         return HookDecision(
             permission="ask",
@@ -406,6 +439,7 @@ def decide(
             what=what,
             why=f"high risk: {reason}",
             try_instead=suggestion,
+            classified_by=classified_by,
         )
     return HookDecision(
         permission="allow",
@@ -415,6 +449,7 @@ def decide(
         what=what,
         why=reason,
         try_instead=suggestion,
+        classified_by=classified_by,
     )
 
 
@@ -824,7 +859,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     if (
         decision.permission == "ask"
         and tool_name in ("Edit", "Write", "MultiEdit", "NotebookEdit")
-        and "default risk for" in decision.reason
+        and decision.classified_by == "default"
         and cwd
     ):
         with contextlib.suppress(Exception):
@@ -866,7 +901,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     # ask path. CRITICAL events (decision.permission == "deny" from
     # classify_command pattern match) bypass this check entirely and
     # still fire.
-    if decision.permission == "ask" and "default risk for" in decision.reason:
+    if decision.permission == "ask" and decision.classified_by == "default":
         with contextlib.suppress(Exception):
             from quill.learn import _normalize_block_reason
             from quill.learning import load_active_overrides
@@ -898,7 +933,7 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     if (
         decision.permission == "ask"
         and tool_name in ("Edit", "Write", "MultiEdit", "NotebookEdit")
-        and "default risk for" in decision.reason
+        and decision.classified_by == "default"
     ):
         with contextlib.suppress(Exception):
             if _is_bypass_mode():
