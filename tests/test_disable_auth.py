@@ -154,3 +154,36 @@ def test_pause_json_is_in_adapter_gate_surface() -> None:
     from quill.adapters.claude_code import _GATE_CONFIG_SUFFIXES
 
     assert any("pause.json" in s for s in _GATE_CONFIG_SUFFIXES)
+
+
+# ---------------------------------------------------------------------------
+# REAL (un-mocked) boundary tests. Everything above mocks _human_tty_challenge;
+# these run the actual /dev/tty open in a process with NO controlling terminal,
+# which is exactly the agent/headless case. If the human-presence check ever
+# regressed to reading stdin (which an agent could feed) instead of /dev/tty,
+# or stopped fail-closing on OSError, these break. They cannot be mocked green.
+# ---------------------------------------------------------------------------
+
+
+def test_human_tty_challenge_failcloses_with_no_controlling_tty() -> None:
+    import subprocess
+    import sys
+
+    code = (
+        "from quill.cli import _human_tty_challenge\n"
+        "class C:\n"
+        "    def print(self, *a, **k):\n"
+        "        pass\n"
+        "print('RESULT', _human_tty_challenge(C(), 'test action'))\n"
+    )
+    # start_new_session=True detaches from the controlling terminal, so
+    # open('/dev/tty') raises OSError -> the challenge must return False (and
+    # must NOT hang waiting on input). A 15s timeout catches a hang regression.
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        start_new_session=True,
+        timeout=15,
+    )
+    assert "RESULT False" in proc.stdout, (proc.stdout, proc.stderr)

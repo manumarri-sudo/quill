@@ -195,3 +195,22 @@ def test_authenticate_maps_lockout_correctly() -> None:
 
     assert res.success is False
     assert res.reason == "lockout"
+
+
+# ---------------------------------------------------------------------------
+# REAL (un-mocked) probe. Everything above mocks LocalAuthentication; this runs
+# the actual codesign-based can_present_ui() that decides whether Touch ID is
+# even attempted. On the ad-hoc-signed uv interpreter this returns False - the
+# exact silent-failure path that broke `quill off` in production. If this code
+# raised or stopped returning a bool, the gate-disable flow would misbehave and
+# no mocked test would catch it.
+# ---------------------------------------------------------------------------
+
+
+def test_can_present_ui_runs_real_codesign_and_returns_bool() -> None:
+    from quill import touchid
+
+    if hasattr(touchid.can_present_ui, "cache_clear"):
+        touchid.can_present_ui.cache_clear()
+    result = touchid.can_present_ui()
+    assert isinstance(result, bool)
