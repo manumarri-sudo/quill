@@ -2,8 +2,10 @@
 
 **For:** AIUC-1 auditors (Schellman et al.), AI insurance underwriters (Armilla, Relm, Vouch), and AIUC-1 cert candidates.
 **Updated:** 2026-06-09
-**Quill version:** v0.3-prep (preceding 0.3.0)
+**Quill version:** v0.2.0a5 (alpha)
 **Status:** Quill ships the audit-event taxonomy described below today. Verifiable against the source: every event type in this doc resolves to a constant in [`src/quill/events.py`](../../src/quill/events.py), and every audit log entry is HMAC-SHA256-chained per [`src/quill/audit.py`](../../src/quill/audit.py).
+
+> **Disclaimer.** Quill produces a machine-verifiable audit record that **maps to** the evidence requests behind AIUC-1. It does **not** certify compliance, and an AIUC-1 certification is issued by an accredited auditor, not by a tool. This mapping is evidence your auditor will want to review, not the artifact they accept on its own. See [`docs/SECURITY-MODEL.md`](../SECURITY-MODEL.md) for the full claims calibration.
 
 ---
 

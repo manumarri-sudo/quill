@@ -155,6 +155,22 @@ real. We do not close them with more regex.
   cannot be bypassed" (false: see limits 1-4). Keep the two separate in any
   copy.
 
+### Claims we do and do not make
+
+A launch-gate for any README or marketing copy. If a claim is not at least
+"partial" below, it does not ship.
+
+| Claim | Status | Honest form |
+|---|---|---|
+| Deterministic gate | **Supported** | Same tool call -> same allow/ask/deny; no model in the decision path. Scope it to the *verdict*, never to record-and-replay. |
+| Tamper-evident audit log | **Supported** | HMAC-chained, locally tamper-evident (limits 5-6), optionally externally anchored. Not "immutable". |
+| Blocks the irreversible class | **Supported** | rm -rf / DROP TABLE / force-push / npm publish / .env reads etc. are default-critical via inspectable regex. |
+| Prevents prompt injection | **Partial / reframe** | It cannot be prompt-injected (no LLM) and refuses some injection *consequences* (lethal-trifecta deny); it does not *prevent* injection. Say "refuses the consequence, not detects the cause." |
+| Secure by default | **Partial** | The hook fails closed; the kernel floor is opt-in and `off`/`--no-biometric` exist. Say "defense-in-depth by default, hard boundary opt-in." |
+| Auditor evidence pack | **Partial** | Maps to evidence requests (SOC 2, EU AI Act Art 12-shaped, ISO 42001 A.6.2.8); does not certify compliance by itself. |
+| Enterprise-grade / production-safe | **Not yet** | Alpha, squatted dist name, no external audit. Do not claim. |
+| Cannot be bypassed / agent-proof | **Dangerous** | False - see limits 1-4. Never claim. |
+
 ## Roadmap to close the gaps (in honesty order)
 
 The fixes for the limits above are architectural, not pattern additions:

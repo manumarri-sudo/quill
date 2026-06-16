@@ -4,6 +4,8 @@
 **For:** CTOs and compliance leads at companies that deploy AI systems into the EU (whether their HQ is in the EU or not).
 **TL;DR:** On 2 August 2026, EU AI Act obligations land for high-risk AI system providers and deployers. Articles 12, 14, and 19 require automatic event logging, human-oversight evidence, and ≥6-month retention of those logs. Most agentic-AI deployments today do not produce logs of the shape these articles require. Quill is an open-source MIT artifact that does, and `quill audit export --pack` generates the evidence pack in one command.
 
+> **Disclaimer.** Quill produces an audit record that **maps to** the logging/oversight evidence requests behind Articles 12/14/19. It does **not** make you EU AI Act compliant by itself: compliance depends on your system's risk classification, your conformity assessment, retention custody, and obligations a tool cannot discharge for you. This is evidence your assessor will want to review, not a certificate. See [`docs/SECURITY-MODEL.md`](../SECURITY-MODEL.md) for the full claims calibration.
+
 ---
 
 ## What lands on 2 August 2026
