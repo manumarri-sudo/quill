@@ -73,12 +73,23 @@ def can_present_ui() -> bool:
         )
     except (OSError, subprocess.SubprocessError):
         return False
-    blob = (proc.stderr or "") + (proc.stdout or "")
-    if "Signature=adhoc" in blob:
+    return _signature_allows_ui((proc.stderr or "") + (proc.stdout or ""))
+
+
+def _signature_allows_ui(codesign_output: str) -> bool:
+    """Pure predicate: does this `codesign --verbose=2` output describe a
+    process that can present the LocalAuthentication biometric sheet?
+
+    Ad-hoc / linker-signed (no Team Identifier) cannot. Split out from the
+    subprocess call so the decision LOGIC is unit-testable against known
+    signature blobs - a live `codesign` call alone can't catch a logic
+    inversion (returning True for an ad-hoc signature), only a crash.
+    """
+    if "Signature=adhoc" in codesign_output:
         return False
     return any(
         line.startswith("TeamIdentifier=") and line.strip() != "TeamIdentifier=not set"
-        for line in blob.splitlines()
+        for line in codesign_output.splitlines()
     )
 
 

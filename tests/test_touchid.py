@@ -214,3 +214,24 @@ def test_can_present_ui_runs_real_codesign_and_returns_bool() -> None:
         touchid.can_present_ui.cache_clear()
     result = touchid.can_present_ui()
     assert isinstance(result, bool)
+
+
+def test_signature_allows_ui_logic_not_inverted() -> None:
+    # Pins the decision LOGIC (not just "returns a bool") against known codesign
+    # blobs, so a logic inversion - allowing UI for an ad-hoc signature - fails.
+    from quill.touchid import _signature_allows_ui
+
+    adhoc = (
+        "Executable=/x/python3\nIdentifier=-\n"
+        "Signature=adhoc\nTeamIdentifier=not set\n"
+    )
+    assert _signature_allows_ui(adhoc) is False
+
+    signed = (
+        "Executable=/Applications/X.app\nIdentifier=com.x.app\n"
+        "Authority=Developer ID Application: X\nTeamIdentifier=ABCDE12345\n"
+    )
+    assert _signature_allows_ui(signed) is True
+
+    # No Team Identifier at all -> cannot present.
+    assert _signature_allows_ui("TeamIdentifier=not set\n") is False
