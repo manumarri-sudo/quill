@@ -364,7 +364,7 @@ CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     (
         r"(?:>>?|\btee\b|\bsed\s+-i|\btruncate\b|\brm\b|\bmv\b|\bcp\b|\bdd\b|\bln\b)"
         r"[^|;]*(?:\.claude/settings(?:\.local)?\.json|\.cursor/hooks\.json|"
-        r"\.quill/(?:config\.toml|key|overrides\.toml))",
+        r"\.quill/(?:config\.toml|key|overrides\.toml|pause\.json))",
         "write/delete targeting the gate's own config (settings.json / config.toml)",
         "Editing the gate's config to disable it is a privilege-escalation shape. "
         "Change policy deliberately via `quill` commands, not by rewriting the files",
@@ -599,6 +599,35 @@ RAW_CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
         r"(?:\brmSync\b|\bunlinkSync\b|\brmdirSync\b|fs\.rm\()",
         "node -e with destructive call",
         "Write the script to a file first so it can be reviewed",
+    ),
+    # Gate self-disable via the LIBRARY, not the CLI. `python -c "from quill
+    # import pause; pause.pause()"` (or quill.overnight.enable/turn_on) flips the
+    # gate off through the state-mutation API, skipping the `quill off` CLI that
+    # the masked self-disable pattern guards. The call lives inside the -c quotes,
+    # so it MUST scan raw. The import / call shapes are specific enough that a
+    # legitimate command rarely contains them; a human pausing should use
+    # `quill off` in their own terminal (not hooked). (audit: 2nd-review gap #1.)
+    (
+        r"(?:from\s+quill\s+import\s+(?:pause|overnight)\b"
+        r"|import\s+quill\.(?:pause|overnight)\b"
+        r"|\bpause\.pause\s*\("
+        r"|\bovernight\.(?:enable|turn_on)\s*\()",
+        "library call disabling/pausing the Quill gate (pause/overnight API)",
+        "Disabling the gate is a human-only action; run `quill off` in your own "
+        "terminal. The pause/overnight library API is not an agent escape hatch.",
+    ),
+    # Gate self-disable via a write to the on-disk state, with the path commonly
+    # QUOTED (`> \"$HOME/.quill/pause.json\"`), which masking would blank - so
+    # scan raw. Mirrors the masked self-tamper rule but survives quoting; pause.json
+    # is the gate-off switch and was previously reachable through a bare Bash
+    # redirect. (audit: 2nd-review gap #2.)
+    (
+        r"(?:>>?|\btee\b|\bsed\s+-i|\bcp\b|\bmv\b|\bdd\b|\binstall\b|\brm\b|\bln\b)[^|\n]*"
+        r"(?:\.claude/settings(?:\.local)?\.json|\.cursor/hooks\.json|"
+        r"\.quill/(?:config\.toml|key|overrides\.toml|pause\.json))",
+        "write/delete targeting the gate's own config/state (quoted-path form)",
+        "Rewriting the gate's state files to disable it is a self-tamper shape. "
+        "Change policy via `quill` commands, not by rewriting the files.",
     ),
     (
         r"(?:^|[;&|]\s*)ruby\s+-e\b.*?"

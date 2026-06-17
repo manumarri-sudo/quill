@@ -276,10 +276,12 @@ _INLINE_CRED_PATTERNS: Final[tuple[tuple[str, re.Pattern[str]], ...]] = (
         "mysql-pflag",
         re.compile(r"(?<!\S)-p(?P<secret>(?!\[REDACTED:)(?=\S*[^a-z])\S{6,})"),
     ),
-    # Connection-string password: scheme://user:PASSWORD@host
+    # Connection-string password: scheme://user:PASSWORD@host. The username is
+    # OPTIONAL (`*` not `+`) so the userless form redis://:PASSWORD@host is also
+    # caught. (audit: 2nd-review gap #4.)
     (
         "dsn-password",
-        re.compile(r"://[^:/@\s]+:(?P<secret>(?!\[REDACTED:)[^@/\s]+)@"),
+        re.compile(r"://[^:/@\s]*:(?P<secret>(?!\[REDACTED:)[^@/\s]+)@"),
     ),
     # FOO_PASSWORD=... / DB_SECRET=... / X_TOKEN=... inline env assignment.
     # The `(?!\[REDACTED:)` guard keeps redact() idempotent: an already-

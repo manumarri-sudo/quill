@@ -347,3 +347,13 @@ def test_audit_what_field_is_redacted_end_to_end():
     what = _summarize_call("Bash", {"command": "deploy --token=ghp_" + "C" * 36})
     assert "ghp_" not in what
     assert "REDACTED" in what
+
+
+def test_redact_userless_dsn_password() -> None:
+    # 2nd-review gap #4: the userless connection-string form (no user before the
+    # colon) was passing through un-redacted.
+    from quill.secrets import redact
+
+    out = redact("redis://:authpass123@cache:6379/0")
+    assert "authpass123" not in out
+    assert "[REDACTED:dsn-password]" in out
