@@ -1,9 +1,9 @@
 """quill CLI.
 
+  quill begin          write .quill/contract.json from the approved task
+  quill verify         compare the diff to the contract, emit a verdict
   quill init           write a starter ~/.quill/config.toml
-  quill serve          run the MCP proxy (this is what Claude Code points to)
   quill tail           live-stream the audit log in a separate terminal
-  quill tree           render the multi-agent delegation tree (snapshot or live)
   quill audit verify   walk the HMAC chain on an existing log file
   quill audit show     pretty-print the log
 
@@ -23,7 +23,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-import anyio
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -31,31 +30,25 @@ from rich.table import Table
 from quill import decay as decay_mod
 from quill import journal as journal_mod
 from quill import telemetry as tel
-from quill import watch as watch_mod
 from quill._version import __version__
 from quill.adapters import claude_code as cc_adapter
 from quill.audit import AuditLog, verify_chain
 from quill.config import (
     default_audit_path,
     default_config_path,
-    load_config,
     render_starter_config,
 )
 from quill.doctor import run_doctor
-from quill.errors import ConfigError, QuillError
-from quill.policy import SessionIntent
-from quill.prompt import Prompter
-from quill.proxy import QuillProxy, build_proxy_server, run_stdio
-from quill.tree import render_tree_live, render_tree_static
+from quill.errors import QuillError
 
 app = typer.Typer(
     add_completion=False,
-    no_args_is_help=False,  # `quill` with no args runs `start`
-    help="quill: the pause button between AI agents and the things you can't undo.\n\n"
+    no_args_is_help=True,
+    help="quill change control: verify AI-written diffs against the human-approved task.\n\n"
+    "  quill begin      capture the approved task into .quill/contract.json\n"
+    "  quill verify     compare the diff to the contract, emit PASS / NEEDS_REVIEW / BLOCK\n"
     "  quill onboard    first-run interactive setup (detects agents, installs hooks)\n"
-    "  quill start      set up + open the dashboard (this is the only command most users need)\n"
     "  quill approve    go-ahead a blocked call (run from a notification)\n"
-    "  quill watch      in-terminal live dashboard\n"
     "  quill audit      review what got blocked / allowed / asked\n"
     "  quill receipts   per-session did / changed / uncertain / to-verify\n"
     "  quill bridge     A2A handoff edges between agents\n"
@@ -65,13 +58,6 @@ app = typer.Typer(
     "  quill decay      permissions that erode without reinforcement\n"
     "  quill doctor     diagnose the install\n",
 )
-
-
-@app.callback(invoke_without_command=True)
-def _root(ctx: typer.Context) -> None:
-    """When called with no subcommand, run `start`."""
-    if ctx.invoked_subcommand is None:
-        ctx.invoke(start)
 
 
 audit_app = typer.Typer(
@@ -122,12 +108,6 @@ approvals_app = typer.Typer(
 )
 app.add_typer(approvals_app, name="approvals")
 
-notify_app = typer.Typer(
-    no_args_is_help=True,
-    help="notification channels - test that your wiring actually delivers.",
-)
-app.add_typer(notify_app, name="notify")
-
 trust_app = typer.Typer(
     no_args_is_help=True,
     help="trusted directories - downshift default Edit/Write risk to auto-allow inside listed paths. The fix for approval fatigue.",
@@ -140,17 +120,112 @@ suggestions_app = typer.Typer(
 )
 app.add_typer(suggestions_app, name="suggestions")
 
-sandbox_app = typer.Typer(
-    no_args_is_help=True,
-    help="kernel-layer Seatbelt floor - inspect/regenerate the sandbox profile that confines the agent below the interpreter.",
-)
-app.add_typer(sandbox_app, name="sandbox")
 
-esf_app = typer.Typer(
-    no_args_is_help=True,
-    help="always-on Endpoint Security layer - compile the protected-path ruleset the ES extension enforces system-wide.",
-)
-app.add_typer(esf_app, name="esf")
+# --------------------------------------------------------------------------
+# Change Control: begin (capture the contract) + verify (gate the diff)
+# --------------------------------------------------------------------------
+
+
+@app.command("begin")
+def begin_cmd(
+    task: Annotated[
+        str,
+        typer.Argument(help="the approved task: an issue URL or free text."),
+    ],
+    scope: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--scope",
+            "-s",
+            help="allowed path (glob / dir / file). Repeatable. "
+            "Omit to declare no path restriction.",
+        ),
+    ] = None,
+    approved_by: Annotated[
+        str | None,
+        typer.Option("--approved-by", help="who approved this task (recorded in the contract)."),
+    ] = None,
+) -> None:
+    """Capture the human-approved task into .quill/contract.json.
+
+    Records WHAT was approved, WHERE it may touch (--scope), and the current
+    HEAD as the base commit. `quill verify` later measures the diff against it.
+    """
+    from quill import contract as contract_mod
+
+    try:
+        with AuditLog(path=default_audit_path(), hmac_key=_hmac_key()) as audit:
+            contract, path = contract_mod.begin(
+                task,
+                allowed_paths=tuple(scope or ()),
+                approved_by=approved_by,
+                audit=audit,
+            )
+    except QuillError as e:
+        console.print(f"[red]cannot create contract:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    out = Console()  # stdout - this is the command's primary output
+    out.print(f"[green]✓[/green] contract [bold]{contract.contract_id}[/bold] written to {path}")
+    out.print(f"  task: {contract.task}")
+    scope_str = ", ".join(contract.allowed_paths) or "(no path restriction)"
+    out.print(f"  scope: {scope_str}")
+    out.print(f"  base commit: {contract.base_commit or '(no commits yet)'}")
+    out.print("  next: let the agent work, then run [bold]quill verify[/bold]")
+
+
+@app.command("verify")
+def verify_cmd(
+    head: Annotated[
+        str,
+        typer.Option("--head", help="ref to verify against the base commit."),
+    ] = "HEAD",
+    passport_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--passport-dir",
+            help="where to write passport.json + passport.md (default: <repo>/.quill).",
+        ),
+    ] = None,
+    write_passport: Annotated[
+        bool,
+        typer.Option("--passport/--no-passport", help="write the passport artifacts."),
+    ] = True,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="print the machine-readable passport to stdout."),
+    ] = False,
+) -> None:
+    """Compare the diff to the contract and emit PASS / NEEDS_REVIEW / BLOCK.
+
+    Exit code is 0 for PASS / NEEDS_REVIEW and 1 for BLOCK, so this drops
+    straight into a CI gate. Evidence is written to .quill/passport.{json,md}.
+    """
+    from quill import contract as contract_mod
+    from quill import passport as passport_mod
+    from quill import verify as verify_mod
+
+    try:
+        contract = contract_mod.load()
+        root = contract_mod.repo_root()
+        with AuditLog(path=default_audit_path(), hmac_key=_hmac_key()) as audit:
+            result = verify_mod.verify(contract=contract, root=root, head=head, audit=audit)
+    except QuillError as e:
+        console.print(f"[red]verify failed:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    if write_passport:
+        out_dir = passport_dir or (root / ".quill")
+        json_path, md_path = passport_mod.write_passport(result, out_dir=out_dir)
+        console.print(f"[dim]passport: {md_path} · {json_path}[/dim]")
+
+    out = Console()  # stdout
+    if as_json:
+        out.print_json(data=passport_mod.build_passport(result))
+    else:
+        out.print(passport_mod.render_markdown(result))
+
+    raise typer.Exit(code=result.verdict.exit_code)
 
 
 @app.command(
@@ -325,9 +400,9 @@ def integrate_cmd(
     if agent == "list":
         installed = {i.name for i in detect_installed()}
         out.print("[bold]quill integrate — supported agents[/bold]\n")
-        for integ in all_integrations():
-            mark = "[green]found[/green]" if integ.name in installed else "[dim]not found[/dim]"
-            out.print(f"  {integ.name:14}  {integ.label:18}  {mark}")
+        for entry in all_integrations():
+            mark = "[green]found[/green]" if entry.name in installed else "[dim]not found[/dim]"
+            out.print(f"  {entry.name:14}  {entry.label:18}  {mark}")
         out.print(
             "\n[dim]run `quill integrate <name>` to install the rules snippet.[/dim]",
         )
@@ -343,8 +418,8 @@ def integrate_cmd(
             agent = found[0].name
         else:
             out.print("[bold]multiple agents detected.[/bold] pick one:")
-            for integ in found:
-                out.print(f"  quill integrate {integ.name}   ({integ.label})")
+            for cand in found:
+                out.print(f"  quill integrate {cand.name}   ({cand.label})")
             raise typer.Exit(code=0)
 
     integ = get_integration(agent)
@@ -882,288 +957,6 @@ def _hmac_key() -> bytes:
 
 
 # --------------------------------------------------------------------------
-# start - the front door. one command, sets up + opens dashboard.
-# --------------------------------------------------------------------------
-
-
-def _wizard_notifications(out: Console) -> None:
-    """Interactive prompt: enable + test out-of-band notifications.
-
-    Idempotent. If [notify] already exists in config.toml, just reports
-    status. Non-TTY contexts skip silently. KeyboardInterrupt-safe.
-    """
-    import platform
-    import tomllib
-
-    cfg_path = default_config_path()
-    if not cfg_path.exists():
-        return  # quill init wasn't run yet; nothing to extend
-
-    try:
-        with cfg_path.open("rb") as f:
-            raw = tomllib.load(f)
-    except Exception:
-        return
-
-    if not sys.stdin.isatty():
-        return  # non-interactive context (CI, piped input)
-
-    if isinstance(raw.get("notify"), dict):
-        out.print(
-            "  [green]✓[/green] notifications: configured "
-            "[dim](edit config.toml + run [bold]quill notify test[/bold] "
-            "to verify)[/dim]"
-        )
-        return
-
-    out.print()
-    out.print("  [bold]want a heads-up when something gets blocked?[/bold]")
-    out.print(
-        "  [dim]quill can fan a structured WHAT/WHY/TRY/APPROVE message out of the terminal.[/dim]"
-    )
-    try:
-        ans = (
-            typer.prompt(
-                "  enable notifications? (Y/n)",
-                default="Y",
-                show_default=False,
-            )
-            .strip()
-            .lower()
-        )
-    except (KeyboardInterrupt, EOFError):
-        ans = "n"
-    if ans == "n":
-        return
-
-    is_mac = platform.system() == "Darwin"
-    enable_macos = is_mac
-    notify_block = ["", "[notify]"]
-    if is_mac:
-        notify_block.append("macos = true                          # macOS Notification Center")
-        notify_block.append('sound = "Glass"')
-    notify_block.append("on_blocked = true                     # critical-risk denials fire")
-    notify_block.append(
-        "on_ask = false                        # high-risk ask-the-human events stay quiet"
-    )
-    notify_block.append('# slack_webhook_url = "https://hooks.slack.com/..."')
-    notify_block.append('# webhook_url = "https://your.endpoint/quill"')
-    notify_block.append("")
-    notify_block.append("# [notify.email]")
-    notify_block.append('# smtp_host = "smtp.gmail.com"')
-    notify_block.append("# smtp_port = 587")
-    notify_block.append('# smtp_user = "you@example.com"')
-    notify_block.append('# smtp_password_env = "QUILL_SMTP_PASS"')
-
-    try:
-        with cfg_path.open("a") as f:
-            f.write("\n".join(notify_block) + "\n")
-    except OSError:
-        out.print("  [yellow]⚠[/yellow] could not write notify config; skipping")
-        return
-
-    if enable_macos:
-        out.print(
-            "  [green]✓[/green] notifications: macOS Notification Center "
-            "[dim](Slack / email / webhook stubs commented in config.toml)[/dim]"
-        )
-    else:
-        out.print(
-            "  [green]✓[/green] notification stubs written "
-            "[dim](edit config.toml to enable Slack / email / webhook)[/dim]"
-        )
-
-    # Step 3 in the researcher's flow: send a test notification immediately
-    # so the user closes the "did it actually fire?" loop on first install.
-    if not enable_macos:
-        return
-    try:
-        ans = (
-            typer.prompt(
-                "  send a test notification now? (Y/n)",
-                default="Y",
-                show_default=False,
-            )
-            .strip()
-            .lower()
-        )
-    except (KeyboardInterrupt, EOFError):
-        ans = "n"
-    if ans == "n":
-        return
-
-    # Inline-fire the macOS channel synchronously (don't shell out to
-    # `quill notify test` - that re-reads config; we're already in-process).
-    from quill.notify import BlockMessage, NotifyConfig, _send_macos
-
-    test_cfg = NotifyConfig(enabled=True, macos=True, sound="Glass", on_blocked=True)
-    test_msg = BlockMessage(
-        risk="critical",
-        decision="blocked",
-        tool_name="quill.start_wizard_test",
-        args_preview={},
-        what="quill is wired up",
-        why="this is a self-test from quill start",
-        try_instead="",
-        approve_token="WIZARD",  # noqa: S106 - synthetic stub, never persisted
-    )
-    if _send_macos(test_cfg, test_msg):
-        out.print(
-            "  [green]✓[/green] test banner fired "
-            "[dim](check Notification Center; Focus mode can suppress)[/dim]"
-        )
-    else:
-        out.print(
-            "  [yellow]⚠[/yellow] osascript reported failure "
-            "[dim](check System Settings → Notifications → Script Editor)[/dim]"
-        )
-
-
-@app.command()
-def start(
-    no_browser: Annotated[
-        bool,
-        typer.Option("--no-browser", help="don't auto-open the dashboard"),
-    ] = False,
-    yes: Annotated[
-        bool,
-        typer.Option(
-            "--yes",
-            "-y",
-            help="don't prompt for the telemetry decision (leaves it as-is)",
-        ),
-    ] = False,
-) -> None:
-    """Install the hook, optionally enable telemetry, open the dashboard.
-
-    This is the only command most users will ever run. Idempotent - safe
-    to re-run; nothing gets duplicated. After this finishes, every Bash /
-    Edit / Write / NotebookEdit call in your Claude Code session is gated
-    by quill, signed into ~/.quill/audit.log.jsonl, and visible live in
-    the dashboard.
-    """
-    out = Console()
-
-    # Sweep orphan daemons/tree procs before doing setup. Common case:
-    # smoke tests under /tmp left detached daemons; old sessions left
-    # duplicate --daemon-child processes fighting for port 9099.
-    reaped = watch_mod.reap_orphans()
-    if reaped:
-        for pid, reason in reaped:
-            out.print(f"  [dim]reaped pid {pid}: {reason}[/dim]")
-
-    out.print()
-    out.print(
-        "[bold]quill[/bold] [dim]· the pause button between AI agents "
-        "and the things you can't undo[/dim]"
-    )
-    out.print()
-
-    # 1. Install the Claude Code PreToolUse hook (idempotent)
-    settings_path, was_installed = cc_adapter.install_into_settings()
-    if was_installed:
-        out.print(f"  [green]✓[/green] hook already installed in [dim]{settings_path}[/dim]")
-    else:
-        out.print(f"  [green]✓[/green] hook installed in [dim]{settings_path}[/dim]")
-        out.print("        [yellow]→ restart Claude Code to pick up the new hook[/yellow]")
-
-    # 1b. Compile the kernel-layer (Seatbelt/ESF) protected-path ruleset so the
-    # floor is ready the first time the operator runs `quill shell`. Best-effort.
-    try:
-        from quill import esf as _esf
-
-        _esf.write_ruleset()
-        out.print(
-            "  [green]✓[/green] kernel-layer ruleset compiled "
-            "[dim](run `quill shell` to confine a session at the kernel)[/dim]"
-        )
-    except Exception:
-        pass
-
-    # Setup is non-interactive by design (the one-command model): safe defaults
-    # now, configure later. The interactive walk-through - notification channels,
-    # agent auto-detection, risk presets - lives in `quill onboard`. Telemetry
-    # stays OFF unless you explicitly run `quill telemetry on`.
-    tel_on = tel.TelemetryState.load().opted_in
-    out.print(
-        f"  [green]✓[/green] telemetry: "
-        f"[{'green' if tel_on else 'dim'}]{'on' if tel_on else 'off (default)'}[/]"
-    )
-    _ = yes  # retained for compatibility; start is now non-interactive
-
-    # 3. Doctor sanity-check (silent unless something's wrong)
-    report = run_doctor()
-    if report.has_failures:
-        out.print()
-        out.print("  [red]✗ install has failures. run [bold]quill doctor[/bold] to see them.[/red]")
-        return
-    if report.has_warnings:
-        warns = [r for r in report.results if r.status == "[yellow]WARN[/yellow]"]
-        out.print(
-            f"  [yellow]⚠[/yellow] {len(warns)} warning(s)  [dim](quill doctor for details)[/dim]"
-        )
-    else:
-        out.print("  [green]✓[/green] install looks clean")
-
-    # 4. Start the live dashboard as a background daemon.
-    # The daemon survives Ctrl-C, terminal close, and Claude Code exit.
-    # The hook re-checks on every tool call and respawns if it died.
-    out.print()
-    log = default_audit_path()
-    n_events = 0
-    if log.exists():
-        with log.open() as f:
-            n_events = sum(1 for _ in f)
-
-    pid, bound_port = watch_mod.ensure_daemon(
-        log,
-        port=watch_mod.DEFAULT_PORT,
-        open_browser=False,
-    )
-    url = f"http://127.0.0.1:{bound_port}/"
-
-    out.print(
-        f"  [bold cyan]quill is live.[/bold cyan]  "
-        f"dashboard: [bold]{url}[/bold]  [dim](pid {pid})[/dim]"
-    )
-    out.print(f"  [dim]audit log: {log} · {n_events} entries[/dim]")
-    out.print()
-    out.print(
-        "  [bold green]you're covered.[/bold green] every agent action now clears quill first:"
-    )
-    out.print(
-        "    [green]✓[/green] risk gate          [dim]allow, ask, or deny on every Bash / Edit / Write / MCP call[/dim]"
-    )
-    out.print(
-        "    [green]✓[/green] secret scanning    [dim]credentials caught before they are written[/dim]"
-    )
-    out.print(
-        "    [green]✓[/green] lethal trifecta    [dim]untrusted input + private data + exfil path = blocked[/dim]"
-    )
-    out.print(
-        "    [green]✓[/green] self-tamper guard  [dim]edits to the gate's own config, key, and off-switch refused[/dim]"
-    )
-    out.print(
-        "    [green]✓[/green] tamper-evident log [dim]signed and chained, verify with `quill audit verify`[/dim]"
-    )
-    out.print(
-        "    [dim]○ kernel floor        run `quill shell` to confine the session at the syscall (`--seal` locks writes + egress)[/dim]"
-    )
-    out.print()
-    out.print(
-        "  [dim]watch live: quill watch  ·  pause: quill off  ·  review: quill saves  ·  daemon survives close, stop with quill stop[/dim]"
-    )
-
-    if not no_browser:
-        try:
-            import webbrowser
-
-            webbrowser.open(url)
-        except Exception:
-            pass
-
-
-# --------------------------------------------------------------------------
 # night / day - overnight auto-approval for unattended agents
 # --------------------------------------------------------------------------
 
@@ -1593,169 +1386,6 @@ def resume_cmd() -> None:
     on_cmd()
 
 
-@app.command("shell")
-def shell_cmd(
-    command: Annotated[
-        list[str] | None,
-        typer.Argument(
-            help="command to run confined (default: your $SHELL). "
-            "Everything it spawns inherits the sandbox.",
-        ),
-    ] = None,
-    seal: Annotated[
-        bool,
-        typer.Option(
-            "--seal",
-            help="high assurance: also confine ALL writes to the trust-path "
-            "allowlist and seal network egress to localhost. May break tools "
-            "that write outside your projects.",
-        ),
-    ] = False,
-    no_network: Annotated[
-        bool,
-        typer.Option(
-            "--no-network", help="seal egress to localhost without full write confinement."
-        ),
-    ] = False,
-    dry_run: Annotated[
-        bool,
-        typer.Option(
-            "--dry-run", help="print the generated profile and the launch command, then exit."
-        ),
-    ] = False,
-) -> None:
-    """launch a kernel-confined session (macOS Seatbelt floor).
-
-    Quill's PreToolUse hook is an application-layer gate - it sees the tool
-    calls the agent routes through the framework. This command adds the layer
-    BELOW that: a Seatbelt profile the macOS kernel enforces on the real
-    syscall, inherited by every interpreter and subprocess the agent spawns.
-    It closes what the text classifier structurally cannot - the write-then-run
-    loophole, raw network exfil, and edits to the gate's own hook scripts.
-
-    Default (floor): allow-default plus a kernel deny on the gate-disable and
-    persistence surface (~/.claude/hooks, settings.json, ~/.quill/config.toml,
-    the key, shell rc files). Does not break dev tooling.
-
-      confined shell:       quill shell
-      run one command:      quill shell -- python3 risky.py
-      high assurance:       quill shell --seal
-      launch a coding agent: quill shell -- cc      # or: quill shell -- claude
-    """
-    from quill import sandbox as _sb
-
-    console = Console()
-
-    if not _sb.sandbox_exec_available():
-        console.print(
-            "[red]sandbox-exec not found.[/red] The Seatbelt floor is macOS-only "
-            "(it ships with every Mac). On other platforms use the kernel floor "
-            "for your OS (Linux: Landlock/seccomp)."
-        )
-        raise typer.Exit(1)
-
-    cwd = str(Path.cwd())
-    spec = _sb.build_spec(cwd=cwd, confine_writes=seal, seal_network=seal or no_network)
-    profile = _sb.write_profile(spec)
-
-    inner = command or [os.environ.get("SHELL", "/bin/zsh")]
-    argv = _sb.launch_argv(profile, inner)
-
-    posture = (
-        "SEAL (writes confined + egress sealed)"
-        if seal
-        else ("FLOOR + egress sealed" if no_network else "FLOOR (gate-disable surface denied)")
-    )
-    if dry_run:
-        console.print(f"[bold]profile[/bold] -> {profile}\n")
-        console.print(profile.read_text())
-        console.print(f"[bold]posture[/bold]: {posture}")
-        console.print(f"[bold]launch[/bold] : {' '.join(argv)}")
-        return
-
-    console.print(f"[bold green]quill shell[/bold green] - kernel floor on [{posture}]")
-    console.print(f"[dim]profile: {profile} · confining: {' '.join(inner)}[/dim]")
-    _emit_gate_event(
-        "sandbox.session.open",
-        {"posture": posture, "cwd": cwd, "command": inner, "profile": str(profile)},
-    )
-    # Replace this process with the confined session so the user gets a normal
-    # interactive shell whose children are all sandboxed.
-    os.execvp(argv[0], argv)
-
-
-@sandbox_app.command("profile")
-def sandbox_profile_cmd(
-    seal: Annotated[
-        bool, typer.Option("--seal", help="render the high-assurance profile.")
-    ] = False,
-    write: Annotated[
-        bool, typer.Option("--write", help="write to <QUILL_HOME>/quill.sb instead of stdout.")
-    ] = False,
-) -> None:
-    """print (or write) the generated Seatbelt profile for the current directory."""
-    from quill import sandbox as _sb
-
-    console = Console()
-    spec = _sb.build_spec(cwd=str(Path.cwd()), confine_writes=seal, seal_network=seal)
-    if write:
-        p = _sb.write_profile(spec)
-        console.print(f"[green]wrote[/green] {p}")
-    else:
-        console.print(_sb.build_profile(spec))
-
-
-@esf_app.command("compile")
-def esf_compile_cmd(
-    show: Annotated[
-        bool, typer.Option("--show", help="print the ruleset instead of writing it.")
-    ] = False,
-) -> None:
-    """compile the protected-path policy into the ES extension's ruleset JSON.
-
-    The ES client reads this at ~/.quill/esf-rules.json and matches it
-    natively - policy is never evaluated by Python on the deadline-critical
-    auth path. Same protected paths as the Seatbelt floor, so the two layers
-    cannot drift.
-    """
-    from quill import esf as _esf
-
-    console = Console()
-    if show:
-        import json as _json
-
-        console.print(_json.dumps(_esf.compile_ruleset(), indent=2))
-        return
-    p = _esf.write_ruleset()
-    rs = _esf.compile_ruleset()
-    n = len(rs["protected_files"]) + len(rs["protected_prefixes"])
-    console.print(
-        f"[green]wrote[/green] {p}  [dim]({n} protected paths, fail_closed={rs['fail_closed']})[/dim]"
-    )
-
-
-@esf_app.command("status")
-def esf_status_cmd() -> None:
-    """show whether the ES ruleset is compiled and where the extension lives."""
-    from quill import esf as _esf
-
-    console = Console()
-    p = _esf.ruleset_path()
-    if p.exists():
-        import json as _json
-
-        rs = _json.loads(p.read_text())
-        n = len(rs.get("protected_files", [])) + len(rs.get("protected_prefixes", []))
-        console.print(f"ruleset: [green]compiled[/green] at {p} ({n} protected paths)")
-    else:
-        console.print(
-            f"ruleset: [yellow]not compiled[/yellow] - run `quill esf compile` (would write {p})"
-        )
-    console.print(
-        "[dim]extension source: native/quill-esf/ · build/test: native/quill-esf/build.sh test[/dim]"
-    )
-
-
 def _print_pause_status(console: Console) -> None:
     from quill import pause as _pause
 
@@ -1798,73 +1428,6 @@ def init(
     console.print(f"[green]wrote[/green] {p}")
     console.print("edit it to declare your session intent, scope, and upstreams.")
     console.print("then: [bold]quill start[/bold]")
-
-
-# --------------------------------------------------------------------------
-# serve
-# --------------------------------------------------------------------------
-
-
-@app.command(hidden=True)
-def serve(
-    config_path: Annotated[
-        Path | None,
-        typer.Option("--config", "-c"),
-    ] = None,
-) -> None:
-    """Run the MCP proxy server. Point Claude Code's mcpServers config here."""
-
-    async def _run() -> None:
-        try:
-            cfg = load_config(config_path)
-        except ConfigError as e:
-            console.print(f"[red]config error:[/red] {e}")
-            raise typer.Exit(code=1) from e
-
-        intent = SessionIntent(
-            session_id="ses_" + secrets.token_hex(4),
-            intent=cfg.session.intent,
-            scope=cfg.session.parsed_scope(),
-            budget_usd=cfg.session.budget_usd,
-        )
-
-        with AuditLog(path=cfg.audit.resolved_path(), hmac_key=_hmac_key()) as audit:
-            audit.emit(
-                event_type="session.start",
-                session_id=intent.session_id,
-                payload={
-                    "intent": intent.intent,
-                    "scope": [str(s) for s in intent.scope],
-                    "budget_usd": intent.budget_usd,
-                    "upstreams": [u.name for u in cfg.upstream],
-                },
-                force_fsync=True,
-            )
-            prompter = Prompter()
-            proxy = QuillProxy(
-                config=cfg,
-                audit=audit,
-                prompter=prompter,
-                intent=intent,
-            )
-            async with proxy:
-                console.print(
-                    f"[green]quill[/green] running. session={intent.session_id}, "
-                    f"upstreams={[u.name for u in cfg.upstream]}",
-                )
-                console.print(f"[dim]audit log: {cfg.audit.resolved_path()}[/dim]")
-                # Run the MCP server over stdio so Claude Code can connect.
-                server = build_proxy_server(proxy)
-                try:
-                    await run_stdio(server)
-                finally:
-                    _maybe_emit_telemetry(cfg.audit.resolved_path())
-
-    try:
-        anyio.run(_run)
-    except QuillError as e:
-        console.print(f"[red]quill error:[/red] {e}")
-        raise typer.Exit(code=1) from e
 
 
 # --------------------------------------------------------------------------
@@ -2901,41 +2464,6 @@ def audit_summary(
 
 
 # --------------------------------------------------------------------------
-# tree
-# --------------------------------------------------------------------------
-
-
-@app.command(hidden=True)
-def tree(
-    log_path: Annotated[
-        Path | None,
-        typer.Option("--log", "-l", help="path to the audit log"),
-    ] = None,
-    snapshot: Annotated[
-        bool,
-        typer.Option("--snapshot", help="one-shot render of the current tree"),
-    ] = False,
-    live: Annotated[
-        bool,
-        typer.Option("--live", help="live-update the tree as new audit events arrive"),
-    ] = False,
-) -> None:
-    """Render the delegation tree from an audit log (snapshot or live)."""
-    p = log_path or default_audit_path()
-    if not p.exists():
-        console.print(f"[yellow]no log:[/yellow] {p}")
-        raise typer.Exit(code=1)
-    if live and snapshot:
-        console.print("[red]choose one of --snapshot or --live[/red]")
-        raise typer.Exit(code=1)
-    # Default to snapshot when neither flag is given.
-    if live:
-        render_tree_live(p)
-    else:
-        render_tree_static(p)
-
-
-# --------------------------------------------------------------------------
 # doctor - install diagnostic
 # --------------------------------------------------------------------------
 
@@ -2955,10 +2483,9 @@ def doctor(
     """
     out = Console()  # use stdout, not stderr - script-friendly
 
-    # Sweep orphan daemons/tree procs as part of every doctor invocation.
-    # This is the most reliable cleanup hook because users run doctor
-    # when something feels off.
-    reaped = watch_mod.reap_orphans()
+    # The legacy live-dashboard daemon was removed in the change-control
+    # pivot; there are no orphan watcher/tree processes to sweep anymore.
+    reaped = 0
 
     report = run_doctor(config_path=config_path)
     out.print()
@@ -3212,223 +2739,6 @@ def journal_save(
 
     written = journal_mod.save_from_transcript(transcript, sessions_dir=sessions_dir)
     Console().print(f"[green]wrote[/green] {written}")
-
-
-# --------------------------------------------------------------------------
-# watch - live observability dashboard
-# --------------------------------------------------------------------------
-
-
-@app.command("watch")
-def watch(
-    log_path: Annotated[
-        Path | None,
-        typer.Option("--log", "-l", help="audit log to stream"),
-    ] = None,
-    port: Annotated[
-        int,
-        typer.Option("--port", "-p", help="local HTTP port (default: 9099)"),
-    ] = watch_mod.DEFAULT_PORT,
-    no_browser: Annotated[
-        bool,
-        typer.Option("--no-browser", help="don't auto-open the browser"),
-    ] = False,
-    terminal: Annotated[
-        bool,
-        typer.Option(
-            "--terminal",
-            "-t",
-            help="spawn a Terminal window running `quill tree --live` "
-            "instead of the browser dashboard (macOS only)",
-        ),
-    ] = False,
-    once: Annotated[
-        bool,
-        typer.Option(
-            "--once",
-            help="if a Quill watcher is already running, exit silently. "
-            "Useful in SessionStart hooks so windows don't stack.",
-        ),
-    ] = False,
-    daemon: Annotated[
-        bool,
-        typer.Option(
-            "--daemon",
-            help="start the BROWSER dashboard as a detached background "
-            "process and return immediately. Idempotent.",
-        ),
-    ] = False,
-    daemon_child: Annotated[
-        bool,
-        typer.Option(
-            "--daemon-child",
-            help="(internal) the actual daemon process - runs the server "
-            "and writes the PID file. Spawned by --daemon.",
-            hidden=True,
-        ),
-    ] = False,
-    browser: Annotated[
-        bool,
-        typer.Option(
-            "--browser",
-            help="use the localhost browser dashboard instead of the "
-            "in-terminal TUI. Default is now the TUI.",
-        ),
-    ] = False,
-) -> None:
-    """In-terminal live dashboard of every audit event as it's signed.
-
-    By default `quill watch` opens a beautiful TUI in the same terminal -
-    no separate browser tab, no port to remember. Use --browser for the
-    old localhost HTTP dashboard, --daemon to run that browser dashboard
-    in the background.
-    """
-    p = log_path or default_audit_path()
-
-    # The daemon-child path is the actual server process; never reap from
-    # inside it (we'd kill ourselves) and never reap before serving.
-    if daemon_child:
-        # We ARE the browser-dashboard daemon. Run with PID-file management.
-        watch_mod.serve(p, port=port, open_browser=False, write_pid_file=True)
-        return
-
-    # All other entry points sweep up orphans before doing anything. Keeps
-    # the long-tail of stale --daemon-child and --tree procs from piling
-    # up across sessions/smoke tests. Idempotent and silent on no-ops.
-    reaped = watch_mod.reap_orphans()
-    if reaped:
-        for pid, reason in reaped:
-            Console().print(f"  [dim]reaped pid {pid}: {reason}[/dim]")
-
-    if terminal:
-        _spawn_terminal_tree(p, once=once)
-        return
-
-    if daemon:
-        pid, bound_port = watch_mod.ensure_daemon(
-            p,
-            port=port,
-            open_browser=False,
-        )
-        url = f"http://127.0.0.1:{bound_port}/"
-        Console().print(
-            f"  [green]quill watch (browser) is running[/green] at [bold]{url}[/bold]"
-            f"  [dim](pid {pid})[/dim]\n"
-            "  daemon survives terminal close. stop with: [bold]quill stop[/bold]",
-        )
-        if not no_browser:
-            try:
-                import webbrowser
-
-                webbrowser.open(url)
-            except Exception:
-                pass
-        return
-
-    if browser:
-        if once and _watcher_already_running(port):
-            return
-        watch_mod.serve(p, port=port, open_browser=not no_browser)
-        return
-
-    # Default: in-terminal TUI. Lives in this terminal until `q`.
-    from quill.tui import run_tui
-
-    run_tui(p)
-
-
-@app.command("stop")
-def stop_daemon() -> None:
-    """Stop the background watch daemon if one is running."""
-    ok, msg = watch_mod.stop_daemon()
-    Console().print(("[green]" if ok else "[dim]") + msg + ("[/green]" if ok else "[/dim]"))
-
-
-def _watcher_already_running(port: int) -> bool:
-    """Cheap probe: bind-check the port. If something is listening, assume
-    it's a prior `quill watch` so the SessionStart hook doesn't stack."""
-    import socket
-
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(0.2)
-    try:
-        s.connect(("127.0.0.1", port))
-        s.close()
-        return True
-    except OSError:
-        return False
-
-
-def _spawn_terminal_tree(log_path: Path, *, once: bool) -> None:
-    """Open a new Terminal.app window running `quill tree --live <log>`.
-
-    macOS-only via osascript. If `once` is set, the SessionStart hook
-    semantics: don't stack. We tag the window title with a sentinel so a
-    second invocation can detect-and-skip.
-    """
-    if sys.platform != "darwin":
-        Console().print(
-            "  [yellow]--terminal currently macOS-only.[/yellow]\n"
-            f"  Run this in a side terminal: [bold]quill tree --live --log {log_path}[/bold]",
-        )
-        return
-
-    import subprocess
-
-    sentinel = "QUILL_TREE_LIVE"
-    if once:
-        # Already-open detection: AppleScript looks for a window with the sentinel.
-        check = subprocess.run(
-            [
-                "osascript",
-                "-e",
-                'tell application "Terminal" to '
-                'get count of (windows whose name contains "' + sentinel + '")',
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if (check.stdout or "").strip().isdigit() and int(check.stdout.strip()) > 0:
-            return  # already showing
-
-    # The shell command runs inside Terminal's `do script` AppleScript
-    # string, so every `"` in it has to be backslash-escaped or AppleScript
-    # bombs with `syntax error: A “[” can’t go after this “"”`. That bug
-    # made --terminal silently no-op for months; capture_output hid it.
-    # We also `activate` Terminal so the new window comes to the foreground
-    # - otherwise the spawned window opens behind the current app and the
-    # user thinks nothing happened.
-    # Trailing `; read` keeps the tab visible if quill tree crashes so the
-    # error is debuggable instead of silently closing.
-    cmd = (
-        f'echo \\"[{sentinel}]\\"; export PS1=\\"\\" ; '
-        f"quill tree --live --log {log_path}; "
-        f'ec=$?; echo \\"\\"; echo \\"quill tree exited (code $ec). '
-        f'press enter to close.\\"; read'
-    )
-    osa = (
-        f'tell application "Terminal"\n'
-        f"  activate\n"
-        f'  set newTab to do script "{cmd}"\n'
-        f'  set custom title of newTab to "{sentinel} · quill tree"\n'
-        f"  set frontmost of (first window whose tabs contains newTab) to true\n"
-        f"end tell\n"
-    )
-    try:
-        r = subprocess.run(
-            ["osascript", "-e", osa],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if r.returncode == 0:
-            Console().print("  [green]opened[/green] Terminal window: quill tree --live")
-        else:
-            err = (r.stderr or "").strip() or f"osascript exit {r.returncode}"
-            Console().print(f"  [yellow]could not spawn Terminal:[/yellow] {err}")
-    except Exception as e:
-        Console().print(f"  [yellow]could not spawn Terminal:[/yellow] {e}")
 
 
 # --------------------------------------------------------------------------
@@ -4290,8 +3600,6 @@ def trust_add(
     if not isinstance(trust_block, dict):
         trust_block = {}
     paths = list(trust_block.get("paths") or [])
-    if not isinstance(paths, list):
-        paths = []
     if resolved in paths:
         console.print(f"  [dim]already trusted:[/dim] {resolved}")
         return
@@ -4363,162 +3671,6 @@ def trust_check(
         console.print(f"  [dim]not trusted[/dim] {resolved}")
         console.print(f"  [dim]add with: quill trust add {resolved}[/dim]")
         raise typer.Exit(code=1)
-
-
-# --------------------------------------------------------------------------
-# notify - synchronously fire every configured channel + report which
-# delivered. Closes the "did my [notify] config actually work?" loop without
-# waiting for a real block to fire.
-
-
-@notify_app.command("test")
-def notify_test(
-    channel: Annotated[
-        str | None,
-        typer.Option(
-            "--channel",
-            "-c",
-            help="only fire one channel (macos|email|slack|webhook); default is all",
-        ),
-    ] = None,
-) -> None:
-    """Fire a synthetic notification through every configured channel and
-    print which ones actually delivered.
-
-    Each channel runs SYNCHRONOUSLY (not the daemon-thread fire-and-forget
-    of the live block path) so the user gets per-channel ✓/✗ feedback in
-    real time. Audit-log entry: tool_name="quill.notify_test" so live-fire
-    can be distinguished from real blocks in `quill audit show`.
-    """
-    import tomllib
-
-    from quill.config import default_config_path
-    from quill.notify import (
-        BlockMessage,
-        NotifyConfig,
-        _send_email,
-        _send_macos,
-        _send_slack,
-        _send_webhook,
-    )
-
-    cfg_path = default_config_path()
-    raw_notify: dict[str, Any] | None = None
-    if cfg_path.exists():
-        with cfg_path.open("rb") as f:
-            raw = tomllib.load(f)
-        if isinstance(raw, dict):
-            raw_notify = raw.get("notify")
-    if not raw_notify:
-        console.print(
-            "[yellow]no [notify] section in config[/yellow] "
-            f"({cfg_path})\n"
-            "  add a [notify] block to enable channels - see "
-            "https://github.com/manumarri-sudo/quill#notifications",
-        )
-        raise typer.Exit(code=1)
-
-    notify_cfg = NotifyConfig.from_dict(raw_notify)
-    msg = BlockMessage(
-        risk="critical",
-        decision="blocked",
-        tool_name="quill.notify_test",
-        args_preview={"command": "self-test"},
-        what="quill notify test (synthetic)",
-        why="this is a self-test - no real call was blocked",
-        try_instead="ignore - verifying your notification wiring",
-        approve_token="TEST" + secrets.token_urlsafe(6),
-    )
-
-    senders = {
-        "macos": _send_macos,
-        "email": _send_email,
-        "slack": _send_slack,
-        "webhook": _send_webhook,
-    }
-    if channel:
-        if channel not in senders:
-            console.print(
-                f"[red]unknown channel[/red] {channel!r} - valid: {', '.join(senders)}",
-            )
-            raise typer.Exit(code=1)
-        senders = {channel: senders[channel]}
-
-    table = Table(title="quill notify test")
-    table.add_column("channel", no_wrap=True, width=10)
-    table.add_column("configured?", width=12)
-    table.add_column("delivered?", width=12)
-    table.add_column("notes", overflow="fold")
-
-    results: dict[str, bool] = {}
-    for name, sender in senders.items():
-        configured = _channel_configured(notify_cfg, name)
-        if not configured:
-            table.add_row(name, "[dim]no[/dim]", "-", "(not in [notify] section)")
-            results[name] = False
-            continue
-        try:
-            ok = bool(sender(notify_cfg, msg))
-        except Exception as e:
-            table.add_row(
-                name, "[green]yes[/green]", "[red]✗ error[/red]", f"{type(e).__name__}: {e}"
-            )
-            results[name] = False
-            continue
-        results[name] = ok
-        if ok:
-            table.add_row(name, "[green]yes[/green]", "[green]✓[/green]", "channel reports success")
-        else:
-            table.add_row(
-                name,
-                "[green]yes[/green]",
-                "[yellow]✗[/yellow]",
-                "channel returned False (check creds / focus mode / network)",
-            )
-
-    Console().print(table)
-
-    # Audit-log the test so it appears in `quill audit show`.
-    try:
-        with AuditLog(path=default_audit_path(), hmac_key=_hmac_key()) as audit:
-            audit.emit(
-                event_type="notify.dispatched",
-                session_id="quill-notify-test",
-                agent_id="quill.notify_test",
-                risk="low",
-                payload={
-                    "tool_name": "quill.notify_test",
-                    "decision": "test",
-                    "risk": "critical",
-                    "channels": results,
-                    "approve_token": msg.approve_token,
-                },
-            )
-    except Exception:
-        pass
-
-    if not any(results.values()):
-        console.print(
-            "[red]nothing delivered.[/red] "
-            "verify channel creds / Focus mode / network reachability.",
-        )
-        raise typer.Exit(code=2)
-    console.print(
-        "[dim]audit-logged as[/dim] notify.dispatched [dim](tool_name=quill.notify_test)[/dim]",
-    )
-
-
-def _channel_configured(cfg: Any, name: str) -> bool:
-    """True iff the user supplied enough config for this channel to even try."""
-    if name == "macos":
-        return bool(getattr(cfg, "macos", False))
-    if name == "email":
-        return bool(getattr(cfg, "email_to", "") and getattr(cfg, "smtp_host", ""))
-    if name == "slack":
-        return bool(getattr(cfg, "slack_webhook_url", ""))
-    if name == "webhook":
-        return bool(getattr(cfg, "webhook_url", ""))
-    return False
 
 
 # --------------------------------------------------------------------------

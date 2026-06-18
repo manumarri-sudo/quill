@@ -60,6 +60,15 @@ APPROVE_BIOMETRIC_SKIPPED: Final[str] = "approve.biometric.skipped"
 GATE_PAUSED: Final[str] = "gate.paused"
 GATE_RESUMED: Final[str] = "gate.resumed"
 
+# Change Control (CI/CD pull-request gate). `quill begin` captures the
+# human-approved task into a contract; `quill verify` compares the diff to
+# that contract and emits a verdict. Both are audit-chained so a Change
+# Passport can cite a tamper-evident record of when the task was approved
+# and what the verification saw. Human-readable names: "Contract Created"
+# and "Verification Run".
+CONTRACT_CREATED: Final[str] = "contract.created"
+VERIFICATION_RUN: Final[str] = "verification.run"
+
 # Set of all known event types - useful for validation / filtering.
 ALL_EVENT_TYPES: Final[frozenset[str]] = frozenset(
     {
@@ -85,5 +94,7 @@ ALL_EVENT_TYPES: Final[frozenset[str]] = frozenset(
         APPROVE_BIOMETRIC_SKIPPED,
         GATE_PAUSED,
         GATE_RESUMED,
+        CONTRACT_CREATED,
+        VERIFICATION_RUN,
     },
 )

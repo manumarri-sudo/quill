@@ -221,10 +221,7 @@ def test_signature_allows_ui_logic_not_inverted() -> None:
     # blobs, so a logic inversion - allowing UI for an ad-hoc signature - fails.
     from quill.touchid import _signature_allows_ui
 
-    adhoc = (
-        "Executable=/x/python3\nIdentifier=-\n"
-        "Signature=adhoc\nTeamIdentifier=not set\n"
-    )
+    adhoc = "Executable=/x/python3\nIdentifier=-\nSignature=adhoc\nTeamIdentifier=not set\n"
     assert _signature_allows_ui(adhoc) is False
 
     signed = (

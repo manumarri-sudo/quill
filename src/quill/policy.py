@@ -8,7 +8,9 @@ on the hot path.
 from __future__ import annotations
 
 import enum
+import fnmatch
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
@@ -1235,3 +1237,294 @@ class SessionIntent(BaseModel):
             f"session's allow-list. your scope was: {scopes}. this call's "
             f"target was: {target!r}."
         )
+
+
+# ---------------------------------------------------------------------------
+# Change Control: deterministic evaluation of a git diff against a contract.
+#
+# This is the diff-shaped analogue of classify_command(): no AI, every check is
+# a string/glob/regex operation. `quill verify` calls evaluate_diff() to learn
+# (1) which changed paths fall outside the human-approved scope, (2) which added
+# lines tripped the existing secret scanner, and (3) which sensitive surfaces
+# (tests, CI workflows, lockfiles) the change touched. The PASS/NEEDS_REVIEW/
+# BLOCK verdict is composed from this evidence in quill.verify.
+# ---------------------------------------------------------------------------
+
+# Lockfiles, matched by basename: editing one silently changes the resolved
+# dependency tree, so a diff that touches one is a sensitive surface even when
+# the change itself looks innocuous.
+_LOCKFILE_NAMES: Final[frozenset[str]] = frozenset(
+    {
+        "uv.lock",
+        "poetry.lock",
+        "Pipfile.lock",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
+        "go.sum",
+        "composer.lock",
+        "Gemfile.lock",
+    },
+)
+
+_HUNK_RE: Final[re.Pattern[str]] = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+@dataclass(frozen=True)
+class DiffFile:
+    """One file touched by a unified diff.
+
+    `path` is the post-change path (the old path for a pure deletion).
+    `added_lines` are (new-file 1-indexed line number, text) pairs for every
+    `+` line in the hunks - exactly the lines a human introduced, which is the
+    surface the secret scanner runs over.
+    """
+
+    path: str
+    old_path: str | None
+    status: str  # "added" | "modified" | "deleted" | "renamed"
+    added_lines: tuple[tuple[int, str], ...]
+
+
+@dataclass(frozen=True)
+class SecretFinding:
+    """A secret-scanner hit on an added line. The matched VALUE is never
+    stored - only where it was found and which pattern fired - so this is
+    safe to write into the audit log and the passport."""
+
+    path: str
+    line: int
+    pattern_name: str
+
+
+@dataclass(frozen=True)
+class DiffEvaluation:
+    """Deterministic findings for a diff measured against a contract scope."""
+
+    files: tuple[DiffFile, ...]
+    out_of_scope: tuple[str, ...]
+    secret_findings: tuple[SecretFinding, ...]
+    sensitive_surfaces: dict[str, tuple[str, ...]]
+    allowed_paths: tuple[str, ...]
+
+    @property
+    def changed_paths(self) -> tuple[str, ...]:
+        return tuple(f.path for f in self.files)
+
+    @property
+    def clean(self) -> bool:
+        """True iff nothing needs human attention: every path in scope, no
+        secrets on added lines, no sensitive surface touched."""
+        return not (
+            self.out_of_scope or self.secret_findings or any(self.sensitive_surfaces.values())
+        )
+
+
+def _normalize_diff_path(raw: str) -> str:
+    """Strip the a//b/ prefix and surrounding git quoting from a diff path."""
+    raw = raw.strip()
+    if len(raw) >= 2 and raw[0] == '"' and raw[-1] == '"':
+        raw = raw[1:-1]
+    if raw.startswith(("a/", "b/")):
+        raw = raw[2:]
+    return raw.removeprefix("./")
+
+
+def parse_unified_diff(diff_text: str) -> list[DiffFile]:
+    """Parse `git diff` output into per-file records with added lines.
+
+    Tolerant by design: it tracks file boundaries from `diff --git` headers,
+    paths from the `---`/`+++` lines (and rename headers), and new-file line
+    numbers from `@@` hunk headers. Binary-file stanzas yield a DiffFile with
+    no added lines. Anything it cannot interpret is skipped rather than raising,
+    because a parse error must never make the gate fail open silently - callers
+    treat an empty result as "no changes", which is the conservative direction
+    for a PASS gate (no evidence of safety, not proof of it).
+    """
+    files: list[DiffFile] = []
+    cur_old: str | None = None
+    cur_new: str | None = None
+    status = "modified"
+    added: list[tuple[int, str]] = []
+    new_lineno = 0
+    in_hunk = False
+
+    def flush() -> None:
+        nonlocal cur_old, cur_new, status, added, in_hunk
+        if cur_new is None and cur_old is None:
+            return
+        path = cur_new if (cur_new and cur_new != "/dev/null") else (cur_old or "")
+        files.append(
+            DiffFile(
+                path=_normalize_diff_path(path),
+                old_path=_normalize_diff_path(cur_old) if cur_old else None,
+                status=status,
+                added_lines=tuple(added),
+            )
+        )
+        cur_old = cur_new = None
+        status = "modified"
+        added = []
+        in_hunk = False
+
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            flush()
+            continue
+        if line.startswith("new file"):
+            status = "added"
+            continue
+        if line.startswith("deleted file"):
+            status = "deleted"
+            continue
+        if line.startswith("rename from "):
+            cur_old = line[len("rename from ") :]
+            status = "renamed"
+            continue
+        if line.startswith("rename to "):
+            cur_new = line[len("rename to ") :]
+            status = "renamed"
+            continue
+        if line.startswith("--- "):
+            cur_old = line[4:]
+            in_hunk = False
+            continue
+        if line.startswith("+++ "):
+            cur_new = line[4:]
+            in_hunk = False
+            continue
+        m = _HUNK_RE.match(line)
+        if m:
+            new_lineno = int(m.group(1))
+            in_hunk = True
+            continue
+        if not in_hunk:
+            continue
+        if line.startswith("+"):
+            added.append((new_lineno, line[1:]))
+            new_lineno += 1
+        elif line.startswith("-"):
+            pass  # removed line: does not advance the new-file counter
+        elif line.startswith("\\"):
+            pass  # "\ No newline at end of file"
+        else:
+            new_lineno += 1  # context line
+    flush()
+    return files
+
+
+def _path_matches(path: str, pattern: str) -> bool:
+    """True iff `path` is covered by one allowed-scope `pattern`.
+
+    Three shapes, most-permissive-wins because this is an allow-list:
+      - glob (`*`, `?`, `[`): fnmatch, e.g. `src/**/*.py`, `src/*`.
+      - directory (`src/` or bare `src`): the prefix and everything under it.
+      - exact file path.
+    """
+    path = path.removeprefix("./")
+    pattern = pattern.strip().removeprefix("./")
+    if not pattern:
+        return False
+    if pattern in ("*", "**", "."):
+        return True
+    if any(ch in pattern for ch in "*?["):
+        # fnmatch treats `*` as crossing `/`, so `src/*` already covers nested
+        # files; collapse `**/` so `src/**/x` behaves like the glob a human means.
+        collapsed = pattern.replace("**/", "*/").replace("**", "*")
+        return fnmatch.fnmatch(path, collapsed) or fnmatch.fnmatch(path, pattern)
+    pattern = pattern.rstrip("/")
+    return path == pattern or path.startswith(pattern + "/")
+
+
+def path_in_scope(path: str, allowed_paths: Sequence[str]) -> bool:
+    """True iff `path` is inside the contract's allowed scope.
+
+    An empty allow-list means "no scope restriction declared" and therefore
+    allows everything; a non-empty list is an allow-list and a path matches if
+    it is covered by any single entry.
+    """
+    if not allowed_paths:
+        return True
+    return any(_path_matches(path, p) for p in allowed_paths)
+
+
+def classify_sensitive_surface(path: str) -> str | None:
+    """Classify a path as a sensitive surface, or None.
+
+    "tests"     - test files (a diff that edits the tests it should be passing
+                  deserves a second look).
+    "ci"        - CI/CD pipeline definitions (they run with credentials).
+    "lockfiles" - dependency lockfiles (silent supply-chain surface).
+    """
+    p = path.removeprefix("./")
+    base = p.rsplit("/", 1)[-1]
+    parts = p.split("/")
+
+    if base in _LOCKFILE_NAMES:
+        return "lockfiles"
+    if (
+        p.startswith(".github/workflows/")
+        or p.startswith(".github/actions/")
+        or p.startswith(".circleci/")
+        or p.startswith(".gitlab-ci")
+        or base in ("Jenkinsfile", "azure-pipelines.yml", ".gitlab-ci.yml")
+    ):
+        return "ci"
+    if (
+        base.startswith("test_")
+        or base.endswith(("_test.py", "_test.go"))
+        or base == "conftest.py"
+        or ".test." in base
+        or ".spec." in base
+        or "tests" in parts
+        or "__tests__" in parts
+    ):
+        return "tests"
+    return None
+
+
+def evaluate_diff(diff_text: str, allowed_paths: Sequence[str]) -> DiffEvaluation:
+    """Deterministically evaluate a unified diff against a contract scope.
+
+    Returns the raw evidence - out-of-scope paths, secret hits on added lines,
+    and sensitive surfaces touched - without rendering a verdict. quill.verify
+    composes PASS / NEEDS_REVIEW / BLOCK from this plus any logged exceptions.
+
+    The secret scan runs per added line so each SecretFinding carries the real
+    new-file line number, and the matched value is never retained.
+    """
+    from quill import secrets as _secrets
+
+    # Quill's own metadata dir (contract.json, exceptions.json, passport.*) is
+    # never agent-authored code; committing it must not register as an
+    # out-of-scope change against the contract it describes.
+    files = tuple(f for f in parse_unified_diff(diff_text) if not f.path.startswith(".quill/"))
+    allowed = tuple(allowed_paths)
+
+    out_of_scope: list[str] = []
+    secret_findings: list[SecretFinding] = []
+    surfaces: dict[str, list[str]] = {"tests": [], "ci": [], "lockfiles": []}
+
+    for f in files:
+        scope_path = f.path or (f.old_path or "")
+        if not path_in_scope(scope_path, allowed):
+            out_of_scope.append(scope_path)
+
+        surface = classify_sensitive_surface(f.path)
+        if surface is not None and f.path not in surfaces[surface]:
+            surfaces[surface].append(f.path)
+
+        for lineno, text in f.added_lines:
+            for hit in _secrets.scan(text):
+                secret_findings.append(
+                    SecretFinding(path=f.path, line=lineno, pattern_name=hit.pattern_name)
+                )
+
+    return DiffEvaluation(
+        files=tuple(files),
+        out_of_scope=tuple(out_of_scope),
+        secret_findings=tuple(secret_findings),
+        sensitive_surfaces={k: tuple(v) for k, v in surfaces.items()},
+        allowed_paths=allowed,
+    )

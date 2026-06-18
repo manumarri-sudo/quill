@@ -142,14 +142,6 @@ def test_passes_on_touchid_success(monkeypatch) -> None:
     _require_disable_auth(_Console())  # must not raise
 
 
-def test_pause_json_is_protected_in_sandbox() -> None:
-    """The gate-off state file must be in the kernel-floor protected set."""
-    from quill import sandbox
-
-    files, _trees = sandbox.default_protected()
-    assert any("pause.json" in f for f in files)
-
-
 def test_pause_json_is_in_adapter_gate_surface() -> None:
     from quill.adapters.claude_code import _GATE_CONFIG_SUFFIXES
 

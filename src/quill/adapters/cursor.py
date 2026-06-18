@@ -412,12 +412,10 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     if decision.permission != "allow" or approval_token_used:
         with contextlib.suppress(Exception):
             from quill import learning
-            from quill.learn import _normalize_block_reason
 
-            head = _normalize_block_reason(original_decision_reason) or original_decision_reason
-            pattern_id = f"{tool_name}:{head}"[:80]
-            verdict_label = "approve" if approval_token_used else "deny"
-            learning.post_decision_update(pattern_id, verdict_label)
+            learning.record_decision_learning(
+                tool_name, original_decision_reason, bool(approval_token_used)
+            )
 
     # Cursor's response shape (NOT Claude Code's hookSpecificOutput).
     response: dict[str, Any] = {"permission": decision.permission}
@@ -453,11 +451,13 @@ def install_into_settings(settings_path: Any = None) -> tuple[Any, bool]:
     existing: dict[str, Any] = {}
     if path.exists():
         try:
-            existing = json.loads(path.read_text() or "{}")
+            loaded: Any = json.loads(path.read_text() or "{}")
         except json.JSONDecodeError:
-            existing = {}
-    if not isinstance(existing, dict):
-        existing = {}
+            loaded = {}
+        # A top-level JSON array/scalar is malformed for a hooks file; ignore it
+        # and keep the empty dict so we never index a non-mapping below.
+        if isinstance(loaded, dict):
+            existing = loaded
 
     if "version" not in existing:
         existing["version"] = 1
@@ -513,16 +513,6 @@ def main() -> int:
             load_config(project_cfg_path)
 
     log_path = log_path or default_audit_path()
-
-    # Lazily ensure the dashboard daemon is alive (parity with Claude Code
-    # adapter). Skippable via QUILL_NO_AUTO_WATCH for power users / CI.
-    import os
-
-    if not os.environ.get("QUILL_NO_AUTO_WATCH"):
-        with contextlib.suppress(Exception):
-            from quill import watch as _watch
-
-            _watch.ensure_daemon(log_path, open_browser=False)
 
     try:
         with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:

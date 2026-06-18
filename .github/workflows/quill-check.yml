@@ -1,0 +1,45 @@
+name: quill-change-control
+
+# Gate every pull request: verify the diff against the human-approved contract
+# (.quill/contract.json) and publish a Change Passport as a Status Check.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  statuses: write # publish the commit Status Check
+  pull-requests: write # (reserved) post the passport as a PR comment
+
+jobs:
+  change-control:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history so the base commit is available)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Skip when no contract is present
+        id: guard
+        run: |
+          if [[ -f .quill/contract.json ]]; then
+            echo "have_contract=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "have_contract=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::No .quill/contract.json found - run 'quill begin' and commit the contract to enable Change Control."
+          fi
+
+      - name: Quill Change Control
+        if: steps.guard.outputs.have_contract == 'true'
+        id: quill
+        uses: ./
+        with:
+          install-from-source: "true"
+          head: ${{ github.event.pull_request.head.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          fail-on-block: "true"
+
+      - name: Report verdict
+        if: steps.guard.outputs.have_contract == 'true'
+        run: echo "Quill verdict was ${{ steps.quill.outputs.verdict }}"

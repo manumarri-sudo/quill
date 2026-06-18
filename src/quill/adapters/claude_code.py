@@ -94,6 +94,12 @@ DEFAULT_BUILTIN_RISK: Final[Mapping[str, Risk]] = {
 }
 
 
+# Structured classification SOURCE (audit #21). Defined once as a named alias so
+# HookDecision and _classification_source stay in lockstep; the run_hook downshift
+# guards gate on this field, never on the display `reason` string.
+ClassifiedBy = Literal["default", "pattern", "secret", "namespace", "self_tamper", "override"]
+
+
 @dataclass(slots=True)
 class HookDecision:
     """The gate's verdict for a single Claude Code PreToolUse event.
@@ -119,9 +125,7 @@ class HookDecision:
     # substring of the human-readable `reason`. Only "default" is eligible for
     # downshift; "pattern"/"secret"/"namespace"/"self_tamper"/"override" are
     # not, so a reason-wording change can't silently broaden a guard. (audit #21)
-    classified_by: Literal[
-        "default", "pattern", "secret", "namespace", "self_tamper", "override"
-    ] = "default"
+    classified_by: ClassifiedBy = "default"
 
 
 def _default_load_hmac_key() -> bytes:
@@ -168,6 +172,27 @@ def _detect_bypass_mode(hook_payload: Mapping[str, Any] | None = None) -> bool:
     return False
 
 
+def _writable_payloads(tool_input: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """Extract (path, content) pairs from a file-write tool's args.
+
+    Covers Claude Code's Write (``content``), Edit/MultiEdit (``new_string``),
+    and NotebookEdit (``new_source``) shapes. Only non-empty string payloads
+    are returned, paired with whatever path key the tool used.
+    """
+    path = ""
+    for key in ("file_path", "path", "notebook_path"):
+        value = tool_input.get(key)
+        if isinstance(value, str):
+            path = value
+            break
+    payloads: list[tuple[str, str]] = []
+    for key in ("content", "new_string", "new_source", "new_str"):
+        value = tool_input.get(key)
+        if isinstance(value, str) and value:
+            payloads.append((path, value))
+    return payloads
+
+
 def classify_event(
     tool_name: str,
     tool_input: Mapping[str, Any],
@@ -205,6 +230,26 @@ def classify_event(
             f"secret detected in write: {summary}",
             "move the value to a secrets manager / env var and reference it by name",
         )
+
+    # Pre-execution AST scan (Phase 2, write-then-run). A Python file the agent
+    # writes now and runs later via an already-allowed `python x.py` can carry
+    # destructive logic the command classifier never sees. We parse the written
+    # payload with the stdlib `ast` module and escalate destructive shapes
+    # (shutil.rmtree, os.system, subprocess, exec(base64...)) to CRITICAL, the
+    # same posture as a secret hit. Non-Python / unparseable payloads yield
+    # nothing, so prose and JSON writes are never blocked.
+    if tool_name in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+        from quill import code_scan
+
+        for path, content in _writable_payloads(tool_input):
+            crit = code_scan.critical_findings(code_scan.scan_write(path, content))
+            if crit:
+                return (
+                    Risk.CRITICAL,
+                    f"destructive code in write: {crit[0].as_reason()}",
+                    "this file runs destructive logic when executed; remove the "
+                    "flagged call or perform the action via an audited command",
+                )
 
     # Gate self-tamper: an Edit/Write targeting Quill's own config or the
     # host agent's hook settings is an attempt to disable the gate from the
@@ -332,7 +377,7 @@ def _summarize_call(tool_name: str, tool_input: Mapping[str, Any]) -> str:
     return tool_name
 
 
-def _classification_source(tool_name: str, reason: str) -> str:
+def _classification_source(tool_name: str, reason: str) -> ClassifiedBy:
     """Map a classify_event verdict to its structured SOURCE for HookDecision.
 
     Centralised here, next to where the reason is produced, instead of being
@@ -630,108 +675,16 @@ def _maybe_notify(
     approve_token: str,
     audit: AuditLog,
 ) -> None:
-    """Dispatch out-of-band notifications if [notify] is configured.
+    """No-op retained for call-site compatibility.
 
-    Best-effort: if config can't be loaded, returns silently. The
-    NotifyDispatcher itself runs each channel on a background thread so
-    this function returns immediately even when channels are slow.
+    Out-of-band notification dispatch (macOS / Slack / email / webhook) was
+    removed in the Change Control pivot: Quill no longer runs as a live
+    developer execution gate, so there is no interactive block to ping a human
+    about. The CI verdict surface (passport + GitHub Status Check) replaces it.
+    The caller already wraps this in `contextlib.suppress`, so the empty body
+    keeps the hot path inert without touching the call site.
     """
-    from quill.notify import BlockMessage, NotifyConfig, NotifyDispatcher
-
-    raw_notify: Mapping[str, Any] | None = None
-    # QuillConfig is strict (extra="forbid"), so [notify] is read straight
-    # from the raw TOML for v0.2's first wire-up. A pydantic NotifyConfig
-    # in config.py is the next refactor.
-    with contextlib.suppress(Exception):
-        import tomllib  # py3.11+
-
-        from quill.config import default_config_path
-
-        cfg_path = default_config_path()
-        if cfg_path.exists():
-            with cfg_path.open("rb") as f:
-                raw = tomllib.load(f)
-            raw_notify = raw.get("notify") if isinstance(raw, dict) else None
-    if not raw_notify:
-        return
-
-    notify_cfg = NotifyConfig.from_dict(raw_notify)
-    if not notify_cfg.enabled:
-        return
-
-    # Pick a context-aware hint to surface under the block. Never fails the
-    # block path; if hints fail to load, the block message just lacks a hint.
-    hint_text = ""
-    try:
-        from quill import saves as _saves
-        from quill.hints import HintContext
-        from quill.hints import select as _select_hint
-
-        ctx = HintContext(
-            pattern=_saves.canonicalize_pattern(decision.reason or decision.why or ""),
-            reason=decision.reason or decision.why or "",
-            risk=decision.risk.value,
-            is_first_block=False,  # could derive from audit log; left for v0.4
-        )
-        chosen = _select_hint(ctx)
-        if chosen is not None:
-            hint_text = chosen.text
-    except Exception:
-        hint_text = ""
-
-    # In-flow promotion prompt: if the learner has flagged this exact
-    # pattern as auto-promote-ready (5+ approvals in 7d, 0 denies), surface
-    # the prompt under the block message so the operator can confirm
-    # without leaving the flow. Decoration only - never auto-applies.
-    with contextlib.suppress(Exception):
-        from quill import learning as _learning
-        from quill.learn import _normalize_block_reason as _norm
-
-        head = _norm(decision.reason or "") or (decision.reason or "")
-        target_pid = f"{tool_name}:{head}"[:80]
-        for sug in _learning.read_suggestions(limit=200):
-            if sug.get("type") != "policy.promotion_suggested":
-                continue
-            if sug.get("pattern_id") != target_pid:
-                continue
-            promote = (
-                "Quill noticed you've approved this "
-                + str(sug.get("evidence", ""))
-                + ". Run `quill suggestions promote` to auto-allow it."
-            )
-            hint_text = (hint_text + "\n" + promote).strip() if hint_text else promote
-            break
-
-    msg = BlockMessage(
-        risk=decision.risk.value,
-        decision="blocked" if decision.permission == "deny" else "ask",
-        tool_name=tool_name,
-        args_preview=_redacted_input(tool_input),
-        what=decision.what or tool_name,
-        why=decision.why or decision.reason,
-        try_instead=decision.try_instead,
-        approve_token=approve_token,
-        cwd=cwd,
-        session_id=session_id,
-        hint=hint_text,
-    )
-
-    def _emit_dispatched(event_type: str, payload: Mapping[str, Any]) -> None:
-        with contextlib.suppress(Exception):
-            audit.emit(
-                event_type=event_type,
-                session_id=session_id,
-                agent_id="quill.notify",
-                risk="low",
-                payload=dict(payload),
-            )
-
-    dispatcher = NotifyDispatcher(config=notify_cfg, audit_emit=_emit_dispatched)
-    # The PreToolUse hook is a short-lived subprocess; daemon threads die
-    # when it exits, so we block for up to 100ms to let the dispatch
-    # complete. Channels are designed to return in <50ms each (osascript,
-    # SMTP connect, urlopen); 100ms is comfortable headroom.
-    dispatcher.fire(msg, wait_timeout=0.1)
+    return
 
 
 def _resolve_project_paths(cwd: str) -> tuple[Path, Path | None]:
@@ -1243,23 +1196,17 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
     # Use the ORIGINAL classifier reason so token-flipped approves
     # group with their preceding denies under the same pattern_id.
     if decision.permission != "allow" or approval_token_used:
-        if os.environ.get("QUILL_LEARNING_STRICT"):
-            from quill import learning
-            from quill.learn import _normalize_block_reason
+        from quill import learning
 
-            head = _normalize_block_reason(original_decision_reason) or original_decision_reason
-            pattern_id = f"{tool_name}:{head}"[:80]
-            verdict_label = "approve" if approval_token_used else "deny"
-            learning.post_decision_update(pattern_id, verdict_label)
+        if os.environ.get("QUILL_LEARNING_STRICT"):
+            learning.record_decision_learning(
+                tool_name, original_decision_reason, bool(approval_token_used)
+            )
         else:
             with contextlib.suppress(Exception):
-                from quill import learning
-                from quill.learn import _normalize_block_reason
-
-                head = _normalize_block_reason(original_decision_reason) or original_decision_reason
-                pattern_id = f"{tool_name}:{head}"[:80]
-                verdict_label = "approve" if approval_token_used else "deny"
-                learning.post_decision_update(pattern_id, verdict_label)
+                learning.record_decision_learning(
+                    tool_name, original_decision_reason, bool(approval_token_used)
+                )
 
     return {
         "hookSpecificOutput": {
@@ -1481,14 +1428,6 @@ def main() -> int:
         sys.stdout.flush()
         return 1
 
-    # Lazily ensure the dashboard daemon is alive. Cheap (PID-file probe +
-    # localhost bind-check) when it's already running, idempotent re-spawn
-    # when it isn't. Skipped via QUILL_NO_AUTO_WATCH for power users / CI.
-    if not os.environ.get("QUILL_NO_AUTO_WATCH"):
-        with contextlib.suppress(Exception):
-            from quill import watch as _watch  # local import to avoid cycles
-
-            _watch.ensure_daemon(log_path, open_browser=False)
     try:
         with AuditLog(path=log_path, hmac_key=_default_load_hmac_key()) as audit:
             response = run_hook(stdin_text, audit=audit)

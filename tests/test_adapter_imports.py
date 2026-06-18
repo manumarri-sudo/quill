@@ -29,7 +29,6 @@ GATE_CRITICAL_MODULES = [
     "quill.secrets",
     "quill.pause",
     "quill.taint",
-    "quill.notify",
     "quill.exports",
     "quill.cli",
 ]

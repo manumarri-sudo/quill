@@ -1,0 +1,76 @@
+name: "Quill Change Control"
+description: >-
+  Verify AI-written diffs against the human-approved task. Checks scope, scans
+  added lines for secrets and sensitive surfaces, evaluates logged exceptions,
+  and issues a Quill Change Passport as a commit Status Check.
+author: "Manu Marri"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  head:
+    description: "Ref to verify against the contract's base commit."
+    required: false
+    default: "HEAD"
+  passport-dir:
+    description: "Directory for passport.json + passport.md."
+    required: false
+    default: ".quill"
+  fail-on-block:
+    description: "Exit 1 (fail the job) when the verdict is BLOCK."
+    required: false
+    default: "true"
+  github-token:
+    description: "Token used to publish the commit Status Check."
+    required: false
+    default: ${{ github.token }}
+  head-sha:
+    description: "Commit SHA to attach the Status Check to (defaults to the PR head)."
+    required: false
+    default: ${{ github.event.pull_request.head.sha }}
+  quill-version:
+    description: "Version spec for the quillx package (e.g. '==0.2.0a5'). Empty installs latest."
+    required: false
+    default: ""
+  install-from-source:
+    description: "Install quill from this checked-out repo instead of PyPI (used for dogfooding)."
+    required: false
+    default: "false"
+
+outputs:
+  verdict:
+    description: "PASS, NEEDS_REVIEW, or BLOCK."
+    value: ${{ steps.verify.outputs.verdict }}
+  exit-code:
+    description: "0 for PASS / NEEDS_REVIEW, 1 for BLOCK."
+    value: ${{ steps.verify.outputs.exit_code }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install Quill
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        if [[ "${{ inputs.install-from-source }}" == "true" ]]; then
+          pip install -e "${{ github.action_path }}"
+        else
+          pip install "quillx${{ inputs.quill-version }}"
+        fi
+
+    - name: Verify diff against contract
+      id: verify
+      shell: bash
+      env:
+        QUILL_HEAD: ${{ inputs.head }}
+        QUILL_PASSPORT_DIR: ${{ inputs.passport-dir }}
+        QUILL_FAIL_ON_BLOCK: ${{ inputs.fail-on-block }}
+        QUILL_HEAD_SHA: ${{ inputs.head-sha }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: bash "${{ github.action_path }}/scripts/quill-passport.sh"

@@ -66,7 +66,7 @@ def test_disable_in_quoted_string_is_masked_not_flagged() -> None:
     "cmd",
     [
         'python -c "from quill import pause; pause.pause(duration_hours=24)"',
-        "python3 -c \"import quill.pause as m; m.pause()\"",
+        'python3 -c "import quill.pause as m; m.pause()"',
         'python -c "from quill import overnight; overnight.enable()"',
         'uv run python -c "from quill import pause; pause.pause()"',
     ],

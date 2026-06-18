@@ -139,7 +139,6 @@ class Prompter:
         and the adapter's approval-consume path lets it through.
         """
         from quill.approvals import ApprovalStore
-        from quill.notify import BlockMessage, NotifyConfig, NotifyDispatcher
 
         token = ""
         try:
@@ -153,64 +152,25 @@ class Prompter:
         except Exception:
             pass
 
-        # Best-effort notification dispatch from the proxy gate too.
-        try:
-            import tomllib
-
-            from quill.config import default_config_path
-
-            cfg_path = default_config_path()
-            raw_notify: Mapping[str, Any] | None = None
-            if cfg_path.exists():
-                with cfg_path.open("rb") as f:
-                    raw = tomllib.load(f)
-                if isinstance(raw, dict):
-                    raw_notify = raw.get("notify")
-            if raw_notify:
-                notify_cfg = NotifyConfig.from_dict(raw_notify)
-                msg = BlockMessage(
-                    risk=risk.value,
-                    decision="ask",
-                    tool_name=action,
-                    args_preview=dict(args),
-                    what=plain_summary or action,
-                    why=f"{risk.value} risk; stdio proxy can't open a y/N prompt",
-                    try_instead="",
-                    approve_token=token,
-                )
-
-                def _emit(et: str, p: Mapping[str, Any]) -> None:
-                    if audit is not None:
-                        try:
-                            audit.emit(
-                                event_type=et,
-                                session_id="quill-proxy",
-                                agent_id="quill.notify",
-                                risk="low",
-                                payload=dict(p),
-                            )
-                        except Exception:
-                            pass
-
-                NotifyDispatcher(config=notify_cfg, audit_emit=_emit).fire(msg)
-        except Exception:
-            pass
+        # Out-of-band notification dispatch (macOS / Slack / email / webhook)
+        # was removed in the Change Control pivot. The paste-able approve line
+        # on stderr below remains the path forward in non-interactive contexts.
 
         # Surface a paste-able approve line on stderr so the user - even
         # without notifications wired - sees the path forward in their
-        # terminal output of `quill serve`.
+        # terminal output.
         self.console.print(
             f"  [yellow]non-interactive · approve with:[/yellow] [bold]quill approve {token}[/bold]"
             if token
             else "  [yellow]non-interactive · could not issue approval token[/yellow]",
         )
-        msg = (
+        decline_msg = (
             f"non-interactive prompter - agent retry will succeed after "
             f"`quill approve {token}` (TTL 10m)"
             if token
             else f"non-interactive prompter declined {action!r}"
         )
-        raise HumanDeclined(msg)
+        raise HumanDeclined(decline_msg)
 
     def confirm(
         self,
