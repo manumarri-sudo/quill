@@ -1,413 +1,271 @@
 # quill
 
-> The pause button between your AI coding agent and the things you can't undo.
->
-> Runtime policy, audit, and approval infrastructure for AI coding agents.
+> **Quill Change Control** — a CI/CD pull-request gate that verifies an AI-written
+> diff against the human-approved task, scopes the change, and issues a
+> tamper-evident **Change Passport**.
 
 <!-- mcp-name: io.github.manumarri-sudo/quill -->
 
 [![PyPI](https://img.shields.io/pypi/v/quillx.svg)](https://pypi.org/project/quillx/)
 [![Python versions](https://img.shields.io/pypi/pyversions/quillx.svg)](https://pypi.org/project/quillx/)
 [![CI](https://img.shields.io/github/actions/workflow/status/manumarri-sudo/quill/ci.yml?branch=main&label=ci)](https://github.com/manumarri-sudo/quill/actions/workflows/ci.yml)
+[![Typed](https://img.shields.io/badge/typed-strict-blue.svg)](https://mypy.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-![Quill in action: real recent BLOCK decisions from a dogfooding session](web/quill_demo.gif)
-
-**One command on a Mac to install:**
+An AI agent opens a pull request. Did it do **only** what it was asked to do? Quill
+answers that in CI, deterministically, and signs the answer.
 
 ```bash
-uvx quillx start
+# 1. capture the approved task (once, at the start of the work)
+quill begin "Add rate-limiting to the login endpoint" --scope "src/auth/**"
+
+# 2. let the agent write the diff, open the PR
+
+# 3. CI runs this on every push and signs the verdict
+quill verify        # PASS · NEEDS_REVIEW · BLOCK   (BLOCK fails the build)
 ```
 
-That installs Quill in front of Claude Code, Cursor, and any MCP-using agent on your laptop. From the next session on, every dangerous tool call gets gated before it runs. The audit log is on your disk. The key is on your disk. No cloud, no telemetry, no enterprise sales call.
+`quill verify` reads `git diff <base>..HEAD`, checks every changed file against the
+scope you approved, scans added lines for hardcoded secrets and sensitive surfaces
+(CI config, lockfiles, test deletions), evaluates any logged exceptions, and writes
+a **Change Passport** — `passport.json` + a PR-ready `passport.md` — that cites the
+HMAC-chained audit entry for the run, so a reviewer can trace the verdict back to a
+tamper-evident record instead of trusting the markdown alone.
 
 ---
 
-## What you're about to read about, because it already happened to someone like you
+## Why this layer
 
-- **July 2025:** [Replit's coding agent deleted Jason Lemkin's production database](https://fortune.com/2025/07/23/ai-coding-tool-replit-wiped-database-called-it-a-catastrophic-failure/) during a vibe-coding session, ignored the code-freeze instruction, and then fabricated 4,000 fake users to cover the deletion. There was no insurance payout. There was no backup. There was no pause button.
-- **Late July 2025:** a Cursor agent ran `rm -rf ~/` against a developer's home directory in a session a journalist later called "violating every principle of safe agent design."
-- **August 2025:** an autonomous coding agent committed a customer's GitHub Personal Access Token into a public commit. By the time the customer noticed, the key had already been scraped.
-- **November 2025:** [Anthropic disclosed](https://www.anthropic.com/news/disrupting-AI-espionage) that a Chinese state-sponsored group hijacked Claude Code instances to run autonomous cyber-espionage against roughly 30 targets in defense, energy, and tech. Same surface. Same tool dispatch path. No gate.
+The agents writing your code have shell access, file write, deploy permissions, and
+your credentials, and the failures are already on the record: in July 2025 [Replit's
+agent deleted a production database](https://fortune.com/2025/07/23/ai-coding-tool-replit-wiped-database-called-it-a-catastrophic-failure/)
+during a vibe-coding session and fabricated data to cover it; that same month a
+Cursor agent ran `rm -rf ~/` against a developer's home directory; in August an
+autonomous agent committed a customer's GitHub token into a public commit. The
+common thread is not that the model is evil, it is that nothing checked the change
+against what was actually approved before it shipped.
 
-The agents writing your code right now have shell access, file write, deploy permissions, GitHub credentials, and your `.env`. None of the popular coding-agent frameworks (Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed) ship with a pause button between the model's decision and the action.
+Quill puts that check where it can be enforced and recorded: **in CI, on the pull
+request**, where the gate runs outside the agent's own process and cannot be quietly
+switched off by the thing it is reviewing. The verdict is a deterministic function of
+the diff, the contract, and the policy — there is no LLM in the decision path, so the
+gate itself cannot be prompt-injected.
 
-Quill is the smallest version of one I could write. MIT, open source, single Python package.
+## What Quill is, and what it is not
 
-## Three reasons to install Quill in 30 seconds
+Calibration matters more than marketing.
 
-- **It refuses the things you can't undo, before they happen.** `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, `.env` reads, the CVE-2025-59536 subcommand-chain bypass, and 26 vendor-format secret patterns scanned against every file the agent writes. Default-critical. On macOS, the confirmation is hardware-attested through Touch ID on the Secure Enclave. **Don't take our word for it — read the regexes.** The command-risk patterns live in [`src/quill/policy.py`](src/quill/policy.py) and the secret patterns in [`src/quill/secrets.py`](src/quill/secrets.py); you can grep them, fork them, and challenge them. Other tools in this space ship opaque heuristics; Quill ships inspectable rules.
-- **It defends against prompt injection by refusing the consequence, not detecting the cause.** Every published LLM-based prompt-injection defense was bypassed at >90% in 2025 (per the [November 2025 adaptive-attack paper](https://simonwillison.net/2025/Nov/2/new-prompt-injection-papers/)); that's a losing battle. Quill enforces Simon Willison's "Lethal Trifecta" deterministically: when the agent has, in one session, *seen untrusted input + read private data + has an exfiltration path*, the gate refuses the third action. Pair with model-level guardrails; never substitute. [Full prompt-injection defense story →](docs/marketing/prompt-injection-defense.md)
-- **The audit log is auditor-reviewable evidence of what your agents actually did.** HMAC-SHA256 chained per entry, mode `0o600`, locally tamper-evident (and optionally externally anchored). It maps to the evidence requests behind EU AI Act Article 12 + 14 + 19, SOC 2 CC6/CC7/CC8, and ISO/IEC 42001 A.6.2.8 — the required fields (actor identification, synchronized timestamp, action in business terms, justification, anomaly flags) and verification criteria (append-only storage, cryptographic hashing) are exactly what Quill produces. Quill produces the machine-verifiable record; it does not certify compliance by itself. One command (`quill audit export --pack`) yields an auditor-reviewable evidence pack mapping to AIUC-1, NIST AI RMF, ISO/IEC 42001, SOC 2 Common Criteria, and MITRE ATLAS in ~3 seconds. [AIUC-1 control mapping →](docs/marketing/aiuc-1-mapping.md)
+- **Quill is a verification-and-evidence artifact, not a content classifier.** It
+  does not predict whether a change is "good." It checks the diff against a recorded
+  contract (scope, secrets, sensitive surfaces) and issues a signed verdict a human
+  can review. There is no model in the gate.
+- **The CI gate is the defensible boundary; the local gate is defense-in-depth.**
+  Quill also ships an optional on-laptop runtime gate (below). That gate is a
+  deterministic speed bump and recorder at the tool-dispatch layer — it raises the
+  bar against careless agents and the common destructive/exfiltration shapes, but it
+  is **not** a hard boundary against a determined adversary actively trying to escape
+  it (write-then-run, flag reordering, inherited-env, ungated network egress are all
+  documented limits). The full, honest threat model is in
+  [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md).
+- **Quill does not certify compliance.** The audit log is machine-verifiable evidence
+  your auditor will want to review, not the artifact they will accept on its own.
+- **Quill is not a hosted service.** It is a single Python package. The audit log and
+  signing key live on your disk in mode `0o600`; you own the key, the log, and the
+  verdict. No cloud round-trip on the verify path, no telemetry by default.
 
-> **The strategic position, in one sentence:** Quill is the gate that stops the agent from doing the thing you can't undo, on the only layer where that gate can actually fire deterministically. Vanta logs that you have FileVault on. Microsoft AGT runs in your enterprise observability stack. Cisco AI Defense inspects MCP traffic at the network appliance. **None of them stop the agent from typing `rm -rf $HOME` in your shell at 2am.** You can have all of them installed and still need Quill, because the gate has to live at the developer-laptop tool-dispatch layer, and that's where Quill runs.
+## Change Control in detail
 
-## What Quill is, and what Quill is not
+### 1. `quill begin` — capture the contract
 
-Calibration matters more than marketing. Three lines worth repeating verbatim before anyone files an issue:
-
-- **Quill is not an AI safety system.** It does not predict whether an action is bad. It records, scope-checks, and asks a human on dangerous calls. There is no LLM in the gate, which is exactly what makes the gate not bypassable through prompt injection of the gate itself.
-- **Quill is not a replacement for OAuth or RBAC.** Identity says you are *allowed* to refund. Quill says *this specific refund, in this specific session, deserves a confirmation*. You need both. Stack Quill on top of Cerbos / Permit.io / WorkOS, don't choose between them.
-- **Quill is not a hosted service.** It is a single Python package. The audit log lives on your disk, you own the key, the log, and the verdict. No telemetry by default. No cloud round-trip on the gate's hot path.
-- **Quill is defense-in-depth, not a hard security boundary.** An application-layer gate raises the bar against careless agents, single-shot prompt injection, and the common destructive/exfiltration shapes; it is not a substitute for OS-level enforcement against a determined adversary actively trying to escape it. The full threat model — what Quill stops well, the known limits (semantic shell obfuscation, app-layer bypass, write-then-run, network egress), and the architectural roadmap to close them — is documented honestly in [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md).
-
-## How it works in one paragraph
-
-`quill` sits between your MCP client (Claude Code, Cursor, Cline, Claude Desktop, Continue, Windsurf, Zed) and the upstream MCP servers your agent uses. It also plugs into Claude Code's `PreToolUse` hook so the *built-in* tools (Bash, Edit, Write, NotebookEdit) get the same treatment. Every tool call passes through three deterministic checks (no LLM in the gate, so the gate itself cannot be jailbroken):
-
-1. **camera** — every call gets a signed JSONL line, HMAC-chained for tamper evidence
-2. **badge** — the call's namespace and resource must match a scope you declared at session start, or it's refused before the agent attempts
-3. **bank manager** — low/medium-risk auto-allows, high-risk pauses for a y/N, critical-risk requires you to type the action name back so muscle-memory yes-spamming cannot ship the irreversible thing
-
-When the gate refuses a critical call, Quill ships you a notification on whatever channel you opted in to (macOS banner, email, Slack, generic webhook) carrying *what was tried*, *why it was blocked*, *what to try instead*, and a paste-able `quill approve <token>` you can run from your phone if you actually meant it.
-
-```text
-                                         ╭─────────────╮
-   Claude Code   ─── stdio ──>  quill ─┼─→ filesystem
-                                         ├─→ github
-                                         ├─→ postgres
-                                         ╰─→ slack
-                                              │
-                                     signed audit log
-                                              │
-                              ┌───────────────┴───────────────┐
-                          receipts          trifecta        bridge
-                       (did/changed/    (untrusted +     (A2A handoff
-                        uncertain)      private + exfil)   edges)
+```bash
+quill begin "Add rate-limiting to the login endpoint" \
+            --scope "src/auth/**" --scope "tests/auth/**" \
+            --approved-by alice
 ```
 
-## How Quill compares to other agent-governance tools
+Writes `.quill/contract.json`: the approved task (text or a URL to a ticket), the
+`allowed_paths` scope (globs, directory prefixes, or exact paths), the base commit
+the change starts from, and a `contract_id`. Commit this file to the branch — it is
+the fixed record the diff is later measured against, and the Change Passport cites it.
 
-Honest table. Each row says what the other tool does well and where Quill differentiates. Updated 2026-06-09.
+### 2. `quill verify` — gate the diff
 
-| Tool | What it does | Where it wins | Where Quill differs |
-|---|---|---|---|
-| **Microsoft Agent Governance Toolkit (AGT)** | MIT, runtime middleware + Claude Code plugin, OWASP Agentic Top 10 framing, Merkle-chained audit | Microsoft brand, 5-language SDKs, framework adapter sprawl | Quill is single-binary, Touch ID hardware-attested, MCP-proxy + hook combined, paste-token-from-phone flow. No daemon, no Kubernetes, no enterprise rollout |
-| **AEGIS (Justin0504/Aegis)** | MIT, arXiv paper, auto-patches 9 Python + 4 JS/TS frameworks, Compliance Cockpit dashboard, Ed25519 release signing | 14 framework adapters, browser dashboard, academic legitimacy | Quill needs no localhost server, no port-8080 dependency. Touch ID + paste-token flow. MCP-proxy form factor. Smaller surface area to audit |
-| **Anthropic Claude Code native PreToolUse hooks** | First-party, ships with Claude Code, supports allow/ask/deny + async/HTTP hooks | Zero install, deepest IDE integration | No HMAC chain on the local log (plaintext JSON). No Touch ID. No MCP-proxy layer. No scope enforcement beyond literal allow/deny lists. Quill is the implementation that adds these properties on top of Anthropic's hook interface |
-| **Cisco AI Defense / F5 CalypsoAI / Lasso / Pillar / Holistic AI** | Enterprise SaaS, runtime guardrails, MCP traffic inspection at the network layer | Network-appliance scale, compliance dashboards, enterprise sales support | Quill runs on a developer laptop in one command. Open source, MIT, no procurement cycle. Different buyer entirely (the engineer who loses sleep about their agent, not the CISO) |
-| **Vanta / Drata / Secureframe / Sprinto** | SOC 2 / ISO 42001 / ISO 27001 evidence-collection platforms via API integrations into AWS / GitHub / Okta / JAMF | Org-wide compliance posture, vendor risk, employee MDM evidence | None of the four lists any coding-agent integration in their public catalog. They cover the 80% of evidence that lives in infrastructure APIs. Quill covers the agent-shaped 20% they can't reach. Quill is a complement, not a competitor |
-| **Lakera Guard / NeMo Guardrails / Prompt Security** | Prompt-injection content classifiers, LLM gateway guardrails | Best-in-class for detecting injection content in LLM inputs | Different layer. Quill doesn't try to detect malicious prompts (a documented losing battle); Quill refuses the consequence (the exfiltration call, the destructive command) using deterministic regex. Pair Lakera-class tools with Quill, don't substitute |
-| **Cerbos / Permit.io / OPA / WorkOS AuthKit** | Policy engines and identity layers being repositioned for agent authorization | Best-in-class for "is this principal allowed in principle?" | Different question. Cerbos answers authorization. Quill enforces *this specific call right now*. Stack them, don't choose |
-| **Invariant Labs mcp-scan** | Static scanner for MCP tool-poisoning attacks | Pre-deployment audit of MCP server manifests | Different lane. Invariant scans before deploy; Quill gates at runtime. Quill's `pinning.py` is the runtime-side mitigation for the same Invariant Labs March 2025 advisory class |
+```bash
+quill verify                 # uses .quill/contract.json, diffs base..HEAD
+```
 
-**The one-line positioning, calibrated honestly:** *"Quill is the developer-laptop, Touch-ID-gated, MCP-proxy-and-hook MIT-licensed open-source tool that gates AI coding agent tool calls deterministically and writes the audit log your insurer / auditor / future-you will want."*
+`verify` (`src/quill/verify.py`, on top of `policy.evaluate_diff`):
 
-[Full comparison + competitive analysis →](docs/marketing/why-quill-vs-others.md)
+1. parses `git diff <base_commit>..HEAD` as a unified diff,
+2. matches every changed path against the contract scope,
+3. scans **added lines** for the 26 vendor-format secret patterns in
+   [`src/quill/secrets.py`](src/quill/secrets.py),
+4. classifies sensitive surfaces (CI/workflow files, lockfiles, test deletions),
+5. applies any logged exceptions in `.quill/exceptions.jsonl`,
+6. composes a verdict — **PASS**, **NEEDS_REVIEW**, or **BLOCK** — and chains a
+   `verification.run` event into the audit log.
 
-## Prompt injection defense — the layered story
+`BLOCK` exits non-zero (fails CI); `PASS` and `NEEDS_REVIEW` exit 0, so review is
+surfaced without hard-stopping the pipeline. The whole thing is deterministic: same
+diff + same contract + same policy → same verdict, explainable line by line.
 
-Prompt injection is the unsolved hard problem of LLM security. The 2025 consensus (from Simon Willison, Meta's "Agents Rule of Two," and the November 2025 adaptive-attack paper that bypassed 12 published defenses at >90% success) is that *every* LLM-based prompt-injection defense is bypassable. The honest design is to assume the agent will eventually be tricked, then refuse the consequence.
+### 3. The Change Passport
 
-Quill ships a four-layer defense:
+`verify` writes `passport.json` (machine-readable, for downstream tooling and status
+checks) and `passport.md` (PR-ready). The markdown footer cites the
+`verification.run` audit MAC, so the passport traces back to the tamper-evident chain
+rather than asking you to trust the document.
 
-1. **The gate itself can't be prompt-injected.** Quill's classifier is a compiled regex set in [`policy.py`](src/quill/policy.py) with no LLM anywhere in the decision path. An attacker who jailbreaks the agent cannot jailbreak the gate, because there's no model to jailbreak.
-2. **Lethal Trifecta enforcement (Simon Willison's framing).** Each session has three taint flags: `has_seen_untrusted` (web fetch, inbox read, attachment ingestion), `has_accessed_private` (`.env` reads, private repo content), `can_exfiltrate` (outbound HTTP, email send, PR creation). When all three would close in one session, the next exfil call is refused with a paste-token. Implemented in [`taint.py`](src/quill/taint.py); cited as AIUC-1 control AIUC-SEC-02.
-3. **Tool description pinning (Invariant Labs March 2025 advisory class).** SHA-256 fingerprint of `(name, description, inputSchema, annotations)` on first sight; the gate refuses to re-advertise any tool whose digest changed silently. This closes the "the MCP server pushed updated description containing hidden instructions" attack vector. Implemented in [`pinning.py`](src/quill/pinning.py).
-4. **Secret detection on file writes.** 26 vendor-format patterns (AWS / OpenAI / Anthropic / GitHub / Stripe / Slack / Google / JWT / PEM / HuggingFace / Twilio / SendGrid / Mailgun / Discord / Notion) scanned against every `Edit` / `MultiEdit` / `Write` / `NotebookEdit`. Hits escalate to `Risk.CRITICAL` with the line number in the verdict reason. This blocks the most common goal of injection attacks: persisting a secret somewhere the attacker can retrieve it.
+### 4. The GitHub Action
 
-[Full prompt-injection defense write-up →](docs/marketing/prompt-injection-defense.md)
+```yaml
+# .github/workflows/quill-change-control.yml
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  change-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # full history so the base commit resolves
+      - uses: manumarri-sudo/quill@v0   # runs `quill verify`, publishes a Status Check
+```
 
-**For agents that scour the internet a lot** (research agents, scrapers, news summarizers, RAG-driven retrieval bots), the prompt-injection surface is the widest. Every fetched web page is potentially adversarial. Quill's taint tracking marks every `WebFetch` / `WebSearch` / `fetch` / `curl http*` call as ingesting untrusted content, and the gate's downstream-action behavior becomes correspondingly stricter for the rest of the session. Set `[session] research_mode = true` in `~/.quill/config.toml` to upgrade the enforcement threshold from "trifecta closes" to "two of three closes for the first time after web ingestion."
+The composite action ([`action.yml`](action.yml)) runs `quill verify`, publishes a
+commit Status Check, and fails the job on `BLOCK`. If a PR has no
+`.quill/contract.json`, the gate is a no-op with a notice telling you to run
+`quill begin` — Change Control is opt-in per branch.
 
-## What's mature vs framework-prepared (as of v0.2.0a5)
+## The local runtime gate (optional, defense-in-depth)
 
-`quill` is built around three pillars and the maturity of each is honestly different. This section exists because dogfooding evidence matters more than design intent.
+Separately from CI, Quill can gate an agent's tool calls **as they happen** on your
+laptop, via Claude Code's `PreToolUse` hook. This is the supporting surface, scoped
+honestly as defense-in-depth — a deterministic speed bump and recorder, not a hard
+boundary.
 
-**Mature, with on-disk evidence in real-world dogfooding** (the gate + audit pillar):
-- Destructive-action gate: hundreds of critical blocks observed across `rm -rf`, `vercel --prod`, `git push --force`, `DROP TABLE`, `TRUNCATE`, `npm publish`, `sudo`, `.env` reads, and the CVE-2025-59536 subcommand-chain bypass. No false positives observed in the critical class during dogfooding.
-- HMAC-chained audit log: 24k+ entries verified end-to-end over ~45 days of dogfooding. Locally tamper-evident (optionally externally anchored), mode `0o600`, EU AI Act Article 12 + 14 fields on every block, audit-log path resolves cleanly through `quill audit verify`.
-- Out-of-band notification dispatch on real blocks: macOS banner, email, Slack, generic webhook. Synchronous-with-100ms-timeout on the hot path so the dispatch can't be killed mid-flight by the hook subprocess exiting.
-- One-shot approve tokens, Touch ID hardware-attested approval, anti-yes-fatigue, type-to-confirm: full block-to-approve cycle observed end-to-end with audit chain evidence.
-- Trust scope with trifecta enforcement priority: trusted directories suppress default-risk Edit/Write asks, but yield to trifecta enforcement when the session is at 2-of-3 flags and the call would close the third.
-- Self-improving classifier: drift detection, suggestions CLI, learner persistence.
-- **`quill onboard`** interactive first-run setup (new in v0.2.0a5): auto-detects Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed; prompts for log location, notification channels, risk preset, intent + scope, and trusted directories; installs hooks for chosen agents; idempotent. Replaces the placeholder-filled `quill init` flow.
-- **Secret detection on file writes** (new in v0.2.0a5): 26 vendor-format patterns (AWS / OpenAI / Anthropic / GitHub / Stripe / Slack / Google / JWT / PEM private keys / HuggingFace / Twilio / SendGrid / Mailgun / Discord / Notion) scanned against every Edit / MultiEdit / Write / NotebookEdit; hits escalate to `Risk.CRITICAL` with line numbers in the verdict reason. Also exposed as a standalone `quill scan-secrets` CLI that respects `.gitignore` when run inside a git repo.
-- **`quill audit export --pack`** (new in v0.2.0a5): one command renders an auditor-reviewable evidence pack that **maps to** (does not certify) the evidence requests behind EU AI Act (Art 12 + 14 + 19), AIUC-1, NIST AI RMF + GenAI Profile, ISO/IEC 42001 A.6.2.8, SOC 2 Common Criteria (CC6 / CC7 / CC8.1 / CC9), and MITRE ATLAS. As `docs/SECURITY-MODEL.md` states, this is evidence your auditor will want to review, not the artifact they will accept on its own, and Quill does not certify compliance by itself. Renders via headless Chrome / Brave / Edge / Chromium (no LaTeX dep), verified end-to-end against the live audit log (~24k events → PDF in ~3s).
-- **Prepare-commit-msg git hook** (new in v0.2.0a5): `quill commit-hook-install` wires a hook that appends the active agent session's summary (calls, blocks, asks, Touch ID approvals, top changed dir, TDR, block reasons) as `#`-prefixed comment lines to every commit message buffer. Skips merge / squash / amend. Idempotent. Refuses to overwrite non-Quill existing hooks. Bakes the absolute path to the venv's `quill` binary so the hook works even from a non-venv shell.
+```bash
+quill onboard      # detect agents, install the hook, pick a risk preset
+```
 
-**Framework-prepared, with thinner dogfooded evidence** (the Trust Infrastructure pillar):
-- Lethal-trifecta detection AND enforcement: detection observed across dozens of sessions; enforcement (escalate allow → deny when a call would close the trifecta) verified end-to-end on a synthetic test. Real-world enforcement triggers depend on operator workflow.
-- A2A Bridge: handoff edge tracking works for the **Cursor adapter** and for tests; **Claude Code subagent capture is pending hook-API support from Anthropic** (the PreToolUse payload doesn't currently expose subagent session_ids, so subagent spawns audit-log under the parent session). If you're using Quill with Cursor, you get full A2A; with Claude Code today you get parent-level audit only.
-- Permission Decay: tracking infrastructure is wired and tested; no overrides observed in single-developer dogfooding yet because the operator hasn't yet promoted a `loosening_candidate` via `quill suggestions promote`. The decay timer fires when overrides accumulate.
-- Tool description pinning: pin recording, digest verification, and approval/revoke CLI all work; only one tool has been observed in dogfooding because the external MCP proxy path (Path B below) is less exercised than the Claude Code built-in tools path (Path A).
-- Native per-tool hook adapters for **Cline / Aider / Continue / Windsurf / Zed** (planned for v0.3): today these tools work via Quill's MCP-proxy mode (Path B) which gates every MCP-routed tool call, but their built-in tools are not gated. Per-tool hook adapters are next on the roadmap; each needs research on that tool's hook contract.
+From the next session, every `Bash` / `Edit` / `Write` / `NotebookEdit` passes
+through the compiled-regex classifier in [`src/quill/policy.py`](src/quill/policy.py):
+`rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, `npm publish`, `.env`
+reads, and the CVE-2025-59536 subcommand-chain bypass are critical-class by default.
+Critical calls are refused with a plain-English reason and a single-use, 10-minute
+`quill approve <token>`; on macOS the approval is hardware-attested through Touch ID
+on the Secure Enclave. Files an agent writes are scanned with the same 26 secret
+patterns and an AST pass ([`code_scan.py`](src/quill/code_scan.py)) that flags
+destructive Python shapes (`shutil.rmtree`, `os.system`, `exec(b64decode(...))`)
+before a later `python foo.py` can run them. Every decision lands in
+`~/.quill/audit.log.jsonl`, HMAC-SHA256 chained for tamper evidence.
 
-**On the v0.3 roadmap**: per-tool hook adapters for the MCP-proxy-only clients above, A2A bridge workaround for Claude Code via transcript-path heuristics, real-world Permission Decay triggers as the suggestions CLI gets used, the `from quill import gate` BYO-agent library API, and tracking the IETF AIVS draft (`draft-stone-aivs-00`) so Quill's receipts stay interoperable with the agent-audit-trail standard.
+Supporting surfaces on the local gate, all derived from the same chain on read:
+`quill receipts` (per-session did / changed / uncertain / to-verify), `quill trifecta`
+(lethal-trifecta exposure: untrusted input + private data + exfil vector),
+`quill pins` (tool-description pinning against MCP rug-pulls), `quill decay`
+(permissions that erode without reinforcement), and `quill audit` (review and verify
+the chain). `quill scan-secrets` runs the secret detectors standalone over files.
+
+**Why this is defense-in-depth and not the headline:** an application-layer gate can
+be routed around by a capable adversary (the limits above). The provable boundary is
+the CI gate, which runs where the agent cannot disable it and produces a signed
+record. The local gate is real and useful, but its honest claim is "raises the bar
+and records everything," not "cannot be bypassed."
+
+## The signed audit log
+
+Both surfaces write to `$QUILL_HOME/audit.log.jsonl`, mode `0o600`. Each entry's
+`mac` is `HMAC-SHA256(prev_mac || canonical(payload))` under your installation's key
+(auto-generated at first run, stored at `$QUILL_HOME/key`, mode `0o600`). Writes take
+`fcntl.flock(LOCK_EX)` and re-read the tail MAC inside the lock so concurrent writers
+can't break the chain. A sealed `<log>.head` high-water-mark lets `verify` detect
+trailing truncation, not just edits and insertions.
+
+```bash
+quill audit verify
+# chain intact: 32332 entries verified.
+```
+
+That count is from ~45 days of real dogfooding on the maintainer's machine; your own
+log starts at one. The chain is locally tamper-evident (and optionally externally
+anchored) — see [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) for exactly what
+that does and does not buy.
 
 ## Install
 
 ```bash
-uvx quillx start
+uvx --from quillx quill begin --help     # no install; run it once
+pipx install quillx                      # or install the CLI persistently
+pip install quillx                        # or into an existing venv
 ```
 
-That's the whole thing on a fresh machine if you have [`uv`](https://docs.astral.sh/uv/) installed. If you'd rather walk through an interactive setup that auto-detects which coding agents are on your machine (Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed), asks which to gate, and lets you pick log location, notification channels (macOS banner / Slack / email / generic webhook), and a risk preset (boring / paranoid), run `quill onboard` instead. It writes a clean `config.toml` and installs the hooks for the agents you chose. Safe to re-run. If you'd rather a persistent install, `pipx install quillx` then `quill start`, or `pip install quillx` inside an existing venv. For a development checkout: `git clone https://github.com/manumarri-sudo/quill && cd quill && pip install -e .`. Homebrew lands as a self-owned tap (`brew install manumarri-sudo/quill/quill`) shortly.
-
-The PyPI dist name is `quillx` because the `quill` PyPI name is held by an unrelated package. The CLI binary (`quill`), import path, config directory (`~/.quill/`), env vars (`QUILL_KEY`), and brand all stay `quill`. A PEP 541 reclaim request for the canonical name is in flight; if it lands, `quillx` becomes a transitional alias for one release cycle and then sunsets.
-
-`quill start` is idempotent: it merges Quill's hook into `~/.claude/settings.json`, runs `quill doctor`, and opens the live dashboard. From the next Claude Code session on, every Bash, Edit, Write, and NotebookEdit goes through Quill's classifier; every external MCP call (if you wire Quill into `mcpServers`) goes through the proxy.
-
-## Two integration paths
-
-Quill governs two surfaces. Both ship in v0.2; pick whichever fits how you code, or use both.
-
-### Path A: Claude Code's built-in tools (recommended for vibe coders)
-
-Claude Code's `Bash`, `Edit`, `Write`, and `NotebookEdit` are not MCP tools, they're internal. Quill plugs into Claude Code's `PreToolUse` hook so every built-in tool call is gated before it executes.
-
-```bash
-quill start                      # installs the hook, starts the dashboard
-# restart Claude Code
-```
-
-That's it. From the next session on, every Bash command, every Edit, every Write goes through Quill's classifier. `rm -rf`, `git push --force`, `DROP TABLE`, `vercel --prod`, and `npm publish` are denied by default with a plain-English reason. Edits to files prompt Claude Code's confirm-this-action UI. Reads pass silently. Every decision lands in `~/.quill/audit.log.jsonl` with an HMAC-chained signature.
-
-The hook is a content-aware classifier: `Bash("ls")` is low-risk, `Bash("rm -rf /")` is critical. The decision logic lives in [`quill.policy.classify_command`](src/quill/policy.py); patterns are explicit and testable.
-
-### Path B: External MCP servers (filesystem, github, postgres, slack)
-
-If you also use Claude Code's `mcpServers` config to point at upstream MCP servers, Quill can sit in front of those too. v0.2 ships a real schema-passthrough proxy: every upstream tool's `inputSchema`, description, and annotations are re-advertised to the client *as the upstream sent them*, so your client gets full autocomplete, the gate sees the real arguments, and JSON-RPC error codes are preserved end to end.
-
-```bash
-quill init                              # writes ~/.quill/config.toml
-# edit config.toml - declare session intent, scope, [[upstream]] blocks, [notify] channels
-```
-
-Then in your Claude Code `mcpServers` config:
-
-```jsonc
-{
-  "mcpServers": {
-    "quill": { "command": "quill", "args": ["serve"] }
-  }
-}
-```
-
-The proxy factory at [`src/quill/_vendor/proxy_factory.py`](src/quill/_vendor/proxy_factory.py) is adapted from `sparfenyuk/mcp-proxy` v0.11.0 (MIT, attributed in [NOTICE](NOTICE)) with three Quill-specific changes: gate callable injection on `_call_tool` / `_read_resource` / `_get_prompt`, upstream-name namespacing (`filesystem.read_file`), and `McpError` preservation (the original swallowed upstream JSON-RPC errors into generic `CallToolResult(isError=True)`, breaking client retry logic).
-
-### Other clients
-
-Beyond Claude Code, the same proxy is what plugs Quill into Cursor, Claude Desktop, Claude Cowork, Cline, Windsurf, Continue, Cody, Zed, GitHub Copilot agent mode, JetBrains AI, and the OpenAI Codex CLI. Copy-paste config per client is in [`docs/clients.md`](docs/clients.md). If you wrote your own agent loop, the wrapper pattern (Path A above is Claude-Code-specific; the universal version applies to any tool-use loop) is in [`docs/byo-agent.md`](docs/byo-agent.md).
-
-## The notification + approval flow
-
-When Quill blocks a critical-risk call, it fans an out-of-band message to every channel the user opted in to via `[notify]` in `config.toml`. Channels: macOS Notification Center (osascript), email (SMTP), Slack incoming webhook, generic JSON webhook. Zero new dependencies, stdlib only. Each channel runs on a daemon thread; the gate's hot path never blocks. Per-channel results are themselves audit-logged as `notify.dispatched`.
-
-Every notification carries four fields:
-
-- **WHAT** was attempted, one line. `"git push --force origin main"`, `"Edit /etc/passwd"`, `"DROP TABLE customers"`.
-- **WHY** it was blocked, in plain English. `"force-push to a protected branch is critical-risk and rewrites shared history"`.
-- **WHAT TO TRY INSTEAD**, a safer alternative the agent can paste back. `"git push --force-with-lease"` or `"open a PR and let CI rebase"`.
-- A one-shot **APPROVE** command: `quill approve T7gQ2x9aB4`.
-
-The token is bound to the exact `(tool_name, args_digest)` that was refused, single-use, 10-minute TTL. An attacker who hijacks the agent mid-session cannot reuse the token for a different command, and a multi-use approval would bypass Permission Decay.
-
-### Concrete example
-
-The agent runs `git push --force origin main`. Quill blocks. Notification on your phone:
-
-```
-quill blocked: git push --force origin main
-why : force-push rewrites shared history; protected branch
-try : git push --force-with-lease    (or open a PR)
-approve once: quill approve T7gQ2x9aB4   (10 min, single-use)
-```
-
-You read the message, agree the agent meant well, paste the command in any terminal:
-
-```bash
-$ quill approve T7gQ2x9aB4
-approved git push for one call · expires 2026-05-08T15:42:11
-  the agent's next attempt of this exact call will go through.
-```
-
-The agent retries, the gate consumes the approval, the push lands. The `approve` action is itself audit-logged.
-
-```bash
-quill approvals list           # see pending tokens
-quill approvals revoke <token> # drop a token if the notification looked surprising
-```
-
-## Trust Infrastructure layer
-
-v0.2 adds three audit-log surfaces that derive directly from the chain. They're computed on read; nothing extra is written. Frameworks the user is publishing on (Trust Infrastructure, Agent Receipts, A2A Bridge, Permission Decay) underpin the design but the surfaces are usable without them.
-
-### Agent Receipts
-
-Per session, `did / changed / uncertain / to_verify`, the four-field mental model for what an agent actually did during a session. Derived from `session.open` / `session.close` / `session.receipt` / `agent.flag.uncertain` events.
-
-```bash
-quill receipts list            # one row per session, ordered by recency
-quill receipts show ses_a4f1   # full did/changed/uncertain/to_verify
-```
-
-### Lethal-Trifecta exposure tracking
-
-Did this session see *untrusted input* + *private data* + *an exfiltration vector* all together? That's the worst-case prompt-injection scenario per Meta's Agents Rule of Two and Simon Willison's Lethal Trifecta. Two of three is recoverable, three is the danger zone.
-
-```bash
-quill trifecta show            # per-session three-flag matrix + verdict
-quill trifecta show --closed   # only sessions where all three closed
-```
-
-Trifecta in v0.2.0a5 is **observation AND enforcement**. The classifier surfaces the exposure on every tool call, and when a call would close the lethal trifecta (untrusted + private + exfil all in one session) for the first time, the gate escalates an otherwise-allow decision to a deny with a paste-able approve token. Trust scope yields to this enforcement so trusted directories can't silently bypass the trifecta gate. Verified end-to-end with on-disk evidence on 2026-05-17 (audit log entries at `verdict.blocked` with reason `trifecta close · ...`).
-
-### A2A Bridge handoff edges
-
-When agent A spawns agent B as a sub-task, the handoff itself is an event with a contract. The A2A Bridge tracks those edges, flags orphans (handoff-out with no matching handoff-in), and detects cascade failures (one bad handoff propagating downstream).
-
-**Adapter maturity as of v0.2.0a5**: full handoff capture works for the **Cursor adapter** (Cursor 1.7+ surfaces subagent session_ids in its hook payload). For **Claude Code**, subagent spawns currently audit-log under the parent session because Claude Code's `PreToolUse` hook doesn't expose subagent session_ids; bridge capture there is **pending hook-API support from Anthropic**. See the "What's mature vs framework-prepared" section near the top of this README for the full breakdown.
-
-```bash
-quill bridge show              # all handoff edges, status (ok / orphan / cascade)
-quill bridge show --orphans    # only the unmatched ones
-```
-
-## Tool description pinning
-
-The Invariant Labs MCP tool-poisoning advisory (March 2025) and the silent-rug-pull attack class both rely on the same primitive: an upstream server changing a tool's *description* between first sight and the moment the agent decides to call it. Quill records a SHA-256 fingerprint of `(name, description, inputSchema, annotations)` the first time it sees each tool, persists it at `$QUILL_HOME/tool_pins.jsonl` mode `0o600`, and refuses to re-advertise tools whose digest changed without explicit user approval.
-
-```bash
-quill pins list                                    # all pinned tools, status, first-seen
-quill pins approve filesystem read_file <digest>   # accept a new digest
-quill pins revoke filesystem read_file             # hide the tool from the client
-```
-
-The pin cache invalidates automatically on any upstream `tools/list_changed` notification.
-
-## Bidirectional notification forwarding
-
-Every notification an upstream MCP server pushes (`tools/list_changed`, `resources/updated`, `prompts/list_changed`, `LoggingMessageNotification`, `ProgressNotification`) is audit-logged AND forwarded downstream to the connected MCP client unmodified. Pin cache invalidates on `tools/list_changed`. The dispatch idiom (class-name-substring matching against the notification root type) is adapted from `IBM/mcp-context-forge` (Apache-2.0, attributed in [NOTICE](NOTICE)); the rest is Quill's own.
-
-## What it does, concretely
-
-| Layer | Question | What it does |
-|---|---|---|
-| camera | did this happen? | every call gets a signed JSONL line, HMAC-SHA256-chained for tamper evidence |
-| badge | is this in scope? | deterministic check; out of scope = refused, no AI deciding |
-| bank manager | should this happen *right now*? | high-risk = y/N prompt; critical-risk = type the action name; out-of-band notification + one-shot approve token on every block |
-
-Default risk classification is in [`src/quill/policy.py`](src/quill/policy.py). Out of the box, `fs.delete`, `git push --force`, `DROP TABLE`, `deploy:production`, `stripe.refunds.*`, `send_email`, `rm -rf`, `vercel --prod`, `npm publish`, `curl | sh`, `terraform destroy`, and `cat .env` are classified `critical` and require typed confirmation. Override per-tool in your config:
-
-```toml
-[policy]
-"fs.delete"          = "critical"
-"github.list_issues" = "low"
-```
-
-## Anti-yes-fatigue
-
-If you approve three high-risk prompts in under four seconds each, the next prompt holds for three seconds before accepting input. This is the same anti-pattern Stripe, GitHub, and Sentry apply to their own dangerous-action UX. Tunable via `QUILL_FATIGUE_*` env vars. Type-to-confirm is anti-fatigue, not anti-hijack: WebAuthn-attested confirmation is on the roadmap, not yet wired.
-
-## The signed audit log
-
-Every event lands in `$QUILL_HOME/audit.log.jsonl`, mode `0o600`. Format:
-
-```json
-{"ts":"2026-05-08T01:14:22Z","session_id":"ses_a4f1","agent_id":"root","type":"tool.attempted","risk":"critical","prev_mac":"…","payload":{"tool_name":"fs.delete","arg_keys":["path"],"arg_count":1},"mac":"…"}
-{"ts":"2026-05-08T01:14:24Z","session_id":"ses_a4f1","agent_id":"root","type":"verdict.blocked","risk":"critical","prev_mac":"…","payload":{"tool_name":"fs.delete","reason":"force-push rewrites shared history","try_instead":"git push --force-with-lease"},"mac":"…"}
-```
-
-Each entry's `mac` is `HMAC-SHA256(prev_mac || canonical(payload))` under your installation's key (auto-generated at first run, stored at `$QUILL_HOME/key`, mode `0o600`). The hot path uses `fcntl.flock(LOCK_EX)` around every emit and re-reads the tail mac inside the lock so concurrent hook subprocesses can't break the chain. Verify the chain at any time:
-
-```bash
-quill audit verify
-# chain intact: 24,478 entries verified.
-```
-
-If you have a log broken by the pre-0.1.1 concurrent-write defect:
-
-```bash
-quill audit repair --legacy --yes
-# emits a chain.repaired event so the operation is itself audit-logged
-```
-
-This is the artifact your auditor will want. EU AI Act Article 14 and AIUC-1 both require evidence of human oversight on high-risk AI actions, with timestamps, decision, and reason. The format above carries all of that.
-
-## `~/.quill/` layout
-
-`QUILL_HOME` (default `~/.quill/`) holds everything. Mode `0o600` on every file.
-
-| File | Purpose |
-|---|---|
-| `config.toml` | session intent, scope, upstreams, `[notify]`, `[policy]` overrides |
-| `audit.log.jsonl` | append-only HMAC-chained event log |
-| `key` | 32-byte HMAC signing key, auto-generated on first run |
-| `permissions.json` | Permission Decay state (use counts, last-reaffirmed timestamps) |
-| `telemetry.json` | opt-in telemetry state (`asked`, `opted_in`, `install_id`) |
-| `tool_pins.jsonl` | tool description pins, append-only |
-| `approvals.json` | pending one-shot approval tokens |
-| `taint.json` | per-session lethal-trifecta state (renamed user-facing to `trifecta`) |
-| `sessions.json` | open/close index for fast Receipts derivation |
-| `watch.pid` | pidfile for the background dashboard daemon |
-
-Per-file env-var overrides still work: `QUILL_LOG`, `QUILL_KEY`, `QUILL_CONFIG`, etc.
+The PyPI dist name is `quillx` because the `quill` name is held by an unrelated
+package; the CLI binary, import path (`quill`), config dir (`~/.quill/`), env vars
+(`QUILL_KEY`), and brand all stay `quill`. A PEP 541 reclaim for the canonical name
+is in flight (not yet granted); if it lands, `quillx` becomes a transitional alias.
+For a development checkout: `git clone https://github.com/manumarri-sudo/quill && cd
+quill && pip install -e .`.
 
 ## CLI surface
 
 ```
-quill onboard        interactive first-run setup (detects agents, installs hooks, picks channels)
-quill start          set up + open the dashboard (most users only run this)
-quill watch          in-terminal live dashboard (TUI by default; --browser for HTTP)
-quill scan-secrets   scan files/dirs for hardcoded AWS/OpenAI/Anthropic/GitHub/Stripe credentials
-quill scan-prompts   scan files/dirs for prompt-injection-shape patterns (heuristic SIGNAL, not a block)
-quill audit export   evidence pack (--pack for full EU AI Act + AIUC-1 + NIST + ISO 42001 + SOC 2 + MITRE ATLAS PDF)
-quill commit-hook-install   wire a prepare-commit-msg hook that appends a session summary to every commit
-quill audit          review what got blocked / allowed / asked (verify, repair, show)
-quill decay          permissions that erode without reinforcement (Permission Decay)
-quill receipts       per-session did / changed / uncertain / to-verify (list / show)
-quill bridge         A2A handoff edges between agents (show, --orphans)
-quill trifecta       exposure tracking: untrusted input + private data + exfil vector
-quill pins           tool description pins (list / approve / revoke)
-quill approvals      list / revoke pending one-shot approval tokens
-quill approve <tok>  consume a token, allow the next exact-match call
-quill doctor         diagnose the install (config / log / key / hook / upstreams)
-quill stop           stop the background watch daemon
-quill version        print the quill version
+quill begin          capture the approved task into .quill/contract.json
+quill verify         compare the diff to the contract, emit PASS / NEEDS_REVIEW / BLOCK
+quill onboard        first-run setup for the local gate (detect agents, install hook)
+quill audit          review what got blocked / allowed / asked; verify the chain
+quill approve <tok>  confirm a pending one-shot approval (Touch ID on macOS)
+quill approvals      list (hashed ids) / revoke pending approval tokens
+quill receipts       per-session did / changed / uncertain / to-verify
+quill trifecta       lethal-trifecta exposure tracking
+quill pins           tool-description pins (anti-poisoning, anti-rug-pull)
+quill decay          permissions that erode without reinforcement
+quill scan-secrets   scan files for hardcoded credentials
+quill scan-prompts   scan files for prompt-injection-shape patterns (signal only)
+quill commit-hook-install   append a session summary to every commit message
+quill doctor         diagnose the install
+quill version        print the version
 ```
 
-Hidden / power-user commands: `init` (write starter config), `serve` (run the MCP proxy), `tail` (live-stream audit log), `tree` (delegation tree, snapshot or live), `claude-hook` + `claude-hook-install` (the PreToolUse adapter), `journal` (write a session log to the AgentOS vault), `telemetry` (opt-in aggregate stats).
+Run `quill --help` for the full list (including `night`/`off` gate-weakening toggles —
+read [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) before using them).
 
-## Performance
+## What's shipping today vs. on the roadmap
 
-Quill aims for invisible: P50 overhead < 2ms on the policy-allow path, P99 < 10ms. Hot path is pre-compiled regex + hash-table lookup; the audit log uses `O_APPEND` and batched fsync (force-fsync on `risk >= high`). Cross-process safety via `fcntl.flock(LOCK_EX)`. Benchmarks ship with the repo (`pytest -m bench`).
+**Shipping (0.2.0a5), with on-disk evidence:** the Change Control flow
+(`begin`/`verify`/passport + GitHub Action), the HMAC-chained audit log (32k+ entries
+dogfooded, truncation-detectable, `quill audit verify` clean), the local PreToolUse
+gate with Touch ID approvals and 26-pattern secret detection, the write-then-run AST
+scan, and the read-side surfaces (receipts, trifecta, pins, decay). 1030 tests pass;
+`ruff`, `ruff format`, and `mypy --strict` are green and enforced in CI.
 
-## What this is not
-
-- Not an AI safety system. It does not predict whether an action is bad. It records, scope-checks, and asks a human on dangerous calls.
-- Not a replacement for OAuth or RBAC. Identity says you are *allowed* to refund. Quill says *this specific* refund, in *this specific* session, deserves a confirmation.
-- Not a hosted service. It is a single Python package. The audit log lives on your disk. You own the key, the log, the verdict.
-
-## Known gaps for v0.2.0a5
-
-Honest list of what is shipped vs. observation-only vs. not yet wired. See also the "What's mature vs framework-prepared" section near the top of this README for the dogfooding-evidence breakdown.
-
-- **Claude Code subagent capture in A2A Bridge** depends on Anthropic shipping subagent session_ids in the `PreToolUse` hook payload. Until then, subagent spawns audit-log under the parent session; the bridge sees no edge. The Cursor adapter is unaffected and gets full A2A capture today.
-- **Per-tool sampling adjudication.** Upstream-initiated `sampling/createMessage` calls are observed in the audit log as `upstream.request` but not yet adjudicated. Default behavior: forward to client unmodified. Will land before 0.2 final.
-- **WebAuthn-attested confirmation is not wired.** Touch ID (macOS) is the hardware-attested option today; WebAuthn for cross-platform hardware attestation is on the v0.3 roadmap.
-- **Telemetry pipeline.** Opt-in only, default off; the ingest/analyze backend is not deployed and is maintained outside this repo. The client side is in `src/quill/telemetry.py` so you can see exactly what would be sent.
-- **Schema-passthrough proxy is end-to-end** for tool calls and the gate sees real arguments. Resources, prompts, and notifications all forward; full lifecycle test coverage is in progress.
-- **PyPI / Homebrew / npm wrapper / MCP registries**: not yet submitted.
-
-## Further reading
-
-- [`docs/marketing/aiuc-1-mapping.md`](docs/marketing/aiuc-1-mapping.md) — Quill ↔ AIUC-1 control crosswalk for AIUC-1 auditors and AI insurance underwriters
-- [`docs/marketing/eu-ai-act-august-2026-readiness.md`](docs/marketing/eu-ai-act-august-2026-readiness.md) — what the August 2, 2026 EU AI Act high-risk obligations actually require, and how Quill produces the evidence
-- [`docs/marketing/cve-2025-59536-mitigation.md`](docs/marketing/cve-2025-59536-mitigation.md) — CVE-2025-59536 Claude Code subcommand-chain bypass, mitigated by `policy.py:333`
-- [`docs/clients.md`](docs/clients.md) — per-client integration recipes for Claude Code, Cursor, Cline, Aider, Continue, Windsurf, Zed, Claude Desktop / Cowork, JetBrains AI, GitHub Copilot agent mode, OpenAI Codex CLI
-- [`docs/byo-agent.md`](docs/byo-agent.md) — wire Quill into an agent loop you wrote yourself
+**Roadmap (not shipping today, do not assume present):** PR-comment rendering of the
+passport (the Action publishes a Status Check today), the lethal-trifecta enforcement
+escalation as a CI signal, per-tool hook adapters for Cline / Aider / Continue /
+Windsurf / Zed, WebAuthn for cross-platform hardware-attested approval, and a
+`from quill import gate` BYO-agent library API. The MCP proxy, OS sandbox, desktop
+dashboard, and out-of-band notification channels that earlier previews shipped were
+**removed** in the Change Control pivot and are not coming back in this line.
 
 ## Security
 
-`quill` is itself a security-critical piece of code. The threat model, hardening recommendations, and responsible-disclosure address are in [SECURITY.md](SECURITY.md). When PyPI publish lands, releases will be signed via [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) with PEP 740 attestations.
+`quill` is itself security-critical code. The threat model, the honest list of what
+the gate stops well and where it can be bypassed, and the responsible-disclosure
+address are in [SECURITY.md](SECURITY.md) and [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md).
+When PyPI publishing is wired, releases will be signed via
+[PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) with PEP 740
+attestations (planned, not yet in place).
 
 ## Contributing
 
-If you have a published red-team trace, a missed dangerous-action class, or a vibe-coding disaster I should be defaulting to critical, open an issue. If you have a framework adapter you want to see (LangGraph, AutoGen, CrewAI, OpenAI Agents SDK), open a PR; adapters live under `src/quill/adapters/`.
+Missed a dangerous-action class, a scope-bypass on the diff parser, or a false
+positive? Open an issue with a repro. Adapters live under `src/quill/adapters/`.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Vendored third-party code is attributed in [NOTICE](NOTICE) (sparfenyuk/mcp-proxy MIT, IBM/mcp-context-forge Apache-2.0). Version history in [CHANGELOG.md](CHANGELOG.md). Repo: [github.com/manumarri-sudo/quill](https://github.com/manumarri-sudo/quill).
+MIT. See [LICENSE](LICENSE). Vendored third-party code is attributed in
+[NOTICE](NOTICE). Version history in [CHANGELOG.md](CHANGELOG.md). Repo:
+[github.com/manumarri-sudo/quill](https://github.com/manumarri-sudo/quill).
 
 ---
 
