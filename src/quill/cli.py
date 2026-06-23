@@ -658,6 +658,71 @@ def status_cmd() -> None:
         )
 
 
+@app.command("frameworks")
+def frameworks_cmd(
+    standard: Annotated[
+        str | None,
+        typer.Option("--standard", "-s", help="filter to one framework (substring match)."),
+    ] = None,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="machine-readable output for piping.")
+    ] = False,
+) -> None:
+    """One command: every compliance framework Quill produces evidence for.
+
+    Prints each control, the evidence it produces, and how an auditor would
+    sample it — the whole crosswalk, no audit log or setup required. To turn a
+    real audit log into a shareable PDF/HTML pack, use `quill audit export --pack`.
+    """
+
+    from quill import exports
+
+    controls = exports.CONTROLS
+    if standard:
+        controls = tuple(c for c in controls if standard.lower() in c.standard.lower())
+
+    if as_json:
+        Console().print_json(
+            data=[
+                {
+                    "standard": c.standard,
+                    "code": c.code,
+                    "title": c.title,
+                    "evidence_events": list(c.quill_event_types),
+                    "auditor_sampling": c.auditor_sampling,
+                }
+                for c in controls
+            ]
+        )
+        return
+
+    by_std: dict[str, list[exports.Control]] = {}
+    for c in controls:
+        by_std.setdefault(c.standard, []).append(c)
+
+    out = Console()
+    if not controls:
+        out.print(f"[yellow]no controls match {standard!r}[/yellow]")
+        raise typer.Exit(code=1)
+    out.print(
+        f"[bold]Quill produces audit evidence for {len(controls)} controls "
+        f"across {len(by_std)} frameworks.[/bold]"
+    )
+    out.print("[dim]Each line: what Quill records, and how an auditor would test it.[/dim]\n")
+    for std in sorted(by_std):
+        out.print(f"[bold cyan]{std}[/bold cyan]")
+        for c in by_std[std]:
+            out.print(f"  [bold]{c.code}[/bold]  {c.title}")
+            out.print(f"    [dim]evidence:[/dim] {', '.join(c.quill_event_types)}")
+            if c.auditor_sampling:
+                out.print(f"    [dim]auditor samples by:[/dim] {c.auditor_sampling}")
+        out.print("")
+    out.print(
+        "[dim]→ `quill audit export --pack` turns your real audit log into a "
+        "signed PDF/HTML evidence pack across all of the above.[/dim]"
+    )
+
+
 @app.command(
     "git-hook",
     hidden=True,
