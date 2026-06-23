@@ -435,6 +435,60 @@ def verify_passport_cmd(
     )
 
 
+@app.command("check-approval")
+def check_approval_cmd(
+    pr: Annotated[int, typer.Option("--pr", help="pull request number.")],
+    head_sha: Annotated[str, typer.Option("--head-sha", help="current head commit SHA.")],
+    author: Annotated[str, typer.Option("--author", help="the PR author's login.")],
+    repo: Annotated[
+        str | None,
+        typer.Option("--repo", help="owner/repo (default: $GITHUB_REPOSITORY)."),
+    ] = None,
+    allow_reviewer: Annotated[
+        list[str] | None,
+        typer.Option("--allow-reviewer", help="restrict approvals to these logins. Repeatable."),
+    ] = None,
+) -> None:
+    """Require a human (non-author) GitHub approval on the current head commit.
+
+    The other root of trust besides a signed perimeter: a human clicks Approve on
+    the PR. An agent can't approve its own PR, and the approval must be on the
+    current head, so it can't be replayed against newly pushed code. Reads the
+    token from $GITHUB_TOKEN. Exit 0 if approved, 1 if not.
+    """
+    import os
+
+    from quill import github_review as gh
+
+    slug = repo or os.environ.get("GITHUB_REPOSITORY", "")
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if "/" not in slug or not token:
+        console.print("[red]need --repo owner/repo (or $GITHUB_REPOSITORY) and $GITHUB_TOKEN[/red]")
+        raise typer.Exit(code=2)
+    owner, name = slug.split("/", 1)
+
+    try:
+        result = gh.check_pr_approval(
+            owner=owner,
+            repo=name,
+            pr_number=pr,
+            head_sha=head_sha,
+            pr_author=author,
+            token=token,
+            allowed_reviewers=allow_reviewer or None,
+        )
+    except QuillError as e:
+        console.print(f"[red]approval check failed:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    out = Console()
+    if result.approved:
+        out.print(f"[green]✓ {result.detail}[/green]")
+        raise typer.Exit(code=0)
+    out.print(f"[red]✗ {result.detail}[/red]")
+    raise typer.Exit(code=1)
+
+
 @app.command(
     "git-hook",
     hidden=True,
