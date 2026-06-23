@@ -1,8 +1,9 @@
 # quill
 
-> **Quill Change Control** — a CI/CD pull-request gate that verifies an AI-written
-> diff against the human-approved task, scopes the change, and issues a
-> tamper-evident **Change Passport**.
+> **Quill Change Control** — the gate at the pull-request merge boundary that
+> proves an AI agent's change did **only** what a human approved. Out-of-scope
+> edits, forbidden paths, and secrets fail the build; in-scope work merges
+> untouched. The verdict is signed, so it can't be faked.
 
 <!-- mcp-name: io.github.manumarri-sudo/quill -->
 
@@ -13,7 +14,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 An AI agent opens a pull request. Did it do **only** what it was asked to do? Quill
-answers that in CI, deterministically, and signs the answer.
+answers that at the one place it can be enforced — the merge boundary, in CI —
+deterministically, where the agent can't switch the gate off or talk its way past
+it (there's no model in the decision path to jailbreak).
 
 ```bash
 # 1. capture the approved task (once, at the start of the work)
