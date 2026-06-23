@@ -25,9 +25,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from quill import events as ev
+from quill import perimeter as perimeter_mod
 from quill import policy
+from quill import provenance as provenance_mod
 from quill.contract import Contract, head_sha, repo_root
 from quill.errors import QuillError
+from quill.perimeter import GATE_TAMPER_GLOBS, Perimeter, _glob_hit
+from quill.provenance import ProvenanceResult
 
 if TYPE_CHECKING:
     from quill.audit import AuditLog
@@ -168,10 +172,29 @@ class VerifyResult:
     exceptions_applied: tuple[dict[str, Any], ...]
     reasons: tuple[str, ...]
     audit_mac: str | None = None
+    # Trust spine (all optional so the contract-only path is unchanged):
+    provenance: ProvenanceResult | None = None  # was the perimeter signed by a human?
+    forbidden_hits: tuple[str, ...] = ()  # paths the perimeter forbids outright
+    gate_tamper_hits: tuple[str, ...] = ()  # edits to the gate's own trust surfaces
+    perimeter_id: str | None = None
+    strict: bool = False
 
     @property
     def changed_paths(self) -> tuple[str, ...]:
         return self.evaluation.changed_paths
+
+
+def _gate_tamper_hits(diff_text: str) -> tuple[str, ...]:
+    """Diff paths that touch the gate's own trust surfaces (perimeter, approver
+    keys, the workflow that runs the check). Always a BLOCK: a diff must not be
+    able to edit its own judge.
+
+    Scans the RAW parsed diff, not ``evaluation.changed_paths``, because the
+    latter strips ``.quill/`` - which would hide exactly the approver-key and
+    perimeter edits this check exists to catch.
+    """
+    paths = {f.path for f in policy.parse_unified_diff(diff_text)}
+    return tuple(sorted(p for p in paths if any(_glob_hit(p, g) for g in GATE_TAMPER_GLOBS)))
 
 
 def verify(
@@ -181,6 +204,9 @@ def verify(
     head: str = "HEAD",
     audit: AuditLog | None = None,
     session_id: str = "quill-change-control",
+    perimeter: Perimeter | None = None,
+    strict: bool = False,
+    env: dict[str, str] | None = None,
 ) -> VerifyResult:
     """Run the full verification and return a VerifyResult.
 
@@ -188,6 +214,13 @@ def verify(
     logged exceptions, composes the verdict, and (when an audit log is given)
     chains a ``verification.run`` event whose mac is attached to the result so a
     passport can cite the tamper-evident record.
+
+    When a signed ``perimeter`` is supplied this also enforces the standing
+    boundary (forbidden paths -> BLOCK, perimeter-chosen review surfaces) and,
+    in ``strict`` mode, requires the perimeter's provenance to be a valid
+    signature from a trusted approver - otherwise the boundary is unestablished
+    and the verdict is BLOCK. Gate-tamper edits (the workflow, the approver keys,
+    the perimeter itself) are always a BLOCK, perimeter or not.
     """
     root = repo_root(root)
     diff_text = git_diff(contract.base_commit, root, head=head)
@@ -221,25 +254,79 @@ def verify(
             else:
                 applied.append(e)
 
+    changed = evaluation.changed_paths
+    gate_tamper = _gate_tamper_hits(diff_text)
+
+    forbidden_hits: tuple[str, ...] = ()
+    provenance: ProvenanceResult | None = None
+    perimeter_id: str | None = None
+    review_categories: set[str] | None = None  # None = report every surface (legacy)
+    if perimeter is not None:
+        perimeter_id = perimeter.perimeter_id
+        forbidden_hits = tuple(p for p in changed if perimeter.forbids(p))
+        review_categories = set(perimeter.review_surfaces)
+        provenance = provenance_mod.verify_artifact(
+            perimeter.to_dict(), perimeter_mod.signature_path(root), root, env
+        )
+
     reasons: list[str] = []
     if unwaived_secrets:
         reasons.append(f"{len(unwaived_secrets)} secret(s) detected on added lines")
     if unwaived_scope:
         reasons.append(f"{len(unwaived_scope)} path(s) changed outside the approved scope")
-    surface_hits = {k: v for k, v in unwaived_surfaces.items() if v}
-    if surface_hits:
+    if forbidden_hits:
+        reasons.append(f"{len(forbidden_hits)} path(s) touch a forbidden perimeter surface")
+    if gate_tamper:
         reasons.append(
-            "sensitive surfaces touched: "
-            + ", ".join(f"{k} ({len(v)})" for k, v in surface_hits.items())
+            f"{len(gate_tamper)} edit(s) to Quill's own trust surfaces "
+            "(workflow / approver keys / perimeter)"
         )
 
-    if unwaived_secrets or unwaived_scope:
+    surface_hits = {k: v for k, v in unwaived_surfaces.items() if v}
+    if review_categories is not None:
+        review_hits = {k: v for k, v in surface_hits.items() if k in review_categories}
+    else:
+        review_hits = surface_hits
+    if review_hits:
+        reasons.append(
+            "sensitive surfaces touched: "
+            + ", ".join(f"{k} ({len(v)})" for k, v in review_hits.items())
+        )
+
+    provenance_blocks = bool(
+        strict
+        and perimeter is not None
+        and provenance is not None
+        and not provenance.status.is_trustworthy
+    )
+    strict_no_perimeter = bool(strict and perimeter is None)
+    if provenance_blocks and provenance is not None:
+        reasons.append(f"perimeter provenance not established: {provenance.detail}")
+    elif perimeter is not None and provenance is not None and not provenance.status.is_trustworthy:
+        # Non-strict: surface the gap as a warning without failing the build.
+        reasons.append(f"warning: perimeter provenance unverified ({provenance.detail})")
+    if strict_no_perimeter:
+        reasons.append("strict mode requires a signed perimeter, but none is configured")
+
+    block = bool(
+        unwaived_secrets
+        or unwaived_scope
+        or forbidden_hits
+        or gate_tamper
+        or provenance_blocks
+        or strict_no_perimeter
+    )
+    if block:
         verdict = Verdict.BLOCK
-    elif surface_hits:
+    elif review_hits:
         verdict = Verdict.NEEDS_REVIEW
     else:
         verdict = Verdict.PASS
-        reasons.append("diff is within scope, no secrets, no sensitive surfaces")
+        reasons.append(
+            "diff is within the approved boundary: in scope, no secrets, nothing forbidden"
+        )
+        if provenance is not None and provenance.status.is_trustworthy:
+            reasons.append(provenance.detail)
 
     head_commit = head_sha(root)
 
@@ -261,6 +348,12 @@ def verify(
                     for f in unwaived_secrets
                 ],
                 "sensitive_surfaces": {k: list(v) for k, v in surface_hits.items()},
+                "forbidden_hits": list(forbidden_hits),
+                "gate_tamper_hits": list(gate_tamper),
+                "perimeter_id": perimeter_id or "",
+                "provenance": provenance.status.value if provenance is not None else "n/a",
+                "provenance_key_id": provenance.key_id if provenance is not None else "",
+                "strict": strict,
                 "exceptions_applied": len(applied),
             },
         )
@@ -277,4 +370,9 @@ def verify(
         exceptions_applied=tuple(applied),
         reasons=tuple(reasons),
         audit_mac=audit_mac,
+        provenance=provenance,
+        forbidden_hits=forbidden_hits,
+        gate_tamper_hits=gate_tamper,
+        perimeter_id=perimeter_id,
+        strict=strict,
     )
