@@ -137,6 +137,18 @@ commit Status Check, and fails the job on `BLOCK`. If a PR has no
 `.quill/contract.json`, the gate is a no-op with a notice telling you to run
 `quill begin` — Change Control is opt-in per branch.
 
+### Known limit today: the contract-provenance gap
+
+`quill verify` trusts `.quill/contract.json`. Nothing yet verifies that a human —
+not the agent — authored it, so an agent with commit access can write its own
+contract (`--approved-by anyone`, `--scope "**"`) and pass its own review. Until
+the contract is bound to something the agent cannot forge (a GitHub PR review
+approval read through the API, or a signed commit) and the action runs from a
+pinned ref rather than the PR's own checkout, **treat Change Control as review
+automation for a cooperative agent, not a boundary against an adversarial one.**
+Closing this gap is the top roadmap item; it is what turns the verdict from a
+useful signal into a trustworthy one. See [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md).
+
 ## The local runtime gate (optional, defense-in-depth)
 
 Separately from CI, Quill can gate an agent's tool calls **as they happen** on your
