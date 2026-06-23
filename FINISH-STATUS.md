@@ -127,6 +127,24 @@ mypy-greening + #46 de-dup pass. **Commit them** (split sensibly); the cli.py
 | 45 | **FIXED** | no caches/.DS_Store tracked. |
 | 50 | **WONTFIX-NOW** | CODE_OF_CONDUCT.md — trivial, next run. |
 
+## Shipped this session (2026-06-23)
+
+Commits on `change-control-pivot`, each independently reviewable:
+1. `fix(hook):` land `code_scan` + `learning.record_decision_learning` — **fixes a broken HEAD** (committed code imported uncommitted modules).
+2. `fix(types):` mypy `--strict` green + drop `|| true` in CI (#8/#10).
+3. `docs:` remove dead `HOOK-VS-PROXY.md` (#22 MOOT).
+4. `docs:` FINISH-STATUS triage + identity decision.
+5. `docs(readme):` lead with Change Control; local gate = defense-in-depth; numbers reconciled; calibration claims (#11/#13/#19/#23/#6). Smoke-tested begin→verify→passport end to end.
+6. `docs:` SECURITY-MODEL (CI gate = provable boundary; Seatbelt removed) + SECURITY.md (proxy framing, supply-chain tense, 0.2.x) + untrack marketing + SSOT count test (#37/#32/#5/#6).
+7. `feat/docs:` CHANGELOG Wave 11.
+
+**Final gate (all green):** `pytest` 1032 passed / 4 xfailed · `ruff check` clean · `ruff format --check` clean · `mypy src/quill` clean & CI-enforced · `quill audit verify` chain intact · begin/verify/passport smoke-tested in a clean repo.
+
+**Left for the human (publish / outward-facing — not done autonomously):**
+- Set the GitHub **About** string to the Change-Control description (in LAUNCH.md "Repo description — CURRENT").
+- Cut the **a6 PyPI release** so the published wheel ships the `quillx` console script, then smoke-test the documented install in a clean env (#2). Until then the README uses the verified-working `uvx --from quillx quill ...` form.
+- Optional: rewrite the still-accurate `docs/marketing/cve-2025-59536-mitigation.md` for the Change-Control framing and re-add it.
+
 ## Out of scope (explicit — next run, per directive)
 
 No new product surface: compliance docs, retention, SOC2 pack, EU AI Act export,
