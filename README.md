@@ -137,17 +137,45 @@ commit Status Check, and fails the job on `BLOCK`. If a PR has no
 `.quill/contract.json`, the gate is a no-op with a notice telling you to run
 `quill begin` — Change Control is opt-in per branch.
 
-### Known limit today: the contract-provenance gap
+## Trust spine: sign the boundary once, the agent can't forge it
 
-`quill verify` trusts `.quill/contract.json`. Nothing yet verifies that a human —
-not the agent — authored it, so an agent with commit access can write its own
-contract (`--approved-by anyone`, `--scope "**"`) and pass its own review. Until
-the contract is bound to something the agent cannot forge (a GitHub PR review
-approval read through the API, or a signed commit) and the action runs from a
-pinned ref rather than the PR's own checkout, **treat Change Control as review
-automation for a cooperative agent, not a boundary against an adversarial one.**
-Closing this gap is the top roadmap item; it is what turns the verdict from a
-useful signal into a trustworthy one. See [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md).
+The point of running in CI is that the gate lives where the agent can't disable
+it — but that only matters if the agent also can't *fake its approval* or *edit
+its own judge*. Quill closes both with Ed25519 (verification uses a public key,
+forging needs the private key — not the same secret, which is what the symmetric
+HMAC chain could never give you):
+
+```bash
+quill keygen --out approver.pem          # human's key; keep the private half OFF the box
+quill guard --key approver.pem --forbid 'migrations/**' --forbid 'src/auth/**'
+#   ^ signs .quill/perimeter.json once. From now on EVERY agent's PR is checked
+#     against it automatically — you're paged only when one crosses the line.
+```
+
+- **A human signs the perimeter once; every PR is enforced with no per-change
+  approval.** That is the answer to "I'm not going to sit and approve a hundred
+  agents." Forbidden paths and gate-tamper edits BLOCK; secrets BLOCK; in-bounds
+  work PASSes silently.
+- **The agent can't authorize itself.** Editing the perimeter, the approver keys
+  (`.quill/approvers/**`), or the workflow that runs the gate is itself a BLOCK,
+  so an agent can't widen its own boundary or add its own signing key. Tampering
+  with a signed perimeter invalidates the signature.
+- **The verdict can't be forged.** With a gate key (`quill verify --strict
+  --sign-key gate.pem`, or `QUILL_GATE_KEY` in CI), the passport is signed;
+  anyone re-checks it with `quill verify-passport passport.json` and a flipped
+  verdict or untrusted signer fails.
+- **Or use GitHub's own reviews.** `quill check-approval` requires a human who is
+  not the PR author to have approved the current head commit — an agent can't
+  approve its own PR, and the approval is dismissed when new code is pushed.
+
+**What this requires to be a real boundary (not optional):** the trust root must
+live where a PR can't edit it — hold the approver/gate **private keys off the
+build machine** (a repo/org secret: `QUILL_GATE_KEY`, `QUILL_APPROVER_PUBKEYS`),
+**pin the Action to a published tag** (`uses: manumarri-sudo/quill@v0`, not the
+PR's own checkout), and make the **Status Check required** in branch protection.
+With those three in place an adversarial agent cannot fool the gate; without them
+it is honest review automation for a cooperative one. The full threat model and
+the exact deployment checklist are in [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md).
 
 ## The local runtime gate (optional, defense-in-depth)
 

@@ -1,8 +1,9 @@
 name: "Quill Change Control"
 description: >-
-  Verify AI-written diffs against the human-approved task. Checks scope, scans
-  added lines for secrets and sensitive surfaces, evaluates logged exceptions,
-  and issues a Quill Change Passport as a commit Status Check.
+  Verify AI-written diffs against a human-signed perimeter. Enforces the signed
+  boundary (forbidden paths and gate-tamper edits BLOCK), scans added lines for
+  secrets, checks approver provenance, and issues a gate-signed Quill Change
+  Passport as a commit Status Check.
 author: "Manu Marri"
 branding:
   icon: "shield"
@@ -37,6 +38,27 @@ inputs:
     description: "Install quill from this checked-out repo instead of PyPI (used for dogfooding)."
     required: false
     default: "false"
+  strict:
+    description: >-
+      Require a signed perimeter from a trusted approver. When true (recommended),
+      an unsigned / tampered / absent perimeter BLOCKs instead of silently passing.
+    required: false
+    default: "true"
+  gate-key:
+    description: >-
+      Gate identity PRIVATE key (PEM) used to sign the passport, so reviewers can
+      verify the verdict with `quill verify-passport`. Pass from a repo/org secret,
+      e.g. ${{ secrets.QUILL_GATE_KEY }}. Never commit this.
+    required: false
+    default: ""
+  approver-pubkeys:
+    description: >-
+      Trusted approver PUBLIC keys (PEM) that may sign the perimeter. Pass from a
+      secret/variable so a PR cannot edit the trust root, e.g.
+      ${{ secrets.QUILL_APPROVER_PUBKEYS }}. The committed .quill/approvers/*.pub
+      set is used in addition.
+    required: false
+    default: ""
 
 outputs:
   verdict:
@@ -72,5 +94,8 @@ runs:
         QUILL_PASSPORT_DIR: ${{ inputs.passport-dir }}
         QUILL_FAIL_ON_BLOCK: ${{ inputs.fail-on-block }}
         QUILL_HEAD_SHA: ${{ inputs.head-sha }}
+        QUILL_STRICT: ${{ inputs.strict }}
+        QUILL_GATE_KEY: ${{ inputs.gate-key }}
+        QUILL_APPROVER_PUBKEYS: ${{ inputs.approver-pubkeys }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: bash "${{ github.action_path }}/scripts/quill-passport.sh"

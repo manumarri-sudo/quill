@@ -167,7 +167,23 @@ A launch-gate for any README or marketing copy. If a claim is not at least
 | Blocks the irreversible class | **Supported** | rm -rf / DROP TABLE / force-push / npm publish / .env reads etc. are default-critical via inspectable regex. |
 | Prevents prompt injection | **Partial / reframe** | It cannot be prompt-injected (no LLM) and refuses some injection *consequences* (lethal-trifecta deny); it does not *prevent* injection. Say "refuses the consequence, not detects the cause." |
 | Secure by default | **Partial** | The local hook fails closed, but `off`/`--no-biometric` exist and the app layer is bypassable (limits 1-4). Say "defense-in-depth by default." The provable boundary is the CI gate (next row), not the local hook. |
-| CI gate runs outside the agent | **Partial** | `quill verify` runs in CI on the PR, where the agent has no process to disable the gate from, and signs the verdict into the HMAC chain. **But it currently trusts the contract.** The contract is a `.quill/contract.json` file committed to the branch, and nothing yet binds it to a verified human — an agent that runs `quill begin "..." --scope "**" --approved-by anyone` produces a contract that passes. Until contract provenance is bound to something the agent can't forge (a GitHub review approval read via API, or a signed commit), and the gate runs from a pinned ref rather than the PR's own copy, the CI gate is *not yet* a boundary against an adversarial agent — it is honest review automation for a cooperative one. See "the contract-provenance gap" below. |
+| CI gate runs outside the agent | **Supported, deployment-gated** | `quill verify` runs in CI where the agent can't disable it, enforces a **human-signed perimeter** (Ed25519: forging needs the approver's private key, which lives off the box), BLOCKs any edit to its own trust surfaces (perimeter, approver keys, workflow), and emits a **gate-signed passport** anyone re-verifies with `quill verify-passport`. The agent cannot forge approval (no private key), bootstrap trust (editing `.quill/approvers/**` is a gate-tamper BLOCK), or forge the verdict (asymmetric). This is a real boundary **iff** the trust root is deployed off the PR's reach — see the deployment checklist below. Absent that (no signed perimeter, keys committed in-repo, action run from the PR's own checkout), it degrades to honest review automation for a cooperative agent, and `--strict` BLOCKs rather than pretending. |
+
+### Deployment checklist (what makes the CI gate a real boundary)
+
+All three are required; any one missing drops it back to cooperative-only:
+
+1. **Keys off the build machine.** The approver/gate **private** keys never live
+   in the repo. Publish the approver **public** key as `QUILL_APPROVER_PUBKEYS`
+   and the gate signing key as `QUILL_GATE_KEY` — repo/org **secrets** a PR
+   cannot read or edit. (A committed `.quill/approvers/*.pub` set is a
+   convenience layer only; it's editable in a PR, so gate-tamper BLOCKs such
+   edits, but the authoritative pin is the secret.)
+2. **Pin the Action to a published tag** (`uses: manumarri-sudo/quill@v0`), not
+   the PR's own checkout (`uses: ./` + `install-from-source`), so a PR can't ship
+   a modified gate that judges itself.
+3. **Make the Status Check required** in branch protection, with admin-bypass and
+   force-push disabled — otherwise a `BLOCK` is merely advisory.
 | Auditor evidence pack | **Partial** | Maps to evidence requests (SOC 2, EU AI Act Art 12-shaped, ISO 42001 A.6.2.8); does not certify compliance by itself. |
 | Enterprise-grade / production-safe | **Not yet** | Alpha, squatted dist name, no external audit. Do not claim. |
 | Cannot be bypassed / agent-proof | **Dangerous** | False - see limits 1-4. Never claim. |

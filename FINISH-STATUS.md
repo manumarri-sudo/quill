@@ -145,6 +145,34 @@ Commits on `change-control-pivot`, each independently reviewable:
 - Cut the **a6 PyPI release** so the published wheel ships the `quillx` console script, then smoke-test the documented install in a clean env (#2). Until then the README uses the verified-working `uvx --from quillx quill ...` form.
 - Optional: rewrite the still-accurate `docs/marketing/cve-2025-59536-mitigation.md` for the Change-Control framing and re-add it.
 
+## Trust spine built this session (Wave 12) — "can't be fooled by the agent"
+
+Built the off-box root of trust that turns the CI gate from cooperative-only into
+a real boundary, in response to "after you create it you shouldn't be able to get
+in and manipulate it" + "I don't want to approve every change across a hundred
+agents." Grounded in a Nimble research pass that validated the pain (review
+bottleneck, "almost right" failures, the explicitly-unsolved task-faithfulness
+niche) and confirmed the generic AI-reviewer market is crowded — so Quill is
+positioned as the *deterministic, signed scope-gate under* the reviewers.
+
+- `attest.py` — Ed25519 sign/verify (verification ≠ forging).
+- `perimeter.py` — sign-once standing boundary; `provenance.py` — verify any
+  artifact against trusted approver keys (committed set + env/CI-secret pin).
+- `verify.py` — enforces perimeter (forbidden → BLOCK), gate-tamper → BLOCK
+  (raw-diff scan), `--strict` requires signed provenance. Backward-compatible.
+- `passport.py` — gate-signed passports + `verify_passport`.
+- `github_review.py` — PR-approval provenance (non-author, on head SHA).
+- CLI: `keygen`, `guard`, `verify --strict --sign-key`, `verify-passport`,
+  `check-approval`. Action: `strict`/`gate-key`/`approver-pubkeys` inputs.
+- ~45 new tests (attest, trust-spine incl. the bootstrap-trust attack, github
+  review). Smoke-tested end to end through the real CLI.
+- Deployment honesty: real boundary **iff** keys off-box + pinned action +
+  required check — checklist in SECURITY-MODEL.md; README states it plainly.
+
+Still owner-gated (publish/outward): cut the release that ships these CLIs;
+generate the org's approver/gate keypairs and set the CI secrets; pin the Action
+tag and turn on required-check branch protection.
+
 ## Out of scope (explicit — next run, per directive)
 
 No new product surface: compliance docs, retention, SOC2 pack, EU AI Act export,

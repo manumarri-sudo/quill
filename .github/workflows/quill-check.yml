@@ -33,12 +33,37 @@ jobs:
       - name: Quill Change Control
         if: steps.guard.outputs.have_contract == 'true'
         id: quill
+        # install-from-source runs THIS repo's checkout as the gate, which is only
+        # safe when the repo dogfooding the action is also the one that owns it.
+        # Consumers should instead pin a published tag (uses: manumarri-sudo/quill@v0)
+        # so a PR cannot modify the gate that judges it.
         uses: ./
         with:
           install-from-source: "true"
           head: ${{ github.event.pull_request.head.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
           fail-on-block: "true"
+          strict: "true"
+          # The trust root lives in secrets so a PR cannot edit it. Set these in
+          # repo/org settings; absent, strict mode BLOCKs (no established perimeter).
+          gate-key: ${{ secrets.QUILL_GATE_KEY }}
+          approver-pubkeys: ${{ secrets.QUILL_APPROVER_PUBKEYS }}
+
+      # The other root of trust: require a human (non-author) GitHub approval on
+      # the current head. Either this OR a signed perimeter is sufficient; run
+      # both for defense in depth. Soft here (continue-on-error) so a repo using
+      # only the signed-perimeter path is not forced to require reviews too.
+      - name: Require human PR approval (optional second root of trust)
+        if: steps.guard.outputs.have_contract == 'true'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          pip install -e . >/dev/null 2>&1 || pip install quillx >/dev/null 2>&1
+          quill check-approval \
+            --pr ${{ github.event.pull_request.number }} \
+            --head-sha ${{ github.event.pull_request.head.sha }} \
+            --author ${{ github.event.pull_request.user.login }}
 
       - name: Report verdict
         if: steps.guard.outputs.have_contract == 'true'

@@ -23,9 +23,19 @@ PASSPORT_DIR="${QUILL_PASSPORT_DIR:-.quill}"
 FAIL_ON_BLOCK="${QUILL_FAIL_ON_BLOCK:-true}"
 STATUS_CONTEXT="quill/change-control"
 
+# --strict (default on) requires a signed perimeter from a trusted approver, so
+# an unsigned / tampered / absent boundary BLOCKs rather than silently passing.
+STRICT_FLAG=""
+if [[ "${QUILL_STRICT:-true}" == "true" ]]; then
+  STRICT_FLAG="--strict"
+fi
+
 # 1. Run the verifier. It exits 1 on BLOCK; we capture that without aborting so
-#    we can still publish the passport and a Status Check before deciding.
-quill verify --head "$HEAD_REF" --passport-dir "$PASSPORT_DIR" >/dev/null 2>"$PASSPORT_DIR.err" || true
+#    we can still publish the passport and a Status Check before deciding. The
+#    passport is gate-signed automatically when QUILL_GATE_KEY is in the env
+#    (an off-box CI secret), so reviewers can verify the verdict independently.
+quill verify $STRICT_FLAG --head "$HEAD_REF" --passport-dir "$PASSPORT_DIR" \
+  >/dev/null 2>"$PASSPORT_DIR.err" || true
 
 PASSPORT_JSON="$PASSPORT_DIR/passport.json"
 PASSPORT_MD="$PASSPORT_DIR/passport.md"
