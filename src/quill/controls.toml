@@ -380,3 +380,51 @@ title = "Authenticity of the verdict and the approval (non-repudiation)"
 description = """The verdict is signed by the gate identity (Ed25519) and re-verifiable with `quill verify-passport`; the perimeter is signed by a human approver whose private key is off the agent's machine. Verification uses a public key, so a third party can check authenticity without being able to forge it."""
 quill_event_types = ["verification.run"]
 auditor_sampling = """Take a passport.json and run `quill verify-passport` against the published gate public key; confirm it validates and that altering the verdict fails verification. Confirm the approver/gate private keys are stored as CI secrets or hardware, never committed."""
+
+# ============================================================================
+# USA regulatory + federal standards.
+# Mapped only where Quill's actual evidence (tamper-evident chain, Ed25519
+# signatures, scope/secret enforcement records, human-approval provenance)
+# genuinely supports the control. These say "produces evidence relevant to",
+# NOT "certifies compliance with".
+# ============================================================================
+
+[[controls]]
+standard = "NIST SP 800-53"
+code = "SI-7-INTEGRITY"
+title = "Software, firmware, and information integrity"
+description = """Integrity-verification mechanisms detect unauthorized changes to information. Quill's audit chain is HMAC-SHA256 chained and the Change Passport / tree head are Ed25519-signed, so unauthorized modification of the evidence is detectable (and, with the Merkle transparency anchor, provable to a third party)."""
+quill_event_types = ["tool.attempted", "verification.run", "chain.repaired"]
+auditor_sampling = """Run `quill audit verify` and confirm the chain reports intact; alter one past entry and confirm verification fails. For a signed passport, run `quill verify-passport` and confirm a tampered verdict fails signature check."""
+
+[[controls]]
+standard = "NIST SP 800-53"
+code = "AU-10-NON-REPUDIATION"
+title = "Non-repudiation of recorded actions and decisions"
+description = """The system binds actions/decisions to an origin such that the actor cannot later deny them. Each verdict is signed by the gate identity and each approval by a human approver key held off the build machine; verification is public, forgery requires the private key."""
+quill_event_types = ["verification.run", "approve.biometric.ok"]
+auditor_sampling = """Confirm the signing keys are stored as CI secrets or hardware (never committed). Verify a passport against the published public key; confirm a third party can validate authenticity without being able to mint a new verdict."""
+
+[[controls]]
+standard = "NIST SP 800-53"
+code = "AU-9-PROTECT-AUDIT-INFO"
+title = "Protection of audit information from unauthorized modification"
+description = """Audit records are protected against unauthorized deletion and modification. The chain is tamper-evident and a sealed high-water-mark (.head) plus the Merkle transparency anchor make trailing truncation and rewrite of already-recorded history detectable from a small off-box anchor."""
+quill_event_types = ["tool.attempted", "verification.run"]
+auditor_sampling = """Confirm an off-box anchor (published tree head / Status Check) exists; delete trailing entries locally and confirm `quill audit verify` against the sealed count flags the shortfall."""
+
+[[controls]]
+standard = "FTC Act Section 5"
+code = "FTC-5-SUBSTANTIATION"
+title = "Substantiation of claims about automated/AI conduct"
+description = """Section 5 reaches unfair or deceptive practices; the FTC has acted on unsubstantiated AI claims. Quill's verifiable record of what each agent was permitted to do and what each change touched provides contemporaneous evidence to substantiate representations about AI behavior — evidence, not a compliance certification."""
+quill_event_types = ["verification.run", "verdict.blocked", "verdict.allowed"]
+auditor_sampling = """For a representation made about the agent (e.g. "agents cannot deploy to prod"), locate the perimeter rule and the verification.run BLOCKs that enforce it; confirm the evidence supports the claim as stated."""
+
+[[controls]]
+standard = "Colorado AI Act (SB 24-205)"
+code = "CO-AI-RECORDS"
+title = "Risk-management records for consequential AI decisions"
+description = """Developers/deployers of high-risk AI must exercise reasonable care and maintain records of risk-management measures. Quill's signed perimeter (the documented allowed/forbidden boundary) plus the per-change verification records form a contemporaneous risk-management trail for changes an AI agent makes."""
+quill_event_types = ["contract.created", "verification.run"]
+auditor_sampling = """Confirm a signed perimeter defines the high-risk boundaries (auth, data, deploy paths); sample verification.run records over the review window and confirm coverage of every merged AI-authored change."""

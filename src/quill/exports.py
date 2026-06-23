@@ -151,6 +151,9 @@ def aggregate(
         "ISO/IEC 42001",
         "SOC 2 Common Criteria",
         "MITRE ATLAS",
+        "NIST SP 800-53",
+        "FTC Act Section 5",
+        "Colorado AI Act (SB 24-205)",
     ]
     by_type: Counter[str] = Counter()
     risk_dist: Counter[str] = Counter()
