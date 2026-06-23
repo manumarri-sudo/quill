@@ -24,8 +24,10 @@ from quill.policy import Risk, classify_command
         ("mkfs.ext4 /dev/sdb1", "filesystem format"),
         # version control destructive
         ("git push --force origin main", "git push --force"),
+        ("git push origin main --force", "git push --force"),
         ("git push -f", "git push --force"),
-        ("git push --force-with-lease", "git push --force"),
+        # NB: `git push --force-with-lease` is the SAFE variant and is
+        # deliberately NOT critical (see test_false_positives_2026_06).
         ("git reset --hard HEAD~5", "git reset --hard"),
         ("git clean -fdx", "git clean"),
         # database - bare unquoted SQL still trips the gate. The quoted
