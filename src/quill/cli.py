@@ -195,29 +195,67 @@ def verify_cmd(
         bool,
         typer.Option("--json", help="print the machine-readable passport to stdout."),
     ] = False,
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help="require a signed perimeter from a trusted approver; BLOCK if absent / "
+            "unsigned / tampered. Recommended in CI.",
+        ),
+    ] = False,
+    sign_key: Annotated[
+        Path | None,
+        typer.Option(
+            "--sign-key",
+            help="gate private key (PEM) to sign the passport with; off-box CI secret. "
+            "Falls back to the QUILL_GATE_KEY env value.",
+        ),
+    ] = None,
 ) -> None:
     """Compare the diff to the contract and emit PASS / NEEDS_REVIEW / BLOCK.
 
     Exit code is 0 for PASS / NEEDS_REVIEW and 1 for BLOCK, so this drops
-    straight into a CI gate. Evidence is written to .quill/passport.{json,md}.
+    straight into a CI gate. When a signed perimeter exists it is enforced
+    (forbidden paths and gate-tamper edits BLOCK); with --strict an unsigned or
+    tampered perimeter also BLOCKs. Evidence goes to .quill/passport.{json,md}.
     """
+    import os
+
     from quill import contract as contract_mod
     from quill import passport as passport_mod
+    from quill import perimeter as perimeter_mod
     from quill import verify as verify_mod
 
     try:
         contract = contract_mod.load()
         root = contract_mod.repo_root()
+        perimeter = perimeter_mod.load(root)
         with AuditLog(path=default_audit_path(), hmac_key=_hmac_key()) as audit:
-            result = verify_mod.verify(contract=contract, root=root, head=head, audit=audit)
+            result = verify_mod.verify(
+                contract=contract,
+                root=root,
+                head=head,
+                audit=audit,
+                perimeter=perimeter,
+                strict=strict,
+            )
     except QuillError as e:
         console.print(f"[red]verify failed:[/red] {e}")
         raise typer.Exit(code=2) from e
 
+    gate_pem: str | None = None
+    if sign_key is not None:
+        gate_pem = sign_key.read_text()
+    elif os.environ.get("QUILL_GATE_KEY"):
+        gate_pem = os.environ["QUILL_GATE_KEY"]
+
     if write_passport:
         out_dir = passport_dir or (root / ".quill")
-        json_path, md_path = passport_mod.write_passport(result, out_dir=out_dir)
-        console.print(f"[dim]passport: {md_path} · {json_path}[/dim]")
+        json_path, md_path = passport_mod.write_passport(
+            result, out_dir=out_dir, sign_key_pem=gate_pem
+        )
+        signed = " [dim](signed)[/dim]" if gate_pem else ""
+        console.print(f"[dim]passport: {md_path} · {json_path}[/dim]{signed}")
 
     out = Console()  # stdout
     if as_json:
@@ -226,6 +264,175 @@ def verify_cmd(
         out.print(passport_mod.render_markdown(result))
 
     raise typer.Exit(code=result.verdict.exit_code)
+
+
+@app.command("keygen")
+def keygen_cmd(
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            "--out",
+            "-o",
+            help="write <out> (private, 0600) and <out>.pub (public). "
+            "Omit to print both to stdout.",
+        ),
+    ] = None,
+) -> None:
+    """Generate an Ed25519 keypair for signing perimeters or passports.
+
+    The private key is the human approver's (or the CI gate's) off-box secret;
+    the .pub goes in .quill/approvers/ or QUILL_APPROVER_PUBKEYS so the gate can
+    verify without ever being able to forge.
+    """
+    from quill import attest
+
+    priv, pub = attest.generate_keypair()
+    kid = attest.key_id(attest.load_public_key(pub))
+    if out is None:
+        o = Console()
+        o.print("[yellow]# keep the private key OFF the agent's machine[/yellow]")
+        o.print(f"[bold]key id:[/bold] {kid}")
+        o.print("\n[bold]--- PRIVATE (secret) ---[/bold]")
+        o.print(priv.rstrip())
+        o.print("\n[bold]--- PUBLIC (share / commit) ---[/bold]")
+        o.print(pub.rstrip())
+        return
+    out.write_text(priv)
+    out.chmod(0o600)
+    pub_path = out.with_name(out.name + ".pub")
+    pub_path.write_text(pub)
+    console.print(f"[green]✓[/green] private key (0600) → {out}")
+    console.print(f"[green]✓[/green] public key → {pub_path}")
+    console.print(f"  key id: [bold]{kid}[/bold]")
+
+
+@app.command("guard")
+def guard_cmd(
+    key: Annotated[
+        Path,
+        typer.Option("--key", "-k", help="approver PRIVATE key (PEM) to sign the perimeter."),
+    ],
+    allow: Annotated[
+        list[str] | None,
+        typer.Option("--allow", help="path agents MAY touch (glob). Repeatable."),
+    ] = None,
+    forbid: Annotated[
+        list[str] | None,
+        typer.Option("--forbid", help="path agents may NEVER touch (glob). Repeatable."),
+    ] = None,
+    approved_by: Annotated[
+        str | None,
+        typer.Option("--approved-by", help="name recorded as the approver."),
+    ] = None,
+) -> None:
+    """Sign the standing perimeter once; every PR is then checked against it.
+
+    Builds (or re-signs) .quill/perimeter.json from --allow / --forbid, signs it
+    into .quill/perimeter.sig with your approver key, and reminds you to publish
+    the matching public key. After this, `quill verify --strict` enforces the
+    boundary on every agent's PR with no further human approval per change.
+    """
+    from quill import attest
+    from quill import contract as contract_mod
+    from quill import perimeter as perimeter_mod
+    from quill import provenance as provenance_mod
+
+    root = contract_mod.repo_root()
+    try:
+        priv_pem = key.read_text()
+        kid = attest.key_id(attest.load_private_key(priv_pem).public_key())
+    except (OSError, QuillError) as e:
+        console.print(f"[red]cannot read approver key:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    existing = perimeter_mod.load(root)
+    if allow or forbid or existing is None:
+        per = perimeter_mod.default_perimeter(
+            allowed_paths=tuple(allow or ()),
+            forbidden_paths=tuple(forbid or ()),
+            approved_by=approved_by,
+        )
+    else:
+        per = existing  # re-sign the existing perimeter unchanged
+    per.write(root)
+    provenance_mod.sign_artifact(per.to_dict(), priv_pem, perimeter_mod.signature_path(root))
+
+    out = Console()
+    out.print(f"[green]✓[/green] perimeter [bold]{per.perimeter_id}[/bold] signed by {kid}")
+    out.print(f"  allowed: {', '.join(per.allowed_paths) or '(anywhere not forbidden)'}")
+    out.print(f"  forbidden: {', '.join(per.forbidden_paths)}")
+    out.print(
+        "  next: publish the matching public key so the gate can verify it — either\n"
+        "    commit it to [bold].quill/approvers/<name>.pub[/bold], or set it as the\n"
+        "    [bold]QUILL_APPROVER_PUBKEYS[/bold] CI secret (stronger: a PR can't edit it)."
+    )
+
+
+@app.command("verify-passport")
+def verify_passport_cmd(
+    passport_file: Annotated[
+        Path,
+        typer.Argument(help="passport.json to verify."),
+    ],
+    gate_key: Annotated[
+        list[Path] | None,
+        typer.Option("--gate-key", help="trusted gate PUBLIC key (PEM). Repeatable."),
+    ] = None,
+) -> None:
+    """Independently verify a signed passport's verdict.
+
+    Checks the passport's signature against the trusted gate public keys (from
+    --gate-key files and/or the QUILL_GATE_PUBKEYS env). A passport with no
+    signature, a tampered body (e.g. a flipped verdict), or an untrusted signer
+    fails with exit 1 - so a reviewer can trust the verdict without trusting the
+    repo it came from.
+    """
+    import json
+    import os
+
+    from quill import attest
+    from quill import passport as passport_mod
+
+    pems: list[str] = []
+    for p in gate_key or []:
+        pems.append(p.read_text())
+    env_val = os.environ.get("QUILL_GATE_PUBKEYS", "")
+    for raw_chunk in env_val.replace(",", "\n\n").split("\n\n"):
+        chunk = raw_chunk.strip()
+        if not chunk:
+            continue
+        gp = Path(chunk).expanduser()
+        pems.append(gp.read_text() if ("BEGIN" not in chunk and gp.is_file()) else chunk)
+
+    gate_keys: dict[str, Any] = {}
+    for pem in pems:
+        try:
+            pub = attest.load_public_key(pem)
+            gate_keys[attest.key_id(pub)] = pub
+        except attest.AttestError:
+            continue
+
+    if not gate_keys:
+        console.print(
+            "[red]no trusted gate public keys[/red] (pass --gate-key or set QUILL_GATE_PUBKEYS)"
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        passport = json.loads(passport_file.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        console.print(f"[red]cannot read passport:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    signer = passport_mod.verify_passport(passport, gate_keys)
+    out = Console()
+    if signer is None:
+        out.print("[red]✗ passport signature INVALID[/red] — untrusted signer or tampered content")
+        raise typer.Exit(code=1)
+    out.print(
+        f"[green]✓ passport verified[/green] · verdict [bold]{passport.get('verdict')}[/bold] "
+        f"· signed by gate {signer}"
+    )
 
 
 @app.command(

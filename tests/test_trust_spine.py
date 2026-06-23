@@ -221,3 +221,60 @@ def test_secret_on_added_line_blocks(repo: Path) -> None:
     result = _verify(repo, contract)
     assert result.verdict is Verdict.BLOCK
     assert result.secret_findings
+
+
+# --------------------------------------------------------------------------- #
+# Signed passports: a verdict a reviewer can verify without trusting the repo  #
+# --------------------------------------------------------------------------- #
+
+
+def test_signed_passport_roundtrips(repo: Path) -> None:
+    from quill import passport as passport_mod
+
+    priv = _approver(repo)
+    _sign_perimeter(repo, priv)
+    contract = _begin(repo)
+    _commit_change(repo, "src/feature.py", "y = 2\n")
+    result = _verify(repo, contract)
+
+    gate_priv_pem, gate_pub_pem = attest.generate_keypair()
+    passport = passport_mod.sign_passport(passport_mod.build_passport(result), gate_priv_pem)
+    gate_pub = attest.load_public_key(gate_pub_pem)
+    gate_keys = {attest.key_id(gate_pub): gate_pub}
+    assert passport_mod.verify_passport(passport, gate_keys) == attest.key_id(gate_pub)
+
+
+def test_forged_passport_verdict_is_rejected(repo: Path) -> None:
+    """The dangerous twin: flip a BLOCK passport to PASS -> signature invalid."""
+    from quill import passport as passport_mod
+
+    priv = _approver(repo)
+    _sign_perimeter(repo, priv)
+    contract = _begin(repo)
+    _commit_change(repo, ".github/workflows/ci.yml", "name: ci\n")  # gate-tamper -> BLOCK
+    result = _verify(repo, contract)
+    assert result.verdict is Verdict.BLOCK
+
+    gate_priv_pem, gate_pub_pem = attest.generate_keypair()
+    passport = passport_mod.sign_passport(passport_mod.build_passport(result), gate_priv_pem)
+    gate_pub = attest.load_public_key(gate_pub_pem)
+    gate_keys = {attest.key_id(gate_pub): gate_pub}
+
+    passport["verdict"] = "PASS"  # attacker flips the verdict
+    assert passport_mod.verify_passport(passport, gate_keys) is None
+
+
+def test_passport_signed_by_untrusted_gate_key_rejected(repo: Path) -> None:
+    from quill import passport as passport_mod
+
+    priv = _approver(repo)
+    _sign_perimeter(repo, priv)
+    contract = _begin(repo)
+    _commit_change(repo, "src/feature.py", "y = 2\n")
+    result = _verify(repo, contract)
+
+    rogue_priv_pem, _ = attest.generate_keypair()
+    _, trusted_gate_pub_pem = attest.generate_keypair()  # a different, trusted gate key
+    passport = passport_mod.sign_passport(passport_mod.build_passport(result), rogue_priv_pem)
+    trusted_pub = attest.load_public_key(trusted_gate_pub_pem)
+    assert passport_mod.verify_passport(passport, {attest.key_id(trusted_pub): trusted_pub}) is None

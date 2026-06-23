@@ -19,7 +19,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from quill import attest
 from quill.verify import Verdict, VerifyResult
+
+SIGNATURE_KEY = "signature"
 
 _VERDICT_BADGE = {
     Verdict.PASS: "✅ PASS",
@@ -50,12 +53,20 @@ def build_passport(result: VerifyResult, *, generated_at: str | None = None) -> 
         "evidence": {
             "changed_files": list(result.changed_paths),
             "out_of_scope": list(result.out_of_scope),
+            "forbidden_hits": list(result.forbidden_hits),
+            "gate_tamper_hits": list(result.gate_tamper_hits),
             "secret_findings": [
                 {"path": f.path, "line": f.line, "pattern": f.pattern_name}
                 for f in result.secret_findings
             ],
             "sensitive_surfaces": {k: list(v) for k, v in result.sensitive_surfaces.items() if v},
             "exceptions_applied": list(result.exceptions_applied),
+        },
+        "trust": {
+            "perimeter_id": result.perimeter_id,
+            "strict": result.strict,
+            "provenance": result.provenance.status.value if result.provenance else None,
+            "provenance_key_id": result.provenance.key_id if result.provenance else None,
         },
         "audit": {"verification_run_mac": result.audit_mac},
     }
@@ -108,6 +119,21 @@ def render_markdown(result: VerifyResult, *, generated_at: str | None = None) ->
         lines.append("_None — every change is within the approved scope._")
     lines.append("")
 
+    if result.forbidden_hits:
+        lines.append(f"### Forbidden perimeter surfaces ({len(result.forbidden_hits)})")
+        lines.append("")
+        for p in result.forbidden_hits:
+            lines.append(f"- ⛔ `{p}` — the signed perimeter forbids changes here")
+        lines.append("")
+
+    if result.gate_tamper_hits:
+        lines.append(f"### Gate-tamper edits ({len(result.gate_tamper_hits)})")
+        lines.append("")
+        lines.append("_This PR edits Quill's own trust surfaces — always a BLOCK:_")
+        for p in result.gate_tamper_hits:
+            lines.append(f"- ⛔ `{p}`")
+        lines.append("")
+
     secrets = result.secret_findings
     lines.append(f"### Secret scan ({len(secrets)})")
     lines.append("")
@@ -139,6 +165,18 @@ def render_markdown(result: VerifyResult, *, generated_at: str | None = None) ->
             lines.append(f"- `{e.get('type', '?')}` on `{target}` — {reason}")
         lines.append("")
 
+    if result.perimeter_id:
+        lines.append("## Trust")
+        lines.append("")
+        lines.append(f"- **Perimeter:** `{result.perimeter_id}`")
+        if result.provenance is not None:
+            prov = result.provenance
+            mark = "✅" if prov.status.is_trustworthy else "⚠️"
+            signer = f" (approver `{prov.key_id}`)" if prov.key_id else ""
+            lines.append(f"- **Perimeter provenance:** {mark} {prov.status.value}{signer}")
+        lines.append(f"- **Strict mode:** {'on' if result.strict else 'off'}")
+        lines.append("")
+
     lines.append("---")
     mac = result.audit_mac or "(not chained)"
     lines.append(f"_Generated {ts} · verification.run audit mac: `{_short(mac, 16)}`_")
@@ -146,19 +184,62 @@ def render_markdown(result: VerifyResult, *, generated_at: str | None = None) ->
     return "\n".join(lines)
 
 
+# --------------------------------------------------------------------------- #
+# Gate-signed passports: the verdict a reviewer can verify without trusting    #
+# the repo. The gate signs; anyone with the gate public key re-verifies; only  #
+# the off-box private key can mint a new PASS.                                  #
+# --------------------------------------------------------------------------- #
+
+
+def sign_passport(passport: dict[str, Any], private_pem: str) -> dict[str, Any]:
+    """Return `passport` with an embedded gate signature over its content.
+
+    The signature covers the passport minus the ``signature`` field itself, so a
+    verifier reconstructs the same bytes by dropping that field before checking.
+    """
+    body = {k: v for k, v in passport.items() if k != SIGNATURE_KEY}
+    priv = attest.load_private_key(private_pem)
+    sig = attest.sign_payload(body, priv)
+    return {**passport, SIGNATURE_KEY: sig.to_dict()}
+
+
+def verify_passport(passport: dict[str, Any], gate_keys: dict[str, Any]) -> str | None:
+    """Return the trusted gate key_id that signed `passport`, or None.
+
+    `gate_keys` maps key_id -> Ed25519PublicKey (load via attest.load_public_key).
+    A passport with no signature, a tampered body, or an untrusted signer fails.
+    """
+    raw = passport.get(SIGNATURE_KEY)
+    if not isinstance(raw, dict):
+        return None
+    try:
+        sig = attest.Signature.from_dict(raw)
+    except attest.AttestError:
+        return None
+    body = {k: v for k, v in passport.items() if k != SIGNATURE_KEY}
+    return attest.verify_against_any(body, sig, gate_keys)
+
+
 def write_passport(
     result: VerifyResult,
     *,
     out_dir: Path,
     generated_at: str | None = None,
+    sign_key_pem: str | None = None,
 ) -> tuple[Path, Path]:
-    """Write passport.json and passport.md into `out_dir`. Returns both paths."""
+    """Write passport.json and passport.md into `out_dir`. Returns both paths.
+
+    When `sign_key_pem` is given (the gate identity's private key, an off-box CI
+    secret), the JSON passport is signed so a reviewer can verify the verdict
+    with ``quill verify-passport`` without trusting the repo it came from.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / "passport.json"
     md_path = out_dir / "passport.md"
-    json_path.write_text(
-        json.dumps(build_passport(result, generated_at=generated_at), indent=2) + "\n"
-    )
+    passport = build_passport(result, generated_at=generated_at)
+    if sign_key_pem:
+        passport = sign_passport(passport, sign_key_pem)
+    json_path.write_text(json.dumps(passport, indent=2) + "\n")
     md_path.write_text(render_markdown(result, generated_at=generated_at))
     return json_path, md_path
 
