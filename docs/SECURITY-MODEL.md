@@ -166,7 +166,8 @@ A launch-gate for any README or marketing copy. If a claim is not at least
 | Tamper-evident audit log | **Supported** | HMAC-chained, locally tamper-evident (limits 5-6), optionally externally anchored. Not "immutable". |
 | Blocks the irreversible class | **Supported** | rm -rf / DROP TABLE / force-push / npm publish / .env reads etc. are default-critical via inspectable regex. |
 | Prevents prompt injection | **Partial / reframe** | It cannot be prompt-injected (no LLM) and refuses some injection *consequences* (lethal-trifecta deny); it does not *prevent* injection. Say "refuses the consequence, not detects the cause." |
-| Secure by default | **Partial** | The hook fails closed; the kernel floor is opt-in and `off`/`--no-biometric` exist. Say "defense-in-depth by default, hard boundary opt-in." |
+| Secure by default | **Partial** | The local hook fails closed, but `off`/`--no-biometric` exist and the app layer is bypassable (limits 1-4). Say "defense-in-depth by default." The provable boundary is the CI gate (next row), not the local hook. |
+| CI gate runs outside the agent | **Supported** | `quill verify` runs in CI on the PR, where the agent has no process to disable the gate from. It verifies the diff against a committed contract and signs the verdict into the HMAC chain. This is the boundary the local app-layer hook cannot be. |
 | Auditor evidence pack | **Partial** | Maps to evidence requests (SOC 2, EU AI Act Art 12-shaped, ISO 42001 A.6.2.8); does not certify compliance by itself. |
 | Enterprise-grade / production-safe | **Not yet** | Alpha, squatted dist name, no external audit. Do not claim. |
 | Cannot be bypassed / agent-proof | **Dangerous** | False - see limits 1-4. Never claim. |
@@ -178,10 +179,14 @@ The fixes for the limits above are architectural, not pattern additions:
 - **Shell AST / intent classification** for limit 1 (keep it local and fast;
   a lightweight intent classifier or a real bash parser, not an LLM in the
   hot path).
-- **Kernel-layer enforcement** for limit 2: eBPF / Linux Landlock / macOS
-  Endpoint Security, gating the actual syscalls so a framework bug cannot
-  route around the gate. This is the single highest-leverage change and the
-  one that would let Quill claim "boundary" rather than "speed bump."
+- **Move the enforced boundary into CI, not the kernel.** An earlier preview
+  shipped an opt-in macOS Seatbelt floor (`quill shell`); it was **removed** in
+  the Change Control pivot because a local kernel floor still runs on the
+  machine the agent controls. The chosen direction is the opposite: enforce in
+  CI, where `quill verify` gates the diff in a process the agent cannot reach.
+  A kernel-layer local control (eBPF / Landlock / Endpoint Security) remains a
+  possible future addition for the local-gate surface, but it is not what makes
+  Quill a boundary today — the CI gate is.
 - **Network-egress proxy** for limits 3 and 4: catch unauthorized outbound
   connections regardless of the language or script that opened them.
 - **Config-file integrity monitoring** for limit 2: detect changes to the

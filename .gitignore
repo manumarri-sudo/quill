@@ -91,3 +91,7 @@ docs/marketing/outreach/
 # The client-side telemetry code stays public at src/quill/telemetry.py.
 experiments/
 infra/
+
+# marketing drafts: pre-pivot product positioning + compliance claims; kept
+# local until a Change-Control-aligned rewrite (see FINISH-STATUS.md). Not shipped.
+docs/marketing/

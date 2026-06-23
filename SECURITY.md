@@ -1,6 +1,6 @@
 # Security policy
 
-`quill` is a security-critical proxy. A buggy proxy is worse than no proxy: it becomes a credential exfiltration vector for every MCP server it wraps. This document describes what the project protects against, what it does not, and how to report a vulnerability.
+`quill` is security-critical code: a CI/CD change-control gate (`quill verify`) plus an optional local tool-dispatch gate. A buggy gate is worse than no gate, because it manufactures false confidence. This document describes what the project protects against, what it does not, and how to report a vulnerability. The calibrated threat model — what the gate stops well and exactly where it can be bypassed — lives in [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md); read it alongside this file.
 
 ## Reporting a vulnerability
 
@@ -59,11 +59,16 @@ In rough priority order:
 
 ## Supply chain
 
-- Releases are signed via PyPI [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) with PEP 740 attestations.
+Current, verifiable in this checkout:
+
 - The lockfile (`uv.lock`) is committed and tested in CI.
-- Dependabot and `pip-audit` run on every PR.
-- An OSSF Scorecard report is published; we aim for a score of 8+.
-- An SBOM (CycloneDX) is attached to every GitHub release.
+- `pip-audit --strict` runs on every PR as a **blocking** gate (a dependency CVE fails the build).
+
+Planned, not yet in place (do not assume present):
+
+- PyPI [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) with PEP 740 attestations on releases.
+- An OSSF Scorecard report (target 8+).
+- An SBOM (CycloneDX) attached to every GitHub release.
 
 ## Audit history
 
@@ -75,6 +80,6 @@ In rough priority order:
 
 | Version | Supported |
 |---|---|
-| 0.1.x | yes |
+| 0.2.x | yes (current alpha line) |
 
 After 1.0, we will support the latest minor and the previous one with security fixes.
