@@ -21,6 +21,10 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quill.readiness import Posture
 from typing import Annotated, Any
 
 import typer
@@ -487,6 +491,171 @@ def check_approval_cmd(
         raise typer.Exit(code=0)
     out.print(f"[red]✗ {result.detail}[/red]")
     raise typer.Exit(code=1)
+
+
+_CONSUMER_WORKFLOW = """\
+name: quill-change-control
+# Gate every PR against the signed perimeter and publish a Change Passport.
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: write
+jobs:
+  change-control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Pinned to a published tag (NOT this PR's checkout) so a PR can't modify
+      # the gate that judges it.
+      - uses: manumarri-sudo/quill@v0
+        with:
+          strict: "true"
+          head: ${{ github.event.pull_request.head.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          # Trust root in secrets so a PR cannot edit it:
+          gate-key: ${{ secrets.QUILL_GATE_KEY }}
+          approver-pubkeys: ${{ secrets.QUILL_APPROVER_PUBKEYS }}
+"""
+
+
+@app.command("init")
+def init_cmd(
+    allow: Annotated[
+        list[str] | None,
+        typer.Option("--allow", help="path agents MAY touch (glob). Repeatable."),
+    ] = None,
+    forbid: Annotated[
+        list[str] | None,
+        typer.Option("--forbid", help="path agents may NEVER touch (glob). Repeatable."),
+    ] = None,
+    approved_by: Annotated[
+        str | None, typer.Option("--approved-by", help="name recorded as the approver.")
+    ] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="overwrite an existing perimeter / keys.")
+    ] = False,
+) -> None:
+    """One command to set up Change Control: keys, signed perimeter, CI workflow.
+
+    Generates an approver + gate keypair, signs a secure-by-default perimeter,
+    writes the pinned GitHub workflow, and gitignores the private keys. Then it
+    tells you the only steps that must happen OFF this machine to make the gate a
+    real boundary - because a key sitting on this laptop is readable by the agent.
+    """
+    from quill import attest, readiness
+    from quill import contract as contract_mod
+    from quill import perimeter as perimeter_mod
+    from quill import provenance as provenance_mod
+
+    out = Console()
+    root = contract_mod.repo_root()
+    keys_dir = root / ".quill" / "keys"
+    approvers = provenance_mod.approvers_dir(root)
+
+    if perimeter_mod.perimeter_path(root).exists() and not force:
+        out.print("[yellow]a perimeter already exists; pass --force to overwrite.[/yellow]")
+        raise typer.Exit(code=1)
+
+    keys_dir.mkdir(parents=True, exist_ok=True)
+    approvers.mkdir(parents=True, exist_ok=True)
+
+    # Private keys must never be committed. gitignore the keys dir up front.
+    gitignore = root / ".gitignore"
+    ignore_line = ".quill/keys/"
+    existing = gitignore.read_text() if gitignore.exists() else ""
+    if ignore_line not in existing:
+        gitignore.write_text(
+            existing
+            + ("" if existing.endswith("\n") or not existing else "\n")
+            + f"{ignore_line}\n"
+        )
+
+    approver_priv, approver_pub = attest.generate_keypair()
+    gate_priv, gate_pub = attest.generate_keypair()
+    for name, content, mode in (
+        ("approver.pem", approver_priv, 0o600),
+        ("approver.pub", approver_pub, 0o644),
+        ("gate.pem", gate_priv, 0o600),
+        ("gate.pub", gate_pub, 0o644),
+    ):
+        p = keys_dir / name
+        p.write_text(content)
+        p.chmod(mode)
+    (approvers / "human.pub").write_text(approver_pub)
+
+    per = perimeter_mod.default_perimeter(
+        allowed_paths=tuple(allow or ()),
+        forbidden_paths=tuple(forbid or ()),
+        approved_by=approved_by,
+    )
+    per.write(root)
+    provenance_mod.sign_artifact(per.to_dict(), approver_priv, perimeter_mod.signature_path(root))
+
+    wf = root / ".github" / "workflows" / "quill-change-control.yml"
+    if not wf.exists() or force:
+        wf.parent.mkdir(parents=True, exist_ok=True)
+        wf.write_text(_CONSUMER_WORKFLOW)
+
+    out.print(f"[green]✓[/green] perimeter [bold]{per.perimeter_id}[/bold] signed")
+    out.print(f"[green]✓[/green] keys in [bold]{keys_dir}[/bold] (gitignored) · workflow written")
+    out.print("\n[bold]To make this a real boundary, do these 3 things OFF this machine[/bold]")
+    out.print(
+        "[dim](a key on this laptop is readable by the agent — these move trust off-box):[/dim]"
+    )
+    out.print("  1. Set CI secrets, then delete the local private keys:")
+    out.print(f"     [dim]gh secret set QUILL_GATE_KEY < {keys_dir / 'gate.pem'}[/dim]")
+    out.print(f"     [dim]gh secret set QUILL_APPROVER_PUBKEYS < {keys_dir / 'approver.pub'}[/dim]")
+    out.print("     [dim](better: keep the approver key on a YubiKey/HSM, never on disk)[/dim]")
+    out.print(
+        "  2. Keep the workflow pinned to [bold]manumarri-sudo/quill@v0[/bold] (already set)."
+    )
+    out.print("  3. Make the [bold]quill/change-control[/bold] status check REQUIRED in branch")
+    out.print("     protection on main (admin-bypass + force-push off).")
+    out.print(
+        "\n[bold]Now:[/bold] commit .quill/ (NOT .quill/keys/), then run [bold]quill status[/bold]."
+    )
+    report = readiness.assess(root, env=dict(__import__("os").environ))
+    out.print(f"\ncurrent posture: {_posture_badge(report.posture)}")
+
+
+def _posture_badge(posture: Posture) -> str:
+    from quill.readiness import Posture
+
+    return {
+        Posture.ENFORCED: "[green]🟢 enforced boundary[/green]",
+        Posture.COOPERATIVE: "[yellow]🟡 cooperative (trust root still on this machine)[/yellow]",
+        Posture.UNCONFIGURED: "[red]🔴 unconfigured[/red]",
+    }[posture]
+
+
+@app.command("status")
+def status_cmd() -> None:
+    """One glance: is the gate a real boundary, or still cooperative? Says what's missing."""
+    from quill import contract as contract_mod
+    from quill import readiness
+
+    report = readiness.assess(contract_mod.repo_root(), env=dict(__import__("os").environ))
+    out = Console()
+    out.print(f"Change Control posture: {_posture_badge(report.posture)}\n")
+    for c in report.checks:
+        mark = "[green]✓[/green]" if c.ok else "[red]✗[/red]"
+        tag = "" if c.ok else f" [dim]({c.level.value})[/dim]"
+        out.print(f"  {mark} [bold]{c.name}[/bold]{tag}: {c.detail}")
+    if report.blockers:
+        out.print(
+            "\n[yellow]Not yet a hard boundary.[/yellow] Close the blockers above "
+            "(usually: move the trust root into CI secrets / hardware, off this machine)."
+        )
+        raise typer.Exit(code=1)
+    if report.posture.value == "enforced":
+        out.print(
+            "\n[green]This is an enforced boundary: the agent can't forge, skip, or erase it.[/green]"
+        )
 
 
 @app.command(
@@ -1667,8 +1836,8 @@ def _print_pause_status(console: Console) -> None:
 # --------------------------------------------------------------------------
 
 
-@app.command(hidden=True)
-def init(
+@app.command("init-config", hidden=True)
+def init_config(
     config_path: Annotated[
         Path | None,
         typer.Option("--config", "-c", help="where to write the starter config"),
