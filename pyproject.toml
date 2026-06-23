@@ -42,6 +42,12 @@ dependencies = [
     "pydantic>=2.7",
     "rich>=13.7",
     "typer>=0.12",
+    # Ed25519 attestation is the off-box root of trust for Change Control:
+    # human-signed contracts and gate-signed passports whose verification (public
+    # key) is deliberately not the same secret as forging (private key) - the
+    # property the symmetric HMAC chain cannot provide. A headline security
+    # primitive belongs in the base install, not an optional extra.
+    "cryptography>=42",
     # Touch ID is a headline security control (gate-disable + approve), so the
     # binding ships in the BASE install on macOS rather than an opt-in extra -
     # the platform marker makes it a no-op on Linux/Windows. Keeping it optional
