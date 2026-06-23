@@ -42,7 +42,7 @@ import json
 import math
 import os
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -315,7 +315,7 @@ except ImportError:  # pragma: no cover - non-POSIX (Windows) fallback
 
 
 @contextlib.contextmanager
-def _file_lock(path: Path, exclusive: bool):
+def _file_lock(path: Path, exclusive: bool) -> Iterator[None]:
     """fcntl.flock around a lock file that lives alongside pattern_stats.
 
     The canonical file gets atomic tmp-rename; the lock prevents two
@@ -390,7 +390,7 @@ def save_stats(stats: dict[str, PatternStats]) -> None:
 
 
 @contextlib.contextmanager
-def _read_modify_write_stats():
+def _read_modify_write_stats() -> Iterator[dict[str, PatternStats]]:
     """Wrap a load-update-save cycle in a single exclusive flock so
     concurrent writers see consistent state. Yields the dict to mutate;
     on exit, saves it back. This is the safe shape for any caller that
@@ -581,6 +581,28 @@ def detect_operator_fatigue(p: PatternStats) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # Public entry. Called from the hook adapter AFTER the verdict is
 # rendered. Never blocks the hot path. Failure here is non-fatal.
+
+
+def record_decision_learning(
+    tool_name: str,
+    decision_reason: str,
+    approval_token_used: bool,
+) -> None:
+    """Fold one post-decision observation into pattern_stats.
+
+    Extracted from the Claude Code and Cursor hot paths, which previously
+    inlined the same normalize-reason / build-pattern-id / update sequence
+    three times over (audit #46). Stays strictly POST-decision and
+    side-effect-only, so a learning failure can never move the gate's
+    verdict (module rule 2). Callers wrap this in their own strict-vs-
+    suppress policy; this function does not swallow exceptions itself.
+    """
+    from quill.learn import _normalize_block_reason
+
+    head = _normalize_block_reason(decision_reason) or decision_reason
+    pattern_id = f"{tool_name}:{head}"[:80]
+    verdict: Literal["approve", "deny"] = "approve" if approval_token_used else "deny"
+    post_decision_update(pattern_id, verdict)
 
 
 def post_decision_update(
