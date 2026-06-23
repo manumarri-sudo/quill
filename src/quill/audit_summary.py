@@ -50,7 +50,7 @@ ALLOWED_PLAIN_EVENT_TYPE = "verdict.allowed"
 _DURATION_TOKEN_RE = re.compile(r"(\d+)([smhdw])")
 
 
-def parse_duration(spec: str) -> timedelta:
+def parse_duration(spec: str | None) -> timedelta:
     """Parse a duration string like ``12h``, ``1d``, ``30m``, ``2h30m``.
 
     Supported units: ``s`` (seconds), ``m`` (minutes), ``h`` (hours),
@@ -559,9 +559,9 @@ def render_markdown(stats: SummaryStats) -> str:
     lines.append("## What still asked you to approve (not auto-approved)")
     if stats.pending_ask:
         for p in stats.pending_ask:
-            t = _time_only(p.ts)
+            tstr = _time_only(p.ts)
             lines.append(
-                f"- `{t}` **{_md_escape(p.tool)}** - "
+                f"- `{tstr}` **{_md_escape(p.tool)}** - "
                 f"{_md_escape(p.what) or '-'}" + (f"  _{_md_escape(p.why)}_" if p.why else ""),
             )
     else:
@@ -571,9 +571,9 @@ def render_markdown(stats: SummaryStats) -> str:
     lines.append("## What got blocked (CRITICAL / scope)")
     if stats.pending_block:
         for p in stats.pending_block:
-            t = _time_only(p.ts)
+            tstr = _time_only(p.ts)
             lines.append(
-                f"- `{t}` **{_md_escape(p.tool)}** - "
+                f"- `{tstr}` **{_md_escape(p.tool)}** - "
                 f"{_md_escape(p.what) or '-'}" + (f"  _{_md_escape(p.why)}_" if p.why else ""),
             )
     else:

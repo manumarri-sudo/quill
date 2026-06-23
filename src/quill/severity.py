@@ -112,12 +112,13 @@ def text_label(label: SeverityLabel) -> str:
 
 def from_risk(risk: Risk) -> SeverityLabel:
     """Map a policy.Risk enum to its severity label."""
-    return {
+    mapping: dict[Risk, SeverityLabel] = {
         Risk.CRITICAL: "critical",
         Risk.HIGH: "high",
         Risk.MEDIUM: "medium",
         Risk.LOW: "low",
-    }[risk]
+    }
+    return mapping[risk]
 
 
 def paint(label: SeverityLabel, text: str, *, plain: bool = False) -> str:

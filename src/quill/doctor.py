@@ -203,7 +203,7 @@ def _hook_command_from_settings(
     pre_list = (data.get("hooks") or {}).get("PreToolUse") or []
     for block in pre_list:
         for h in block.get("hooks") or []:
-            cmd = h.get("command", "")
+            cmd: str = h.get("command", "")
             if cmd.endswith("quill claude-hook"):
                 return cmd
     return None

@@ -315,8 +315,8 @@ def redact(text: str, *, extra_patterns: Iterable[SecretPattern] = ()) -> str:
     for pat in (*_PATTERNS, *extra_patterns):
         for m in pat.regex.finditer(text):
             spans.append((m.start(), m.end(), f"[REDACTED:{pat.name}]"))
-    for label, pat in _INLINE_CRED_PATTERNS:
-        for m in pat.finditer(text):
+    for label, cred_re in _INLINE_CRED_PATTERNS:
+        for m in cred_re.finditer(text):
             s, e = m.span("secret")
             if e > s:
                 spans.append((s, e, f"[REDACTED:{label}]"))

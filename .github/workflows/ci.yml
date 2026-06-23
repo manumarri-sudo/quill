@@ -33,7 +33,7 @@ jobs:
         run: ruff format --check src tests
 
       - name: Type-check (mypy)
-        run: mypy src/quill || true   # warn-level for v0.1; tighten before 1.0
+        run: mypy src/quill   # blocking: strict is green and the py.typed marker promises it
 
       - name: Test
         run: pytest --no-cov tests/

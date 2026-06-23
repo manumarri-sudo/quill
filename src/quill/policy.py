@@ -13,7 +13,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Final
+from typing import Final, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -792,7 +792,7 @@ def _user_bash_allowlist() -> tuple[re.Pattern[str], ...]:
     global _USER_BASH_ALLOWLIST
     cached = globals().get("_USER_BASH_ALLOWLIST")
     if cached is not None:
-        return cached
+        return cast("tuple[re.Pattern[str], ...]", cached)
     patterns: list[re.Pattern[str]] = []
     try:
         import tomllib  # py311+

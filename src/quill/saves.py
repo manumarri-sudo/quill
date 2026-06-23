@@ -34,7 +34,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, ClassVar, Final
 
 from quill import events as ev
 
@@ -133,8 +133,8 @@ class Saves:
     sessions_seen: int = 0  # distinct session_ids in window
 
     # ≈ estimated time-saved assumptions (configurable via class methods if needed)
-    CLICK_LATENCY_LOWER_S: float = 2.5
-    CLICK_LATENCY_UPPER_S: float = 5.0
+    CLICK_LATENCY_LOWER_S: ClassVar[float] = 2.5
+    CLICK_LATENCY_UPPER_S: ClassVar[float] = 5.0
 
     @property
     def total_blocks(self) -> int:

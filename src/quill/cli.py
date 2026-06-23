@@ -2485,8 +2485,6 @@ def doctor(
 
     # The legacy live-dashboard daemon was removed in the change-control
     # pivot; there are no orphan watcher/tree processes to sweep anymore.
-    reaped = 0
-
     report = run_doctor(config_path=config_path)
     out.print()
     out.print("[bold]quill doctor[/bold]")
@@ -2496,11 +2494,6 @@ def doctor(
         out.print(f"  {r.status}  [bold]{r.name:<{name_width}}[/bold] {r.detail}")
         if r.fix and r.status != "[green]PASS[/green]":
             out.print(f"        [dim]→ {r.fix}[/dim]")
-    if reaped:
-        out.print()
-        out.print(f"  [dim]reaped {len(reaped)} orphan quill process(es):[/dim]")
-        for pid, reason in reaped:
-            out.print(f"    [dim]pid {pid}: {reason}[/dim]")
     out.print()
     if report.has_failures:
         out.print("[red]some checks failed.[/red]  fix the FAILs above and re-run.")

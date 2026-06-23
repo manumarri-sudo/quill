@@ -108,7 +108,7 @@ def is_available() -> bool:
     `is_available() and can_present_ui()`.
     """
     try:
-        import LocalAuthentication  # type: ignore[import-not-found]
+        import LocalAuthentication
     except ImportError:
         return False
     try:
@@ -147,7 +147,7 @@ def authenticate(
     if not is_available():
         return TouchIDResult(False, "not_available")
 
-    import LocalAuthentication  # type: ignore[import-not-found]
+    import LocalAuthentication
 
     ctx = LocalAuthentication.LAContext.new()
     event = threading.Event()

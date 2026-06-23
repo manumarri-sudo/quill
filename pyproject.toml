@@ -174,8 +174,12 @@ warn_return_any = true
 files = ["src/quill"]
 python_version = "3.11"
 
+# LocalAuthentication is the Apple Touch ID / Secure Enclave framework, vendored
+# via pyobjc on macOS and absent on Linux/Windows. It ships no type stubs, so tell
+# mypy to ignore the missing import rather than scattering inline ignores that go
+# stale (one platform sees import-not-found, the other import-untyped).
 [[tool.mypy.overrides]]
-module = ["mcp.*"]
+module = ["LocalAuthentication"]
 ignore_missing_imports = true
 
 # opentelemetry is an optional extra (the OTEL dual-write path). When it is not

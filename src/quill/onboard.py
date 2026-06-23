@@ -18,7 +18,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from rich.console import Console
 from rich.panel import Panel
@@ -166,7 +166,7 @@ def _toml_str_list(values: list[str], indent: str = "  ") -> str:
     return f"[\n{body},\n]"
 
 
-def _toml_kv(d: dict, indent: str = "") -> list[str]:
+def _toml_kv(d: dict[str, Any], indent: str = "") -> list[str]:
     """Serialize a flat dict to TOML key=value lines."""
     out = []
     for k, v in d.items():
@@ -184,7 +184,7 @@ def build_config_toml(
     intent: str,
     scope: list[str],
     audit_path: Path,
-    notify: dict,
+    notify: dict[str, Any],
     preset: str,
     trust_paths: list[str],
 ) -> str:
@@ -274,9 +274,9 @@ def _prompt_log_location(console: Console) -> Path:
     return Path(raw).expanduser().resolve()
 
 
-def _prompt_notifications(console: Console) -> dict:
+def _prompt_notifications(console: Console) -> dict[str, Any]:
     is_mac = platform.system() == "Darwin"
-    notify: dict = {"on_blocked": True, "on_ask": False}
+    notify: dict[str, Any] = {"on_blocked": True, "on_ask": False}
     console.print(
         "\n[bold]notifications for blocked calls[/bold]\n"
         "  [dim]each block fans WHAT/WHY/TRY/APPROVE out of the terminal[/dim]",
