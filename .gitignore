@@ -98,3 +98,7 @@ docs/marketing/
 
 # Manus private research cache (screenshots + competitor notes); not shipped
 research-screenshots/
+
+# internal worklists (security findings + triage); kept local, not public
+AUDIT-FIX-PLAN.md
+FINISH-STATUS.md
