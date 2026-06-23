@@ -148,7 +148,12 @@ CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
     ),
     # Version control destructive
     (
-        r"\bgit\s+push\s+(?:--force|--force-with-lease|-f)\b",
+        # Unconditional force-push is critical. The SAFE variants
+        # (--force-with-lease / --force-if-includes) are explicitly the
+        # recommended remediation, so they must NOT match here - the negative
+        # lookahead excludes them while still catching `--force` and `-f`
+        # anywhere in the push command.
+        r"\bgit\s+push\b.*?\s(?:--force(?!-with-lease|-if-includes)|-f)\b",
         "git push --force",
         "Use `git push --force-with-lease` to avoid clobbering a teammate's commits - "
         "or rebase first: `git fetch && git rebase origin/<branch>`",
