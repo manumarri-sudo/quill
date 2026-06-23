@@ -341,3 +341,42 @@ code = "ATLAS-TOOL-MISUSE"
 title = "Mitigation: Tool Misuse (broad)"
 description = """ATLAS Tool Misuse technique class. Quill's deterministic regex classifier with default-critical patterns for rm -rf, git push --force, DROP TABLE, vercel --prod, npm publish, stripe mutations, .env reads, banking transfers, and outbound communication covers the most common misuse modes by name."""
 quill_event_types = ["verdict.blocked", "verdict.ask"]
+
+# ============================================================================
+# Change Control (the CI/CD PR gate) — the headline surface.
+# These map the verification.run + contract.created events that `quill verify`
+# and `quill begin` emit, which the earlier crosswalk (local-gate only) missed.
+# Every row carries auditor_sampling: how a reviewer would test the evidence.
+# ============================================================================
+
+[[controls]]
+standard = "SOC 2 Common Criteria"
+code = "CC8.1-CHANGE-AUTHORIZED"
+title = "Changes are authorized against an approved scope before merge"
+description = """Each AI-authored change is verified in CI against a human-approved contract/perimeter (allowed paths, forbidden surfaces, no secrets) before it can merge. The verdict (PASS / NEEDS_REVIEW / BLOCK) is recorded as a verification.run event and issued as a signed Change Passport."""
+quill_event_types = ["verification.run", "contract.created"]
+auditor_sampling = """Select a sample of merged PRs; for each, retrieve the Change Passport and confirm it cites a verification.run MAC present in the chain, the verdict was PASS or a reviewed NEEDS_REVIEW, and the branch-protection required check passed. Confirm no PR with a BLOCK verdict was merged."""
+
+[[controls]]
+standard = "SOC 2 Common Criteria"
+code = "CC6.1-SCOPE-ENFORCED"
+title = "Out-of-scope and forbidden-surface changes are denied"
+description = """The gate denies a change that touches paths outside the approved scope or any forbidden perimeter surface (CI workflows, approver keys, the perimeter itself), recording the offending paths in the verification.run payload (out_of_scope, forbidden_hits, gate_tamper_hits)."""
+quill_event_types = ["verification.run"]
+auditor_sampling = """Sample verification.run events with verdict=BLOCK; confirm the payload names the out-of-scope or forbidden paths and that the corresponding PR did not merge. Attempt a control test: open a PR touching a forbidden path and confirm it BLOCKs."""
+
+[[controls]]
+standard = "EU AI Act Art. 14"
+code = "ART-14-CHANGE-OVERSIGHT"
+title = "Human oversight over what the agent is permitted to change"
+description = """A human records the approved task and scope (contract.created) and signs the standing perimeter; the agent's diffs are measured against that human-approved boundary, so a person — not the model — defines what may change."""
+quill_event_types = ["contract.created", "verification.run"]
+auditor_sampling = """Confirm a signed perimeter exists and is signed by a trusted approver key held off the build machine; sample contract.created events and tie each to a named approver. Verify (quill status) reports an enforced boundary, not cooperative mode."""
+
+[[controls]]
+standard = "AIUC-1"
+code = "AIUC-ACC-PROVENANCE"
+title = "Authenticity of the verdict and the approval (non-repudiation)"
+description = """The verdict is signed by the gate identity (Ed25519) and re-verifiable with `quill verify-passport`; the perimeter is signed by a human approver whose private key is off the agent's machine. Verification uses a public key, so a third party can check authenticity without being able to forge it."""
+quill_event_types = ["verification.run"]
+auditor_sampling = """Take a passport.json and run `quill verify-passport` against the published gate public key; confirm it validates and that altering the verdict fails verification. Confirm the approver/gate private keys are stored as CI secrets or hardware, never committed."""

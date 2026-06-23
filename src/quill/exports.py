@@ -67,6 +67,7 @@ class Control:
     title: str
     description: str
     quill_event_types: tuple[str, ...]  # which audit events satisfy this
+    auditor_sampling: str = ""  # how an auditor would sample/test this evidence
 
 
 _CONTROLS_TOML = Path(__file__).parent / "controls.toml"
@@ -86,6 +87,7 @@ def _load_controls(path: Path = _CONTROLS_TOML) -> tuple[Control, ...]:
                 title=str(r["title"]),
                 description=str(r["description"]).strip(),
                 quill_event_types=tuple(str(e) for e in r["quill_event_types"]),
+                auditor_sampling=str(r.get("auditor_sampling", "")).strip(),
             ),
         )
     return tuple(out)
@@ -365,6 +367,9 @@ def render_markdown(r: ExportReport) -> str:
         add("")
         add("Quill event types: `" + "`, `".join(c.quill_event_types) + "`")
         add("")
+        if c.auditor_sampling:
+            add(f"**How an auditor samples this**: {c.auditor_sampling}")
+            add("")
         if ce.sample_events:
             add("Sample evidence (redacted):")
             add("")

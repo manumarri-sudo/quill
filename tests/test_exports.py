@@ -50,6 +50,17 @@ def test_every_control_references_real_event_types() -> None:
             )
 
 
+def test_change_control_surface_is_covered_with_sampling() -> None:
+    """The crosswalk must cover the headline Change-Control events, and every
+    Change-Control control must carry auditor-sampling guidance (the explicit
+    field practitioners asked for: how would an auditor test this)."""
+    cc = [c for c in CONTROLS if "verification.run" in c.quill_event_types]
+    assert cc, "no control maps the Change-Control verification.run event"
+    assert any("contract.created" in c.quill_event_types for c in CONTROLS)
+    for c in cc:
+        assert c.auditor_sampling, f"Change-Control control {c.code} has no auditor_sampling"
+
+
 def test_aggregate_empty_log_produces_no_evidence_for_every_control() -> None:
     rep = aggregate([], log_path=Path("/dev/null"))
     assert rep.total_events == 0
