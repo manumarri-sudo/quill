@@ -235,8 +235,46 @@ fuzzing of the diff parser against real git — drove two more to closure:
   exact forbidden/gate path with a non-ASCII byte slipped past. Decoded at the
   single path chokepoint (`tests/test_diff_quoted_paths.py`).
 
+A fourth pass (2026-06-24, source + targeted exploit suite, scored 5.0/10) drove
+the remaining inventory and evidence bugs to closure:
+
+- **Rename OUT of a gate or forbidden surface (Critical, closed).** Gate-tamper
+  and forbidden checks looked only at a rename's DESTINATION, so renaming the
+  workflow (or protected code) out of its path escaped the BLOCK. `verify` now
+  builds the inventory from `git diff --name-status -z --find-renames` and
+  applies every path rule to BOTH endpoints (`tests/test_rename_and_inventory.py`).
+- **Quoted mode-only change disappears (High, closed).** A chmod on a C-quoted
+  unicode path produced an empty textual-parse and vanished from every check; the
+  authoritative name-status inventory now reports it.
+- **Candidate identity mismatch (High, closed).** The diff was taken against a
+  symbolic ref while the passport recorded repo HEAD. The candidate is now
+  resolved to one SHA used for the diff, the inventory, and the recorded head.
+- **Wrapper rc/verdict inconsistency (High, closed).** The wrapper now requires
+  process rc, passport verdict, and exit_code to agree, failing closed otherwise
+  (`tests/test_action_wrapper.py`).
+- **Trust-root path indirection (High, closed).** Strict mode rejects a
+  `QUILL_APPROVER_PUBKEYS` file path that resolves inside the checkout, so the
+  "external" trust root can't be redirected to a PR-controlled file
+  (`tests/test_trust_root_path.py`).
+- **block_secrets honored (closed).** The signed perimeter's block_secrets now
+  composes the verdict (default BLOCK; a signed false downgrades to review).
+
 Genuinely still open — do not rely on the CI gate against a determined adversary
 until these land:
+
+- **Contract context-binding.** The signed contract binds task, scope, and base
+  commit, but NOT the repository id, protected branch, candidate SHA, an expiry,
+  or a one-use nonce, so a valid contract is replayable anywhere its signer key
+  is trusted and the base object resolves. Bind these before trusting the gate
+  across repositories/tenants.
+- **NEEDS_REVIEW is non-blocking.** It exits 0 (a soft signal); enforcing review
+  still depends on `quill check-approval` + branch protection, not the verdict
+  alone. The Critical rename-out case that previously hid behind NEEDS_REVIEW now
+  BLOCKs, but a strict deployment that must HARD-stop on sensitive surfaces needs
+  the approval gate wired up.
+- **Action supply chain.** The Action installs the latest `quillx` and references
+  third-party actions by mutable major tags unless the caller pins exact
+  versions/digests; pin them in a hardened deployment.
 
 - **Off-box evidence anchoring.** The Merkle transparency tree head is built but
   not yet anchored off the runner, so a CI passport's MAC is not independently

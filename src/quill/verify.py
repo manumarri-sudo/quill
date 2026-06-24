@@ -376,9 +376,17 @@ def verify(
         contract.to_dict(), root / ".quill" / "contract.sig", root, env, strict=strict
     )
 
+    # Honor the signed perimeter's block_secrets setting: it BLOCKs by default
+    # (and always, with no perimeter), but a human who signed block_secrets=false
+    # downgrades a secret hit to a review signal rather than a hard fail. The
+    # config is signed, so this can only be relaxed by the approver, never the PR.
+    secrets_block = bool(unwaived_secrets) and (perimeter is None or perimeter.block_secrets)
+    secrets_review = bool(unwaived_secrets) and not secrets_block
+
     reasons: list[str] = []
     if unwaived_secrets:
-        reasons.append(f"{len(unwaived_secrets)} secret(s) detected on added lines")
+        tail = "" if secrets_block else " (perimeter block_secrets=false: review, not block)"
+        reasons.append(f"{len(unwaived_secrets)} secret(s) detected on added lines{tail}")
     if unwaived_scope:
         reasons.append(f"{len(unwaived_scope)} path(s) changed outside the approved scope")
     if forbidden_hits:
@@ -421,7 +429,7 @@ def verify(
         reasons.append(f"warning: contract provenance unverified ({contract_prov.detail})")
 
     block = bool(
-        unwaived_secrets
+        secrets_block
         or unwaived_scope
         or forbidden_hits
         or gate_tamper
@@ -431,7 +439,7 @@ def verify(
     )
     if block:
         verdict = Verdict.BLOCK
-    elif review_hits:
+    elif review_hits or secrets_review:
         verdict = Verdict.NEEDS_REVIEW
     else:
         verdict = Verdict.PASS
