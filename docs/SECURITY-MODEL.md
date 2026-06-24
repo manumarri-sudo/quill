@@ -217,6 +217,24 @@ regression test:
   surfaces; `evaluate_diff` checks both ends of a rename
   (`tests/test_diff_binary_rename.py`).
 
+A third pass — an adversarial red-team of `verify --strict`, plus differential
+fuzzing of the diff parser against real git — drove two more to closure:
+
+- **Case-fold / homoglyph escape of the forbid + gate-tamper surfaces (closed).**
+  On a case-insensitive filesystem (macOS/Windows runners, many deploy targets)
+  `src/Auth/login.py` IS `src/auth/login.py`, but matching was case-sensitive, so
+  a capital-letter variant escaped a forbid of `src/auth/**` while the wildcard
+  scope `src/**` still covered it — `verify --strict` returned PASS on an auth
+  backdoor, and a `.github/Workflows/ci.yml` variant escaped gate-tamper. The
+  deny side now folds case + NFKC compatibility forms and maps common homoglyphs
+  to ASCII (`deny_hit`), while the allow side stays strict so a variant that
+  isn't caught falls out of scope instead. Reproduced end-to-end and pinned in
+  `tests/test_perimeter_casefold.py`.
+- **git C-quoted path decoding (closed).** A path with a byte ≥ 0x80 is emitted
+  by git as `"a/caf\303\251.env"`; the parser left the escapes literal, so an
+  exact forbidden/gate path with a non-ASCII byte slipped past. Decoded at the
+  single path chokepoint (`tests/test_diff_quoted_paths.py`).
+
 Genuinely still open — do not rely on the CI gate against a determined adversary
 until these land:
 
@@ -229,6 +247,20 @@ until these land:
   `contract_id` still does not cryptographically bind the *specific* scope a
   human saw at approval time; a re-signed contract with a different scope under
   the same id is not detected beyond the signature itself.
+- **Exotic homoglyph confusables.** `deny_hit` folds case + the common
+  Cyrillic/Greek look-alikes an attacker actually reaches for, but Unicode has
+  thousands of confusables and the table is not exhaustive; a path using an
+  obscure look-alike of a forbidden segment could still read as that segment to a
+  human while being a distinct codepoint. The strict allow-list mitigates it (an
+  unrecognised variant falls out of scope), and the homoglyph only bites if the
+  protected code actually lives under the look-alike path.
+- **Non-trust `.quill/` files in a PR.** `verify` strips `.quill/` from the
+  scope/secret evaluation (so committing the contract it describes is not
+  self-flagged), and gate-tamper covers `.quill/perimeter.*` and
+  `.quill/approvers/**`. A *different* `.quill/` file in a PR (e.g. a local-hook
+  config) does not change the CI verdict, but could alter the optional local
+  runtime hook's behavior on a machine that re-reads it; treat `.quill/` as
+  trusted only to the extent its trust-bearing files are signed.
 | Auditor evidence pack | **Partial** | Maps to evidence requests (SOC 2, EU AI Act Art 12-shaped, ISO 42001 A.6.2.8); does not certify compliance by itself. |
 | Enterprise-grade / production-safe | **Not yet** | Alpha, squatted dist name, no external audit. Do not claim. |
 | Cannot be bypassed / agent-proof | **Dangerous** | False - see limits 1-4. Never claim. |

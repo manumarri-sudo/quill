@@ -276,6 +276,19 @@ def verify_cmd(
         console.print(f"[red]verify failed:[/red] {e}")
         raise typer.Exit(code=2) from e
 
+    # Make the runtime match the docs: a non-strict run does NOT establish that a
+    # human (not the agent) authored the contract/perimeter, so its verdict is
+    # advisory and forgeable by the same agent that wrote the diff. Say so loudly
+    # rather than letting an authoritative-looking PASS imply a boundary it isn't.
+    if not strict:
+        console.print(
+            "[yellow]⚠ cooperative mode:[/yellow] this verdict is advisory — the "
+            "contract/perimeter are not checked as human-signed, so the agent that "
+            "wrote the diff could also forge them. For an enforced boundary run "
+            "[bold]quill verify --strict[/bold] with approver keys pinned off-box "
+            "([bold]QUILL_APPROVER_PUBKEYS[/bold]). See docs/SECURITY-MODEL.md."
+        )
+
     gate_pem: str | None = None
     if sign_key is not None:
         gate_pem = sign_key.read_text()
