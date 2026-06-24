@@ -28,7 +28,7 @@ from quill import events as ev
 from quill import perimeter as perimeter_mod
 from quill import policy
 from quill import provenance as provenance_mod
-from quill.contract import Contract, head_sha, repo_root
+from quill.contract import Contract, repo_root
 from quill.errors import QuillError
 from quill.perimeter import GATE_TAMPER_GLOBS, Perimeter, _glob_hit, deny_hit
 from quill.provenance import ProvenanceResult
@@ -114,6 +114,50 @@ def git_diff(base_commit: str | None, root: Path, *, head: str = "HEAD") -> str:
     return out.stdout
 
 
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+def _resolve_sha(root: Path, ref: str) -> str:
+    """Resolve `ref` to a concrete commit SHA once, so the diff, the passport,
+    the audit event, and any Status Check all describe the SAME candidate. The
+    diff was previously taken against a symbolic ref while the passport recorded
+    repository HEAD, which could differ (security review: candidate identity
+    mismatch). Falls back to the raw ref string if resolution fails."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return ref
+    return out.stdout.strip() or ref
+
+
+def git_name_status(base_commit: str | None, root: Path, *, head: str = "HEAD") -> list[Any]:
+    """Authoritative changed-path inventory via ``git diff --name-status -z``.
+
+    This is the SECURITY source of truth for which paths a candidate touches:
+    unlike the textual diff it is NUL-delimited (no C-quoting), and it reports
+    binary files, mode-only changes, and BOTH ends of a rename - the exact cases
+    a textual-patch parser can drop. Returns ``policy.ChangedPath`` records."""
+    base = base_commit or _EMPTY_TREE
+    args = ["git", "diff", "--name-status", "-z", "--find-renames", base, head]
+    try:
+        out = subprocess.run(
+            args, cwd=root, capture_output=True, text=True, errors="replace", check=True
+        )
+    except FileNotFoundError as e:
+        msg = "git not found on PATH"
+        raise VerifyError(msg) from e
+    except subprocess.CalledProcessError as e:
+        msg = f"git diff --name-status failed: {e.stderr.strip() or e}"
+        raise VerifyError(msg) from e
+    return policy.parse_name_status(out.stdout)
+
+
 def _glob_match(value: str, pattern: str | None) -> bool:
     """A None/empty pattern matches anything; otherwise reuse the policy path
     matcher so exception globs behave exactly like scope globs."""
@@ -185,19 +229,6 @@ class VerifyResult:
         return self.evaluation.changed_paths
 
 
-def _gate_tamper_hits(diff_text: str) -> tuple[str, ...]:
-    """Diff paths that touch the gate's own trust surfaces (perimeter, approver
-    keys, the workflow that runs the check). Always a BLOCK: a diff must not be
-    able to edit its own judge.
-
-    Scans the RAW parsed diff, not ``evaluation.changed_paths``, because the
-    latter strips ``.quill/`` - which would hide exactly the approver-key and
-    perimeter edits this check exists to catch.
-    """
-    paths = {f.path for f in policy.parse_unified_diff(diff_text)}
-    return tuple(sorted(p for p in paths if any(deny_hit(p, g) for g in GATE_TAMPER_GLOBS)))
-
-
 def verify(
     *,
     contract: Contract,
@@ -224,8 +255,32 @@ def verify(
     the perimeter itself) are always a BLOCK, perimeter or not.
     """
     root = repo_root(root)
-    diff_text = git_diff(contract.base_commit, root, head=head)
+    # Resolve the candidate to ONE concrete SHA and use it for the diff, the
+    # inventory, and the recorded head, so evaluated == recorded (security review:
+    # candidate identity mismatch).
+    candidate_sha = _resolve_sha(root, head)
+    diff_text = git_diff(contract.base_commit, root, head=candidate_sha)
     evaluation = policy.evaluate_diff(diff_text, contract.allowed_paths)
+
+    # Authoritative changed-path inventory (NUL-delimited, both rename endpoints,
+    # binary + mode-only included). This is the source of truth for every path
+    # rule; the textual diff above is kept only for added-line secret scanning.
+    # We police the UNION of the two so a path either parser sees is never lost.
+    inventory = git_name_status(contract.base_commit, root, head=candidate_sha)
+    raw_changed: set[str] = set()  # every touched path, both ends, incl. .quill/
+    policed_changed: set[str] = set()  # scope/surface set: .quill/ excluded
+    for cp in inventory:
+        for p in cp.endpoints:
+            raw_changed.add(p)
+            if not p.startswith(".quill/"):
+                policed_changed.add(p)
+    for df in policy.parse_unified_diff(diff_text):
+        for p in (df.path, df.old_path):
+            if p and p != "/dev/null":  # /dev/null is the add/delete sentinel
+                raw_changed.add(p)
+                if not p.startswith(".quill/"):
+                    policed_changed.add(p)
+
     # Strict mode does NOT honor branch-authored exceptions (security review
     # P0-2): an unsigned .quill/exceptions.json could waive whole classes of
     # findings with an empty path. Cooperative mode still applies them.
@@ -233,8 +288,16 @@ def verify(
 
     applied: list[dict[str, Any]] = []
 
+    # Scope violations from the authoritative inventory too, so a path the textual
+    # parser dropped (e.g. a quoted mode-only change) is still measured against the
+    # contract scope. Preserve the parser's order, then append the extras.
+    out_of_scope_all: list[str] = list(evaluation.out_of_scope)
+    for p in sorted(policed_changed):
+        if not policy.path_in_scope(p, contract.allowed_paths) and p not in out_of_scope_all:
+            out_of_scope_all.append(p)
+
     unwaived_scope: list[str] = []
-    for p in evaluation.out_of_scope:
+    for p in out_of_scope_all:
         e = _waived_scope(p, exceptions)
         if e is None:
             unwaived_scope.append(p)
@@ -249,17 +312,31 @@ def verify(
         else:
             applied.append(e)
 
+    # Combine parser-found surfaces with any from the authoritative inventory the
+    # parser missed (e.g. a quoted mode-only edit to a CI file).
+    surfaces_all: dict[str, list[str]] = {
+        k: list(v) for k, v in evaluation.sensitive_surfaces.items()
+    }
+    for p in sorted(policed_changed):
+        cat = policy.classify_sensitive_surface(p)
+        if cat is not None and p not in surfaces_all.setdefault(cat, []):
+            surfaces_all[cat].append(p)
+
     unwaived_surfaces: dict[str, list[str]] = {"tests": [], "ci": [], "lockfiles": []}
-    for category, paths in evaluation.sensitive_surfaces.items():
+    for category, paths in surfaces_all.items():
         for p in paths:
             e = _waived_surface(category, p, exceptions)
             if e is None:
-                unwaived_surfaces[category].append(p)
+                unwaived_surfaces.setdefault(category, []).append(p)
             else:
                 applied.append(e)
 
-    changed = evaluation.changed_paths
-    gate_tamper = _gate_tamper_hits(diff_text)
+    # Gate-tamper over EVERY touched path (both rename endpoints, incl. .quill/),
+    # so a PR cannot move its own judge out of a protected path to escape the
+    # check (security review: rename-out of a gate surface).
+    gate_tamper = tuple(
+        sorted(p for p in raw_changed if any(deny_hit(p, g) for g in GATE_TAMPER_GLOBS))
+    )
 
     forbidden_hits: tuple[str, ...] = ()
     provenance: ProvenanceResult | None = None
@@ -267,7 +344,10 @@ def verify(
     review_categories: set[str] | None = None  # None = report every surface (legacy)
     if perimeter is not None:
         perimeter_id = perimeter.perimeter_id
-        forbidden_hits = tuple(p for p in changed if perimeter.forbids(p))
+        # Forbidden over every touched path, both endpoints: a rename OUT of a
+        # forbidden namespace touches the forbidden source and must BLOCK
+        # (security review: rename-out of a forbidden path).
+        forbidden_hits = tuple(sorted(p for p in raw_changed if perimeter.forbids(p)))
         review_categories = set(perimeter.review_surfaces)
         provenance = provenance_mod.verify_artifact(
             perimeter.to_dict(), perimeter_mod.signature_path(root), root, env, strict=strict
@@ -276,9 +356,10 @@ def verify(
         # standing perimeter is the OUTER bound. A path is in effective scope only
         # if it is allowed by BOTH the contract and the perimeter, so a contract
         # cannot widen past the boundary a human signed. Empty perimeter allow-list
-        # means "anywhere not forbidden". These join the scope violations.
+        # means "anywhere not forbidden". Both rename endpoints are checked. These
+        # join the scope violations.
         if perimeter.allowed_paths:
-            for p in changed:
+            for p in sorted(policed_changed):
                 if (
                     not any(_glob_hit(p, g) for g in perimeter.allowed_paths)
                     and p not in unwaived_scope
@@ -360,7 +441,7 @@ def verify(
         if provenance is not None and provenance.status.is_trustworthy:
             reasons.append(provenance.detail)
 
-    head_commit = head_sha(root)
+    head_commit = candidate_sha
 
     audit_mac: str | None = None
     if audit is not None:

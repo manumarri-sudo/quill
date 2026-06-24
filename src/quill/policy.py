@@ -1326,6 +1326,59 @@ class DiffEvaluation:
         )
 
 
+@dataclass(frozen=True)
+class ChangedPath:
+    """One entry from ``git diff --name-status -z`` - the authoritative inventory.
+
+    ``status`` is git's letter (A/M/D/R/C/T). ``path`` is the new/current path
+    (the only path for non-renames); ``old_path`` is the source for a rename or
+    copy. Both endpoints exist so every path policy can police a rename on both
+    ends. With ``-z`` git emits raw, NUL-delimited paths with NO C-quoting, so
+    this also sidesteps the quoting/parsing pitfalls of the textual diff."""
+
+    status: str
+    path: str
+    old_path: str | None
+
+    @property
+    def endpoints(self) -> tuple[str, ...]:
+        """Every path this change touches - both ends of a rename/copy."""
+        if self.old_path and self.old_path != self.path:
+            return (self.path, self.old_path)
+        return (self.path,)
+
+
+def parse_name_status(z: str) -> list[ChangedPath]:
+    """Parse ``git diff --name-status -z --find-renames`` output.
+
+    The stream is NUL-separated fields. A plain change is ``<status>\\0<path>``;
+    a rename/copy is ``R<sim>\\0<old>\\0<new>`` (likewise ``C``). Tolerant: a
+    truncated trailing record is dropped rather than raising, because the gate
+    must never crash on odd input - though here the inventory is the SECURITY
+    source of truth, so the caller treats a parse that loses paths as fail-closed
+    by policing the union of this and the textual parse."""
+    toks = z.split("\0")
+    out: list[ChangedPath] = []
+    i, n = 0, len(toks)
+    while i < n:
+        tok = toks[i]
+        if not tok:
+            i += 1
+            continue
+        code = tok[0]
+        if code in ("R", "C"):
+            if i + 2 >= n:
+                break  # truncated rename record
+            out.append(ChangedPath(code, toks[i + 2], toks[i + 1]))
+            i += 3
+        else:
+            if i + 1 >= n:
+                break
+            out.append(ChangedPath(code, toks[i + 1], None))
+            i += 2
+    return out
+
+
 _C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
 
 
