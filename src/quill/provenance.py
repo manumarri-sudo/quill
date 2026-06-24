@@ -79,7 +79,20 @@ def _split_pem_blocks(text: str) -> list[str]:
     return [b for b in blocks if "BEGIN PUBLIC KEY" in b]
 
 
-def _load_pubkeys_from_env(env: dict[str, str] | None = None) -> dict[str, Ed25519PublicKey]:
+def _is_inside(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def _load_pubkeys_from_env(
+    env: dict[str, str] | None = None,
+    *,
+    root: Path | None = None,
+    strict: bool = False,
+) -> dict[str, Ed25519PublicKey]:
     raw = (env or os.environ).get(APPROVER_ENV, "").strip()
     if not raw:
         return {}
@@ -93,6 +106,13 @@ def _load_pubkeys_from_env(env: dict[str, str] | None = None) -> dict[str, Ed255
             continue
         p = Path(chunk).expanduser()
         if "BEGIN" not in chunk and p.is_file():
+            # Strict trust must come from OUTSIDE the checkout (an off-box CI
+            # secret), so reject a path that resolves inside the repo: otherwise
+            # `QUILL_APPROVER_PUBKEYS=.quill/approvers/human.pub` would redirect
+            # the "external" trust root back into a PR-controlled file (security
+            # review: trust-root path indirection). Inline PEM is always allowed.
+            if strict and root is not None and _is_inside(p, root):
+                continue
             pieces.append(p.read_text())
         else:
             pieces.append(chunk)
@@ -134,7 +154,7 @@ def load_trusted_approvers(
     committed set is a convenience and the env pin merges over it.
     """
     if strict:
-        return _load_pubkeys_from_env(env)
+        return _load_pubkeys_from_env(env, root=root, strict=True)
     keys = _load_pubkeys_from_dir(root)
     keys.update(_load_pubkeys_from_env(env))
     return keys

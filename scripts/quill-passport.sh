@@ -89,6 +89,20 @@ case "$VERDICT" in
     ;;
 esac
 
+# 3a-bis. Process rc, passport verdict, and passport exit_code MUST agree. A
+#     buggy, replaced, or supply-chain-substituted verifier could otherwise emit
+#     contradictory evidence (e.g. process rc=1 but a PASS passport) and have the
+#     wrapper select the favorable side. Bind the three together and fail closed
+#     on any disagreement (security review: evidence-integrity inconsistency).
+case "$VERDICT" in
+  BLOCK) WANT_RC=1; WANT_EXIT=1 ;;
+  *)     WANT_RC=0; WANT_EXIT=0 ;;
+esac
+if [[ "$QUILL_RC" != "$WANT_RC" || "$EXIT_CODE" != "$WANT_EXIT" ]]; then
+  echo "::error::inconsistent verdict evidence (process rc=$QUILL_RC, verdict=$VERDICT, exit_code=$EXIT_CODE); failing closed"
+  exit 2
+fi
+
 # 3b. If a gate public key is configured, the passport's signature MUST verify.
 #     This binds the verdict to the off-box gate identity: a passport whose body
 #     was edited (e.g. a flipped verdict) or signed by an untrusted key fails the
@@ -100,6 +114,12 @@ if [[ -n "${QUILL_GATE_PUBKEYS:-}" ]]; then
     cat "$WORK/sig.err" 2>/dev/null || true
     exit 2
   fi
+elif [[ -n "$STRICT_FLAG" ]]; then
+  # Strict authenticates the contract/perimeter, but without a configured gate
+  # key the published passport is UNSIGNED: a reviewer cannot re-verify the
+  # verdict independently of this repo. Say so rather than implying signed
+  # evidence (security review: strict accepts unsigned passport by default).
+  echo "::warning::strict mode but no QUILL_GATE_PUBKEYS configured — the passport is UNSIGNED and its verdict cannot be independently re-verified. Set gate-key + gate-pubkeys for signed evidence."
 fi
 
 echo "Quill verdict: $VERDICT ($REASONS)"

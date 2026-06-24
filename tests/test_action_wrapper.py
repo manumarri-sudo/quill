@@ -93,3 +93,50 @@ def test_committed_passport_cannot_fake_a_pass(repo: tuple[Path, dict[str, str]]
     published = json.loads((quill_dir / "passport.json").read_text())
     assert published["verdict"] == "BLOCK"
     assert "PAYLOAD.txt" in published["evidence"]["out_of_scope"]
+
+
+def _install_fake_quill(bin_dir: Path, *, rc: int, verdict: str, exit_code: int) -> None:
+    """A stand-in `quill` that writes a passport with the given verdict/exit_code
+    into --passport-dir and exits with `rc`, to drive the wrapper's evidence-
+    consistency check without depending on the real verifier's behavior."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fake = bin_dir / "quill"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        'dir="."; prev=""\n'
+        'for a in "$@"; do [[ "$prev" == "--passport-dir" ]] && dir="$a"; prev="$a"; done\n'
+        'mkdir -p "$dir"\n'
+        f'printf \'{{"verdict":"{verdict}","exit_code":{exit_code},"reasons":["fake"]}}\' '
+        '> "$dir/passport.json"\n'
+        'printf "# passport\\n" > "$dir/passport.md"\n'
+        f"exit {rc}\n"
+    )
+    fake.chmod(0o755)
+
+
+def test_wrapper_fails_closed_on_rc_verdict_mismatch(
+    repo: tuple[Path, dict[str, str]],
+) -> None:
+    """A verifier that exits rc=1 but writes a PASS passport is contradictory
+    evidence; the wrapper must fail closed (exit 2), not pick the favorable side."""
+    if not WRAPPER.exists():
+        pytest.skip("wrapper script not present")
+    root, env = repo
+    bin_dir = root.parent / "fakebin"
+    _install_fake_quill(bin_dir, rc=1, verdict="PASS", exit_code=0)
+    proc = subprocess.run(
+        ["bash", str(WRAPPER)],
+        cwd=root,
+        env={
+            **env,
+            "PATH": str(bin_dir) + os.pathsep + env["PATH"],  # fake quill wins
+            "QUILL_STRICT": "false",
+            "QUILL_PASSPORT_DIR": ".quill",
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 2, (
+        f"expected fail-closed exit 2, got {proc.returncode}: {proc.stderr}"
+    )
+    assert "inconsistent verdict evidence" in (proc.stdout + proc.stderr)
