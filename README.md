@@ -297,7 +297,7 @@ quill pins           tool-description pins (anti-poisoning, anti-rug-pull)
 quill decay          permissions that erode without reinforcement
 quill scan-secrets   scan files for hardcoded credentials
 quill scan-prompts   scan files for prompt-injection-shape patterns (signal only)
-quill commit-hook-install   append a session summary to every commit message
+quill commit-hook-install   add a session-summary block to the commit message template
 quill doctor         diagnose the install
 quill version        print the version
 ```

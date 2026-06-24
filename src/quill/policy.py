@@ -1326,11 +1326,51 @@ class DiffEvaluation:
         )
 
 
+_C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def _git_unquote(inner: str) -> str:
+    """Decode git's C-style path quoting (``core.quotepath``) back to the real path.
+
+    git wraps a path in double quotes and backslash-escapes whenever it holds a
+    byte >= 0x80, a control char, a quote, or a backslash: an octal ``\\NNN`` per
+    byte, plus ``\\a \\b \\t \\n \\v \\f \\r \\" \\\\``. We decode to raw bytes and
+    then UTF-8. Skipping this leaves a literal ``caf\\303\\251.env`` in place of
+    ``café.env``, so a forbidden or gate-tamper EXACT path with a non-ASCII byte
+    would slip past every check that compares the path string (differential fuzz
+    against real git surfaced this fail-open)."""
+    out = bytearray()
+    i, n = 0, len(inner)
+    while i < n:
+        ch = inner[i]
+        if ch == "\\" and i + 1 < n:
+            nxt = inner[i + 1]
+            if nxt in _C_ESCAPES:
+                out.append(_C_ESCAPES[nxt])
+                i += 2
+                continue
+            if nxt in "01234567":
+                j = i + 1
+                digits = ""
+                while j < n and len(digits) < 3 and inner[j] in "01234567":
+                    digits += inner[j]
+                    j += 1
+                out.append(int(digits, 8) & 0xFF)
+                i = j
+                continue
+            out.extend(nxt.encode("utf-8"))  # unknown escape: keep the char
+            i += 2
+            continue
+        out.extend(ch.encode("utf-8"))
+        i += 1
+    return out.decode("utf-8", "replace")
+
+
 def _normalize_diff_path(raw: str) -> str:
     """Strip the a//b/ prefix and surrounding git quoting from a diff path."""
     raw = raw.strip()
     if len(raw) >= 2 and raw[0] == '"' and raw[-1] == '"':
-        raw = raw[1:-1]
+        raw = _git_unquote(raw[1:-1])
     if raw.startswith(("a/", "b/")):
         raw = raw[2:]
     return raw.removeprefix("./")
