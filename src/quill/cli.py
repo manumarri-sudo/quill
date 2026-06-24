@@ -2224,30 +2224,30 @@ def audit_export(
         raise typer.Exit(code=1)
 
     # --pack: turn everything on, force PDF, force open.
+    standards: list[str] = []
     if pack:
-        aiuc_1 = True
-        eu_ai_act = True
-        nist = True
-        iso_42001 = True
-        soc2 = True
-        mitre_atlas = True
+        # The full pack includes EVERY framework in the crosswalk, derived from
+        # controls.toml so a newly-mapped framework (e.g. a US regulatory one)
+        # is always in the pack and can't silently drop out.
+        from quill.exports import CONTROLS
+
+        standards = sorted({c.standard for c in CONTROLS})
         if fmt == "both":
             fmt = "all"
         open_after = True
-
-    standards: list[str] = []
-    if eu_ai_act:
-        standards += ["EU AI Act Art. 14", "EU AI Act Art. 12", "EU AI Act Art. 19"]
-    if aiuc_1:
-        standards.append("AIUC-1")
-    if nist:
-        standards += ["NIST AI RMF", "NIST GenAI Profile"]
-    if iso_42001:
-        standards.append("ISO/IEC 42001")
-    if soc2:
-        standards.append("SOC 2 Common Criteria")
-    if mitre_atlas:
-        standards.append("MITRE ATLAS")
+    else:
+        if eu_ai_act:
+            standards += ["EU AI Act Art. 14", "EU AI Act Art. 12", "EU AI Act Art. 19"]
+        if aiuc_1:
+            standards.append("AIUC-1")
+        if nist:
+            standards += ["NIST AI RMF", "NIST GenAI Profile"]
+        if iso_42001:
+            standards.append("ISO/IEC 42001")
+        if soc2:
+            standards.append("SOC 2 Common Criteria")
+        if mitre_atlas:
+            standards.append("MITRE ATLAS")
     if not standards:
         console.print(
             "[red]no standards selected - pass --aiuc-1 or "

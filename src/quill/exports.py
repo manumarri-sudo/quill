@@ -528,6 +528,8 @@ def render_html(r: ExportReport) -> str:
             "<p><strong>Quill event types:</strong> "
             f"<code>{e(', '.join(c.quill_event_types))}</code></p>"
         )
+        if c.auditor_sampling:
+            add(f"<p><strong>How an auditor samples this:</strong> {e(c.auditor_sampling)}</p>")
         if ce.sample_events:
             add("<p>Sample evidence (redacted):</p>")
             add("<pre>")
