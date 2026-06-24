@@ -198,20 +198,37 @@ and an unsigned wildcard exceptions file that could waive whole finding classes
 (P0-2, strict mode no longer honors branch-authored exceptions). Both are covered
 by adversarial tests in `tests/test_trust_spine.py`.
 
-Still open, do not rely on the CI gate against a determined adversary until these
-land (tracked from the same review):
+A second review pass (same date) drove three more to closure, each with a
+regression test:
 
-- **Action-wrapper fail-closed behavior.** `scripts/quill-passport.sh` should run
-  in a fresh temp dir, fail closed on an internal verifier error (not just BLOCK),
-  and verify the passport signature before reporting success. Until then a
-  pre-seeded passport plus a forced verifier crash is a theoretical fail-open.
-- **Binary / rename diff coverage.** The unified-diff parser can miss a binary
-  addition or a rename *out of* a forbidden path. File inventory should come from
-  `git diff --name-status -z` and evaluate both old and new paths.
+- **Composite rogue-key-in-base attack (closed).** An attacker who plants a
+  public key in the base commit (where the gate-tamper scan can't see it, since
+  the diff starts *after* it) and signs their own perimeter + contract with it.
+  Strict mode now trusts **only** externally-pinned `QUILL_APPROVER_PUBKEYS`, so
+  a committed key is never a trust root (`test_p0_1_composite_rogue_key_plus_base_move_blocks`).
+- **Action-wrapper fail-open (closed).** `scripts/quill-passport.sh` now runs the
+  verifier into a fresh `mktemp` dir and reads the verdict only from there (a
+  committed/stale passport can't be read), fails closed on any non-`0/1` exit or
+  unrecognised verdict, and re-verifies the passport's gate signature when a gate
+  pubkey is configured (`tests/test_action_wrapper.py`).
+- **Binary / rename diff coverage (closed).** The unified-diff parser now seeds
+  each file from the `diff --git` header and parses `Binary files … differ`
+  stanzas, so a binary blob is inventoried against scope and the gate-tamper
+  surfaces; `evaluate_diff` checks both ends of a rename
+  (`tests/test_diff_binary_rename.py`).
+
+Genuinely still open — do not rely on the CI gate against a determined adversary
+until these land:
+
 - **Off-box evidence anchoring.** The Merkle transparency tree head is built but
   not yet anchored off the runner, so a CI passport's MAC is not independently
   resolvable. There has been **no external security audit** of the full
   end-to-end construction; treat the CI gate as alpha.
+- **Perimeter allow-list as outer bound.** The signed perimeter's `allowed_paths`
+  now caps a contract's scope (a contract can narrow but not widen past it), but
+  `contract_id` still does not cryptographically bind the *specific* scope a
+  human saw at approval time; a re-signed contract with a different scope under
+  the same id is not detected beyond the signature itself.
 | Auditor evidence pack | **Partial** | Maps to evidence requests (SOC 2, EU AI Act Art 12-shaped, ISO 42001 A.6.2.8); does not certify compliance by itself. |
 | Enterprise-grade / production-safe | **Not yet** | Alpha, squatted dist name, no external audit. Do not claim. |
 | Cannot be bypassed / agent-proof | **Dangerous** | False - see limits 1-4. Never claim. |
