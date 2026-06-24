@@ -28,14 +28,24 @@ backdoor. That is the honest scope, and it is the part a human reviewer most
 often misses on a large agent PR.
 
 ```bash
-# 1. capture the approved task (once, at the start of the work)
-quill begin "Add rate-limiting to the login endpoint" --scope "src/auth/**"
+# 0. one-time: create a human approver key; keep the private half OFF the build box
+quill keygen --out approver.pem
+
+# 1. capture AND SIGN the approved task (a signed contract can't be forged by the agent)
+quill begin "Add rate-limiting to the login endpoint" --scope "src/auth/**" --key approver.pem
 
 # 2. let the agent write the diff, open the PR
 
-# 3. CI runs this on every push and signs the verdict
-quill verify        # PASS · NEEDS_REVIEW · BLOCK   (BLOCK fails the build)
+# 3. CI runs this on every push in strict mode, and signs the verdict
+quill verify --strict   # PASS · NEEDS_REVIEW · BLOCK   (BLOCK fails the build)
 ```
+
+`--key` + `--strict` is the secure-by-default path: it requires a human-signed
+contract and perimeter whose trust root lives off the build box. Without them
+(`quill begin` / `quill verify` with no flags) Quill still runs, but in
+*cooperative* mode — honest review automation for a non-adversarial agent, not a
+boundary against one trying to escape. See
+[docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) for the full deployment.
 
 `quill verify` reads `git diff <base>..HEAD`, checks every changed file against the
 scope you approved, scans added lines for hardcoded secrets and sensitive surfaces
@@ -113,13 +123,16 @@ quill verify                 # uses .quill/contract.json, diffs base..HEAD
 3. scans **added lines** for the 26 vendor-format secret patterns in
    [`src/quill/secrets.py`](src/quill/secrets.py),
 4. classifies sensitive surfaces (CI/workflow files, lockfiles, test deletions),
-5. applies any logged exceptions in `.quill/exceptions.jsonl`,
+5. applies any logged exceptions in `.quill/exceptions.json` (ignored in strict mode
+   unless the waiver file is itself signed),
 6. composes a verdict — **PASS**, **NEEDS_REVIEW**, or **BLOCK** — and chains a
    `verification.run` event into the audit log.
 
 `BLOCK` exits non-zero (fails CI); `PASS` and `NEEDS_REVIEW` exit 0, so review is
-surfaced without hard-stopping the pipeline. The whole thing is deterministic: same
-diff + same contract + same policy → same verdict, explainable line by line.
+surfaced without hard-stopping the pipeline. The whole thing is deterministic: given
+the same inputs — the diff, the contract, the signed perimeter, the trusted approver
+keys, the strict flag, and any (signed) exceptions — it returns the same verdict,
+explainable line by line. There is no model and no clock in the decision path.
 
 ### 3. The Change Passport
 
@@ -168,10 +181,14 @@ quill guard --key approver.pem --forbid 'migrations/**' --forbid 'src/auth/**'
   approval.** That is the answer to "I'm not going to sit and approve a hundred
   agents." Forbidden paths and gate-tamper edits BLOCK; secrets BLOCK; in-bounds
   work PASSes silently.
-- **The agent can't authorize itself.** Editing the perimeter, the approver keys
-  (`.quill/approvers/**`), or the workflow that runs the gate is itself a BLOCK,
-  so an agent can't widen its own boundary or add its own signing key. Tampering
-  with a signed perimeter invalidates the signature.
+- **The agent can't authorize itself (in strict mode, with an off-box trust
+  root).** Editing the perimeter, the approver keys (`.quill/approvers/**`), or
+  the workflow that runs the gate is itself a BLOCK, and tampering with a signed
+  perimeter or contract invalidates the signature. The committed
+  `.quill/approvers/*.pub` set is a *convenience*, not a boundary: in strict mode
+  only the externally-pinned `QUILL_APPROVER_PUBKEYS` are trusted, because an
+  agent could otherwise plant a key in the base commit and sign its own approval.
+  Off-box keys + strict is what makes this a real claim rather than a hopeful one.
 - **The verdict can't be forged.** With a gate key (`quill verify --strict
   --sign-key gate.pem`, or `QUILL_GATE_KEY` in CI), the passport is signed;
   anyone re-checks it with `quill verify-passport passport.json` and a flipped
@@ -186,11 +203,14 @@ build machine** (a repo/org secret: `QUILL_GATE_KEY`, `QUILL_APPROVER_PUBKEYS`),
 **sign the contract** (`quill begin --key`) and require it in strict mode,
 **pin the Action to a published tag** (not the PR's own checkout), and make the
 **Status Check required** in branch protection. With those in place the bypasses
-above are closed; without them it is honest review automation for a cooperative
-agent. This has **not yet had an external security audit**, and known remaining
-hardening items (Action-wrapper fail-closed behavior, binary/rename diff
-coverage) are tracked in the security model. Treat
-[docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) as authoritative over this README.
+the security model enumerates are closed against the attacks the test suite
+exercises (including the composite rogue-key-in-base attack, the Action-wrapper
+fail-open, and binary/rename diff coverage, all closed with regression tests);
+without them it is honest review automation for a cooperative agent. This has
+**not yet had an external security audit**, so treat "closed" as "closed against
+what we currently test," and treat
+[docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) — which tracks the residual open
+items — as authoritative over this README.
 
 ## The local runtime gate (optional, defense-in-depth)
 
