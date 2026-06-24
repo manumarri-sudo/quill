@@ -86,13 +86,23 @@ def _commit_change(repo: Path, path: str, content: str) -> None:
 
 
 def _verify(
-    repo: Path, contract: contract_mod.Contract, *, strict: bool = True
+    repo: Path,
+    contract: contract_mod.Contract,
+    *,
+    strict: bool = True,
+    env: dict[str, str] | None = None,
 ) -> verify_mod.VerifyResult:
+    # In strict mode only env-pinned keys are trusted (committed keys are
+    # ignored), so simulate the human pinning their approver key as a CI secret.
+    if env is None and strict:
+        human = repo / ".quill" / "approvers" / "human.pub"
+        env = {provenance_mod.APPROVER_ENV: human.read_text()} if human.exists() else {}
     return verify_mod.verify(
         contract=contract,
         root=repo,
         perimeter=perimeter_mod.load(repo),
         strict=strict,
+        env=env,
     )
 
 
@@ -347,3 +357,52 @@ def test_p0_2_unsigned_exceptions_do_not_waive_in_strict(repo: Path) -> None:
     # Cooperative mode still honors it (the secret is waived).
     coop = _verify(repo, contract, strict=False)
     assert not coop.secret_findings
+
+
+def test_p0_1_composite_rogue_key_plus_base_move_blocks(repo: Path) -> None:
+    """The stronger bypass the re-review found: the attacker plants its OWN
+    approver key + a rogue-signed perimeter + a rogue-signed contract in the base
+    commit M (where gate-tamper can't see them, since the diff starts at M), and
+    moves the base to hide malicious code. Strict mode trusts ONLY the env-pinned
+    human key and ignores the committed approver dir, so the rogue-signed
+    artifacts fail provenance and it BLOCKs."""
+    import json as _json
+
+    # The human's real approver key, pinned via env (a CI secret a PR can't edit).
+    _, human_pub = attest.generate_keypair()
+    # The attacker's own key, committed into the repo checkout.
+    rogue_priv, rogue_pub = attest.generate_keypair()
+
+    d = repo / ".quill" / "approvers"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "rogue.pub").write_text(rogue_pub)
+    rogue_per = perimeter_mod.default_perimeter()
+    rogue_per.write(repo)
+    provenance_mod.sign_artifact(
+        rogue_per.to_dict(), rogue_priv, perimeter_mod.signature_path(repo)
+    )
+    (repo / "src" / "evil.py").write_text("backdoor = 1\n")  # malicious code in M
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "M: rogue key + perimeter + evil")
+    m_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+    ).stdout.strip()
+
+    # Commit C: rogue-signed contract with base = M (hides evil.py from the diff).
+    contract, _ = contract_mod.begin("anything", allowed_paths=("**",), root=repo)
+    data = contract.to_dict()
+    data["base_commit"] = m_sha
+    (repo / ".quill" / "contract.json").write_text(_json.dumps(data))
+    forged = contract_mod.Contract.from_dict(data)
+    provenance_mod.sign_artifact(forged.to_dict(), rogue_priv, repo / ".quill" / "contract.sig")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "C: rogue contract base=M")
+
+    result = verify_mod.verify(
+        contract=forged,
+        root=repo,
+        perimeter=perimeter_mod.load(repo),
+        strict=True,
+        env={provenance_mod.APPROVER_ENV: human_pub},  # only the human key is pinned
+    )
+    assert result.verdict is Verdict.BLOCK

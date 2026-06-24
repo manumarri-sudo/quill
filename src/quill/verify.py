@@ -269,7 +269,7 @@ def verify(
         forbidden_hits = tuple(p for p in changed if perimeter.forbids(p))
         review_categories = set(perimeter.review_surfaces)
         provenance = provenance_mod.verify_artifact(
-            perimeter.to_dict(), perimeter_mod.signature_path(root), root, env
+            perimeter.to_dict(), perimeter_mod.signature_path(root), root, env, strict=strict
         )
 
     # Contract provenance (security review P0-1): the contract supplies the base
@@ -279,7 +279,7 @@ def verify(
     # already blocks *editing* it inside the diff; this blocks a forged one that
     # was committed to the branch.
     contract_prov = provenance_mod.verify_artifact(
-        contract.to_dict(), root / ".quill" / "contract.sig", root, env
+        contract.to_dict(), root / ".quill" / "contract.sig", root, env, strict=strict
     )
 
     reasons: list[str] = []

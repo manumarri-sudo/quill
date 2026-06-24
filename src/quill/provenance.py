@@ -121,10 +121,20 @@ def _load_pubkeys_from_dir(root: Path) -> dict[str, Ed25519PublicKey]:
 
 
 def load_trusted_approvers(
-    root: Path, env: dict[str, str] | None = None
+    root: Path, env: dict[str, str] | None = None, *, strict: bool = False
 ) -> dict[str, Ed25519PublicKey]:
-    """Trusted approver public keys; the env pin (CI secret) merges over the
-    committed ``.quill/approvers/*.pub`` set."""
+    """Trusted approver public keys.
+
+    In **strict** mode only the env-pinned keys (a CI secret a PR can't edit) are
+    trusted; the committed ``.quill/approvers/*.pub`` set is IGNORED. This closes
+    the composite bypass (security re-review): an attacker can plant a rogue key
+    in the base commit where gate-tamper can't see it (the diff starts after it),
+    then sign its own perimeter and contract with it. Trusting only the external
+    pin means a planted key is never a trust root. In cooperative mode the
+    committed set is a convenience and the env pin merges over it.
+    """
+    if strict:
+        return _load_pubkeys_from_env(env)
     keys = _load_pubkeys_from_dir(root)
     keys.update(_load_pubkeys_from_env(env))
     return keys
@@ -163,21 +173,28 @@ def verify_artifact(
     sig_path: Path,
     root: Path,
     env: dict[str, str] | None = None,
+    *,
+    strict: bool = False,
 ) -> ProvenanceResult:
     """Check whether `payload` carries a valid signature from a trusted approver.
 
     The signature is verified over the *exact* payload, so any tamper (scope
     widened, a forbidden path removed) breaks it, and only the approver's private
-    key can re-sign.
+    key can re-sign. In strict mode only externally-pinned keys are trusted (see
+    ``load_trusted_approvers``), so a key committed to the PR is never a trust root.
     """
-    trusted = load_trusted_approvers(root, env)
+    trusted = load_trusted_approvers(root, env, strict=strict)
     sig = load_signature(sig_path)
 
     if not trusted:
         return ProvenanceResult(
             ProvenanceStatus.NO_APPROVERS,
             None,
-            f"no trusted approver keys (add .quill/approvers/*.pub or set {APPROVER_ENV})",
+            (
+                f"no externally-pinned approver keys (set {APPROVER_ENV})"
+                if strict
+                else f"no trusted approver keys (add .quill/approvers/*.pub or set {APPROVER_ENV})"
+            ),
             0,
         )
     if sig is None:
