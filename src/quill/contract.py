@@ -20,7 +20,7 @@ import json
 import subprocess
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -101,10 +101,15 @@ class Contract:
     created_at: str
     contract_id: str
     approved_by: str | None = None
+    expires_at: str | None = None  # ISO-8601; the approval lapses after this
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["allowed_paths"] = list(self.allowed_paths)
+        # Omit expires_at when unset so a contract WITHOUT an expiry serializes
+        # exactly as before this field existed - keeping older signatures valid.
+        if self.expires_at is None:
+            d.pop("expires_at", None)
         return d
 
     @classmethod
@@ -119,10 +124,23 @@ class Contract:
                 created_at=str(data.get("created_at", "")),
                 contract_id=str(data.get("contract_id", "")),
                 approved_by=data.get("approved_by"),
+                expires_at=data.get("expires_at"),
             )
         except (KeyError, TypeError, ValueError) as e:
             msg = f"malformed contract: {e}"
             raise ContractError(msg) from e
+
+    def is_expired(self, now: datetime | None = None) -> bool:
+        """True iff an expiry was set and has passed. A contract with no expiry
+        never expires; an unparseable expiry is ignored (operator typo, not a
+        reason to brick the gate)."""
+        if not self.expires_at:
+            return False
+        try:
+            exp = datetime.fromisoformat(self.expires_at)
+        except ValueError:
+            return False
+        return (now or datetime.now(UTC)) >= exp
 
     def write(self, root: Path) -> Path:
         p = contract_path(root)
@@ -131,14 +149,17 @@ class Contract:
         return p
 
 
-def _contract_id(task: str, base_commit: str | None, created_at: str) -> str:
-    """Short stable id: a hash over the task, base commit, and creation time.
-
-    Not a security primitive - it is a human-citable handle ("contract a1b2c3d")
-    that the audit chain and passport reference. Tamper-evidence comes from the
-    HMAC audit chain, not from this id.
+def _contract_id(
+    task: str, base_commit: str | None, created_at: str, allowed_paths: Sequence[str] = ()
+) -> str:
+    """Short stable id: a hash over the task, base commit, creation time, AND the
+    approved scope, so two contracts that differ only in scope get distinct ids
+    (security review: contract_id omitted scope). Still not a security primitive -
+    a human-citable handle ("contract a1b2c3d"); tamper-evidence comes from the
+    HMAC audit chain and the contract signature, not from this id.
     """
-    h = hashlib.sha256(f"{task}\x00{base_commit}\x00{created_at}".encode()).hexdigest()
+    scope = "\x00".join(allowed_paths)
+    h = hashlib.sha256(f"{task}\x00{base_commit}\x00{created_at}\x00{scope}".encode()).hexdigest()
     return h[:12]
 
 
@@ -166,15 +187,18 @@ def begin(
     allowed_paths: Sequence[str] = (),
     root: Path | None = None,
     approved_by: str | None = None,
+    expires_in_days: int | None = None,
     audit: AuditLog | None = None,
     session_id: str = "quill-change-control",
 ) -> tuple[Contract, Path]:
     """Create and persist a contract from the approved task. Returns (contract, path).
 
     `task` is the issue URL or free text the human approved. `allowed_paths` is
-    the scope allow-list. The base commit is the repo's current HEAD. When an
-    `audit` log is supplied, a ``contract.created`` event is chained so the
-    approval is tamper-evidently recorded.
+    the scope allow-list. The base commit is the repo's current HEAD.
+    `expires_in_days`, when set, records an expiry after which `quill verify
+    --strict` BLOCKs - so a stale approval cannot authorize work indefinitely.
+    When an `audit` log is supplied, a ``contract.created`` event is chained so
+    the approval is tamper-evidently recorded.
     """
     task = task.strip()
     if not task:
@@ -184,6 +208,12 @@ def begin(
     root = repo_root(root)
     base = head_sha(root)
     created = _now()
+    expires_at: str | None = None
+    if expires_in_days is not None:
+        if expires_in_days <= 0:
+            msg = "expires_in_days must be a positive number of days"
+            raise ContractError(msg)
+        expires_at = (datetime.now(UTC) + timedelta(days=expires_in_days)).isoformat()
     contract = Contract(
         version=CONTRACT_VERSION,
         task=task,
@@ -191,8 +221,9 @@ def begin(
         allowed_paths=tuple(allowed_paths),
         base_commit=base,
         created_at=created,
-        contract_id=_contract_id(task, base, created),
+        contract_id=_contract_id(task, base, created, allowed_paths),
         approved_by=approved_by,
+        expires_at=expires_at,
     )
     path = contract.write(root)
 

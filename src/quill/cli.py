@@ -158,6 +158,14 @@ def begin_cmd(
             "`quill verify --strict`: an unsigned contract is forgeable by the agent.",
         ),
     ] = None,
+    expires_in: Annotated[
+        int | None,
+        typer.Option(
+            "--expires-in",
+            help="days until the approval lapses. After it, `quill verify --strict` "
+            "BLOCKs so a stale contract can't authorize work indefinitely.",
+        ),
+    ] = None,
 ) -> None:
     """Capture the human-approved task into .quill/contract.json.
 
@@ -176,6 +184,7 @@ def begin_cmd(
                 task,
                 allowed_paths=tuple(scope or ()),
                 approved_by=approved_by,
+                expires_in_days=expires_in,
                 audit=audit,
             )
     except QuillError as e:

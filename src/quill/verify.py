@@ -416,6 +416,14 @@ def verify(
     )
     strict_no_perimeter = bool(strict and perimeter is None)
     contract_provenance_blocks = bool(strict and not contract_prov.status.is_trustworthy)
+    contract_expired = contract.is_expired()
+    contract_expiry_blocks = bool(strict and contract_expired)
+    if contract_expiry_blocks:
+        reasons.append(f"contract expired at {contract.expires_at}; re-approve to authorize")
+    elif contract_expired:
+        reasons.append(
+            f"warning: contract expired at {contract.expires_at} (not enforced; cooperative mode)"
+        )
     if provenance_blocks and provenance is not None:
         reasons.append(f"perimeter provenance not established: {provenance.detail}")
     elif perimeter is not None and provenance is not None and not provenance.status.is_trustworthy:
@@ -436,6 +444,7 @@ def verify(
         or provenance_blocks
         or strict_no_perimeter
         or contract_provenance_blocks
+        or contract_expiry_blocks
     )
     if block:
         verdict = Verdict.BLOCK
