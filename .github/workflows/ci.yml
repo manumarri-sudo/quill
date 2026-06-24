@@ -36,7 +36,7 @@ jobs:
         run: mypy src/quill   # blocking: strict is green and the py.typed marker promises it
 
       - name: Test
-        run: pytest --no-cov tests/
+        run: pytest tests/   # enforces --cov-fail-under=75 from pyproject (currently ~82%)
 
       - name: Audit dependencies
         run: pip-audit --strict   # blocking: a dependency CVE must fail the build
