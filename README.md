@@ -28,24 +28,34 @@ backdoor. That is the honest scope, and it is the part a human reviewer most
 often misses on a large agent PR.
 
 ```bash
-# 0. one-time: create a human approver key; keep the private half OFF the build box
+# 0. one-time: create a human approver key. Keep the PRIVATE half off the build
+#    box; pin the PUBLIC half so a PR cannot edit the trust root (in CI this is a
+#    repo/org secret or variable, NOT a path inside the checkout).
 quill keygen --out approver.pem
+export QUILL_APPROVER_PUBKEYS="$(cat approver.pem.pub)"
 
-# 1. capture AND SIGN the approved task (a signed contract can't be forged by the agent)
+# 1. sign the standing boundary ONCE: what agents may touch, what is off-limits.
+quill guard --key approver.pem --allow "src/**" --forbid "migrations/**"
+
+# 2. capture AND SIGN the approved task (a signed contract can't be forged by the agent).
 quill begin "Add rate-limiting to the login endpoint" --scope "src/auth/**" --key approver.pem
+#    commit .quill/{perimeter.json,perimeter.sig,contract.json,contract.sig} to the BASE branch.
 
-# 2. let the agent write the diff, open the PR
+# 3. the agent writes the diff and opens the PR.
 
-# 3. CI runs this on every push in strict mode, and signs the verdict
-quill verify --strict   # PASS · NEEDS_REVIEW · BLOCK   (BLOCK fails the build)
+# 4. CI verifies the PR against the signed boundary, in strict mode.
+quill verify --strict        # PASS · NEEDS_REVIEW · BLOCK   (BLOCK fails the build)
+#    add --sign-key gate.pem (or QUILL_GATE_KEY in CI) to ALSO sign the verdict,
+#    so a reviewer can re-check it with `quill verify-passport`.
 ```
 
-`--key` + `--strict` is the secure-by-default path: it requires a human-signed
-contract and perimeter whose trust root lives off the build box. Without them
-(`quill begin` / `quill verify` with no flags) Quill still runs, but in
-*cooperative* mode — honest review automation for a non-adversarial agent, not a
-boundary against one trying to escape. See
-[docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) for the full deployment.
+That full sequence — pinned external approver key, signed perimeter, signed
+contract, `--strict` — is the real adversarial boundary. Drop any of it (`quill
+begin` / `quill verify` with no flags) and Quill still runs, but in *cooperative*
+mode: honest review automation for a non-adversarial agent, not a boundary
+against one trying to escape. Verdict signing is opt-in (it needs a gate key); it
+is not on by default. See [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) for
+the full deployment checklist.
 
 `quill verify` reads `git diff <base>..HEAD`, checks every changed file against the
 scope you approved, scans added lines for hardcoded secrets and sensitive surfaces
@@ -113,18 +123,22 @@ the fixed record the diff is later measured against, and the Change Passport cit
 ### 2. `quill verify` — gate the diff
 
 ```bash
-quill verify                 # uses .quill/contract.json, diffs base..HEAD
+quill verify --strict        # enforced mode: requires the signed perimeter + contract
+quill verify                 # local/cooperative: advisory, forgeable by the agent
 ```
 
 `verify` (`src/quill/verify.py`, on top of `policy.evaluate_diff`):
 
-1. parses `git diff <base_commit>..HEAD` as a unified diff,
-2. matches every changed path against the contract scope,
-3. scans **added lines** for the 26 vendor-format secret patterns in
+1. builds the authoritative changed-path inventory from
+   `git diff --name-status -z --find-renames <base_commit>..<candidate>` — both
+   rename endpoints, binary and mode-only changes included — and parses the
+   unified diff only to scan **added lines**,
+2. matches every changed path (both ends of a rename) against the contract scope,
+3. scans added lines for the 26 vendor-format secret patterns in
    [`src/quill/secrets.py`](src/quill/secrets.py),
 4. classifies sensitive surfaces (CI/workflow files, lockfiles, test deletions),
-5. applies any logged exceptions in `.quill/exceptions.json` (ignored in strict mode
-   unless the waiver file is itself signed),
+5. applies any logged exceptions in `.quill/exceptions.json` (ignored entirely in
+   strict mode — an unsigned waiver file cannot weaken a strict verdict),
 6. composes a verdict — **PASS**, **NEEDS_REVIEW**, or **BLOCK** — and chains a
    `verification.run` event into the audit log.
 
@@ -159,8 +173,10 @@ jobs:
 
 The composite action ([`action.yml`](action.yml)) runs `quill verify`, publishes a
 commit Status Check, and fails the job on `BLOCK`. If a PR has no
-`.quill/contract.json`, the gate is a no-op with a notice telling you to run
-`quill begin` — Change Control is opt-in per branch.
+`.quill/contract.json`, verification **errors and the job fails closed** (exit 2),
+rather than passing silently — so deleting or omitting the contract cannot wave a
+change through. Initialize Change Control on the base branch (`quill begin`) before
+requiring the check.
 
 ## Trust spine: sign the boundary once, the agent can't forge it
 

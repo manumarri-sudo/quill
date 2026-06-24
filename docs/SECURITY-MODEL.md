@@ -171,14 +171,14 @@ A launch-gate for any README or marketing copy. If a claim is not at least
 
 ### Deployment checklist (what makes the CI gate a real boundary)
 
-All three are required; any one missing drops it back to cooperative-only:
+All four are required; any one missing drops it back to cooperative-only:
 
 1. **Keys off the build machine.** The approver/gate **private** keys never live
    in the repo. Publish the approver **public** key as `QUILL_APPROVER_PUBKEYS`
-   and the gate signing key as `QUILL_GATE_KEY` — repo/org **secrets** a PR
-   cannot read or edit. (A committed `.quill/approvers/*.pub` set is a
-   convenience layer only; it's editable in a PR, so gate-tamper BLOCKs such
-   edits, but the authoritative pin is the secret.)
+   (INLINE PEM, not a path inside the checkout — strict mode rejects an in-repo
+   key path) and the gate signing key as `QUILL_GATE_KEY` — repo/org **secrets** a
+   PR cannot read or edit. (A committed `.quill/approvers/*.pub` set is a
+   convenience layer used only in cooperative mode; strict ignores it entirely.)
 2. **Pin the Action to a published tag** (`uses: manumarri-sudo/quill@v0`), not
    the PR's own checkout (`uses: ./` + `install-from-source`), so a PR can't ship
    a modified gate that judges itself.

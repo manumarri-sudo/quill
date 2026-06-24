@@ -2,8 +2,9 @@ name: "Quill Change Control"
 description: >-
   Verify AI-written diffs against a human-signed perimeter. Enforces the signed
   boundary (forbidden paths and gate-tamper edits BLOCK), scans added lines for
-  secrets, checks approver provenance, and issues a gate-signed Quill Change
-  Passport as a commit Status Check.
+  secrets, checks approver provenance, and issues a Quill Change Passport as a
+  commit Status Check. The passport is gate-signed when a gate key is configured
+  (gate-key + gate-pubkeys); otherwise it is unsigned.
 author: "Manu Marri"
 branding:
   icon: "shield"
@@ -61,10 +62,12 @@ inputs:
     default: ""
   approver-pubkeys:
     description: >-
-      Trusted approver PUBLIC keys (PEM) that may sign the perimeter. Pass from a
-      secret/variable so a PR cannot edit the trust root, e.g.
-      ${{ secrets.QUILL_APPROVER_PUBKEYS }}. The committed .quill/approvers/*.pub
-      set is used in addition.
+      Trusted approver PUBLIC keys (PEM) that may sign the perimeter/contract. Pass
+      INLINE from a secret/variable so a PR cannot edit the trust root, e.g.
+      ${{ secrets.QUILL_APPROVER_PUBKEYS }}. In strict mode (the default) the
+      committed .quill/approvers/*.pub set is IGNORED, and a key path resolving
+      inside the checkout is rejected; only these externally-pinned keys are
+      trusted. In cooperative mode the committed set is used in addition.
     required: false
     default: ""
 

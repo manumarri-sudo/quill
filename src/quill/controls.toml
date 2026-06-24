@@ -64,8 +64,8 @@ quill_event_types = ["tool.attempted", "verdict.allowed", "verdict.blocked", "ve
 [[controls]]
 standard = "EU AI Act Art. 12"
 code = "ART-12-TAMPER-EVIDENT"
-title = "Tamper-resistant records"
-description = """The logs must support post-market monitoring and incident investigation; Quill uses HMAC-SHA256 chaining (each entry signs over the previous entry's MAC plus the canonical payload) so any modification of past entries breaks chain verification on the next `quill audit verify`."""
+title = "Tamper-evident records"
+description = """The logs must support post-market monitoring and incident investigation; Quill uses HMAC-SHA256 chaining (each entry signs over the previous entry's MAC plus the canonical payload) so any modification of past entries breaks chain verification on the next `quill audit verify`. This is locally tamper-EVIDENT (a holder of the HMAC key can rewrite the whole chain), not tamper-PROOF; external anchoring is required for immutability."""
 quill_event_types = ["tool.attempted", "chain.repaired"]
 
 [[controls]]
@@ -85,7 +85,7 @@ quill_event_types = ["tool.attempted"]
 standard = "AIUC-1 Accountability"
 code = "AIUC-E015.2"
 title = "AI agent logging - intermediate steps + tool calls + sub-agents"
-description = """Intermediate steps between input and output are logged, including tool calls, sub-agent actions, and metadata across execution chains. Quill's per-tool-call event with tool_name, args_digest, decision, reason, and HMAC anchor satisfies the published AIUC-1 evidence requirement."""
+description = """Intermediate steps between input and output are logged, including tool calls, sub-agent actions, and metadata across execution chains. Quill's per-tool-call event with tool_name, args_digest, decision, reason, and HMAC anchor PRODUCES EVIDENCE TOWARD the published AIUC-1 requirement; it does not by itself establish compliance, which depends on operational controls and auditor acceptance."""
 quill_event_types = ["tool.attempted", "verdict.allowed", "verdict.blocked", "agent.handoff.out"]
 
 [[controls]]
@@ -133,8 +133,8 @@ quill_event_types = ["session.taint.update", "verdict.blocked"]
 [[controls]]
 standard = "AIUC-1 Reliability"
 code = "AIUC-REL-01"
-title = "Every tool call audited"
-description = """No tool call executes without an audit-log entry. The chain is HMAC-SHA256-linked so any tampering breaks subsequent verifications."""
+title = "Every routed tool call audited"
+description = """Every tool call ROUTED THROUGH Quill's gate (the PreToolUse/MCP hook) emits an audit-log entry before it executes; calls that bypass the hook are not seen. The chain is HMAC-SHA256-linked so any tampering breaks subsequent verifications."""
 quill_event_types = ["tool.attempted"]
 
 [[controls]]
@@ -190,7 +190,7 @@ quill_event_types = ["chain.repaired", "tool.attempted"]
 standard = "NIST AI RMF"
 code = "MEASURE-2.8"
 title = "Privacy risk measured and managed"
-description = """Privacy risks (data exfiltration, secret exposure) are measured. Quill's lethal-trifecta enforcement and (planned v0.3) secret-detection-on-diff close this loop at the tool-call boundary."""
+description = """Privacy risks (data exfiltration, secret exposure) are measured. Quill's lethal-trifecta enforcement and secret-detection-on-diff (26 vendor patterns, scanned on added lines at the merge gate) close this loop at the tool-call and change boundary."""
 quill_event_types = ["session.taint.update", "verdict.blocked"]
 
 [[controls]]
@@ -211,7 +211,7 @@ quill_event_types = ["tool.attempted"]
 standard = "NIST GenAI Profile"
 code = "GENAI-MS-2.6"
 title = "Pre-deployment testing evidence for agent tool surfaces"
-description = """Pre-deployment testing covers agent tool-call surfaces. Quill's `quill audit verify` and `quill doctor` give a per-deployment integrity baseline; the test corpus (598+ unit + integration tests) is the substrate."""
+description = """Pre-deployment testing covers agent tool-call surfaces. Quill's `quill audit verify` and `quill doctor` give a per-deployment integrity baseline; the project's own test corpus (1,100+ unit + integration tests, including adversarial regression tests) is the substrate."""
 quill_event_types = ["chain.repaired"]
 
 # ============================================================================
@@ -401,7 +401,7 @@ auditor_sampling = """Run `quill audit verify` and confirm the chain reports int
 standard = "NIST SP 800-53"
 code = "AU-10-NON-REPUDIATION"
 title = "Non-repudiation of recorded actions and decisions"
-description = """The system binds actions/decisions to an origin such that the actor cannot later deny them. Each verdict is signed by the gate identity and each approval by a human approver key held off the build machine; verification is public, forgery requires the private key."""
+description = """The system binds actions/decisions to an origin such that the actor cannot later deny them. Each verdict CAN be signed by the gate identity (when a gate key is configured) and each approval by a human approver key held off the build machine; verification is public, forgery requires the private key. Verdict signing is opt-in, not on by default."""
 quill_event_types = ["verification.run", "approve.biometric.ok"]
 auditor_sampling = """Confirm the signing keys are stored as CI secrets or hardware (never committed). Verify a passport against the published public key; confirm a third party can validate authenticity without being able to mint a new verdict."""
 
