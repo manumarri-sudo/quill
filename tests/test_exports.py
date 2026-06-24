@@ -36,12 +36,10 @@ def test_every_control_references_real_event_types() -> None:
     """If a refactor renames an event type, the crosswalk shouldn't
     silently keep referring to the old name. Pin every control's
     event-type tuple against the canonical event-type registry."""
-    real = ev.ALL_EVENT_TYPES | {
-        "tool.pin_refused",
-        "notify.dispatched",
-        "approve.biometric.ok",
-        "approve.biometric.deny",
-    }
+    # No exceptions: every control event must be a real, registered event type.
+    # (The old allow-list hid stale names like notify.dispatched / tool.pin_refused
+    # for events the pivot removed - security review honesty finding.)
+    real = ev.ALL_EVENT_TYPES
     for c in CONTROLS:
         for et in c.quill_event_types:
             assert et in real, (

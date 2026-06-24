@@ -225,7 +225,10 @@ def verify(
     root = repo_root(root)
     diff_text = git_diff(contract.base_commit, root, head=head)
     evaluation = policy.evaluate_diff(diff_text, contract.allowed_paths)
-    exceptions = load_exceptions(root)
+    # Strict mode does NOT honor branch-authored exceptions (security review
+    # P0-2): an unsigned .quill/exceptions.json could waive whole classes of
+    # findings with an empty path. Cooperative mode still applies them.
+    exceptions = [] if strict else load_exceptions(root)
 
     applied: list[dict[str, Any]] = []
 
@@ -269,6 +272,16 @@ def verify(
             perimeter.to_dict(), perimeter_mod.signature_path(root), root, env
         )
 
+    # Contract provenance (security review P0-1): the contract supplies the base
+    # commit and the allowed scope the whole verdict rests on, so in strict mode
+    # it must itself be signed by a trusted approver. Otherwise a PR could ship a
+    # fully forged contract (wide scope / a base that hides commits). Gate-tamper
+    # already blocks *editing* it inside the diff; this blocks a forged one that
+    # was committed to the branch.
+    contract_prov = provenance_mod.verify_artifact(
+        contract.to_dict(), root / ".quill" / "contract.sig", root, env
+    )
+
     reasons: list[str] = []
     if unwaived_secrets:
         reasons.append(f"{len(unwaived_secrets)} secret(s) detected on added lines")
@@ -300,6 +313,7 @@ def verify(
         and not provenance.status.is_trustworthy
     )
     strict_no_perimeter = bool(strict and perimeter is None)
+    contract_provenance_blocks = bool(strict and not contract_prov.status.is_trustworthy)
     if provenance_blocks and provenance is not None:
         reasons.append(f"perimeter provenance not established: {provenance.detail}")
     elif perimeter is not None and provenance is not None and not provenance.status.is_trustworthy:
@@ -307,6 +321,10 @@ def verify(
         reasons.append(f"warning: perimeter provenance unverified ({provenance.detail})")
     if strict_no_perimeter:
         reasons.append("strict mode requires a signed perimeter, but none is configured")
+    if contract_provenance_blocks:
+        reasons.append(f"contract provenance not established: {contract_prov.detail}")
+    elif not strict and not contract_prov.status.is_trustworthy:
+        reasons.append(f"warning: contract provenance unverified ({contract_prov.detail})")
 
     block = bool(
         unwaived_secrets
@@ -315,6 +333,7 @@ def verify(
         or gate_tamper
         or provenance_blocks
         or strict_no_perimeter
+        or contract_provenance_blocks
     )
     if block:
         verdict = Verdict.BLOCK

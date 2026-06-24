@@ -4,6 +4,19 @@ All notable changes to `quill` are documented here. The format follows [Keep a C
 
 ## [Unreleased]
 
+### Wave 13 — security-review response: close the contract bypass, stop overclaiming
+
+An independent skeptical review found a complete bypass of the central claim, and it was right. Fixing the root and downgrading every claim the code could not back.
+
+**P0-1: the per-PR contract was forgeable (complete bypass).** The contract supplies the base commit and allowed scope, but it was unsigned and branch-authored. An agent could commit malicious code in M, then a second commit that rewrites `.quill/contract.json` to set `base_commit: M` and a wildcard scope; `git diff M..C` then showed only the contract file, which `evaluate_diff` strips, so the malicious commit vanished from the verification interval and the verdict was PASS even under strict perimeter provenance. **Fix:** `quill verify --strict` now requires the contract itself to be signed by a trusted approver (`quill begin --key`), so a rewritten or forged contract fails its signature and BLOCKs. Reproduced and pinned by `test_p0_1_contract_rebase_after_malicious_commit_blocks`.
+
+**P0-2: unsigned exceptions could waive whole finding classes.** An unsigned `.quill/exceptions.json` with an empty path matched every finding of a type. **Fix:** strict mode no longer honors branch-authored exceptions at all (signed one-use waivers are a follow-up). Pinned by `test_p0_2_unsigned_exceptions_do_not_waive_in_strict`.
+
+**Honesty pass (the review's other half).** Downgraded the README hero from "proves an AI agent's change did only what a human approved" / "the verdict is signed so it can't be faked" / "an adversarial agent cannot fool the gate" to the honest scope: a merge-boundary gate that enforces *structural* authorization (paths, forbidden surfaces, secrets), not semantic correctness, with the deployment requirements and the no-external-audit status stated up front. Fixed `controls.toml`: removed the ISO 42001 "essentially the reference implementation" overclaim and the stale event names (`notify.dispatched`, `tool.pin_refused`) the pivot left behind; the event-pin test now enforces that every control maps to a real registered event, with no allow-list.
+
+**Documented the remaining open items honestly** in `docs/SECURITY-MODEL.md`: the Action-wrapper fail-closed behavior, binary/rename diff coverage, and off-box evidence anchoring are still open, so the CI gate is alpha and not yet audited. 1087 tests pass.
+
+
 ### Wave 12 — the trust spine: sign the boundary once, the agent can't forge it
 
 Answers the two questions that decide whether Change Control is a real control or theater: *can the agent fake its own approval?* and *can a human trust the verdict without watching every change?* Both are now "no", built on Ed25519 (verification uses a public key, forging needs the private key — the asymmetry the symmetric HMAC chain could never provide).

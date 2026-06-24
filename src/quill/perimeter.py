@@ -33,9 +33,13 @@ PERIMETER_VERSION = 1
 # self-tamper attempt (rewrite the boundary, add your own approver key, neuter
 # the workflow that runs the check), so a diff that touches them is always a
 # BLOCK - these change out-of-band via an approver, never inside a gated PR.
-# NB: the per-task contract (.quill/contract.json / .sig) is deliberately NOT
-# here - that file is the legitimate per-PR artifact and is allowed to be
-# committed; its integrity is protected by its own signature, not by this set.
+#
+# The per-task contract (.quill/contract.json / .sig) is deliberately NOT here:
+# its commit legitimately lands inside the base..head range, so gate-tamper would
+# always fire on it. Its integrity is protected by its SIGNATURE instead - the
+# contract supplies the base commit and scope, so `verify --strict` requires it
+# to be signed by a trusted approver (security review P0-1), which is what makes
+# a PR-rewritten or forged contract fail (the signature no longer matches).
 GATE_TAMPER_GLOBS: tuple[str, ...] = (
     ".github/workflows/**",
     ".github/actions/**",

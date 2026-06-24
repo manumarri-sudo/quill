@@ -1,9 +1,15 @@
 # quill
 
-> **Quill Change Control** — the gate at the pull-request merge boundary that
-> proves an AI agent's change did **only** what a human approved. Out-of-scope
-> edits, forbidden paths, and secrets fail the build; in-scope work merges
-> untouched. The verdict is signed, so it can't be faked.
+> **Quill Change Control**: a merge-boundary gate that checks an AI agent's pull
+> request against a **human-signed change policy**. Out-of-scope edits, forbidden
+> paths, and secrets fail the build; in-scope work merges. It enforces
+> *structural* authorization (which paths may change, what is off-limits, no
+> secrets), deterministically, in CI where the agent can't disable it. It does
+> **not** judge whether the code is semantically correct, and it is a real
+> adversarial boundary only with the full deployment in
+> [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) (signed contract, off-box
+> keys, required check). **Alpha**; treat the security model as the source of
+> truth over any one-line claim.
 
 <!-- mcp-name: io.github.manumarri-sudo/quill -->
 
@@ -13,10 +19,13 @@
 [![Typed](https://img.shields.io/badge/typed-strict-blue.svg)](https://mypy.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-An AI agent opens a pull request. Did it do **only** what it was asked to do? Quill
-answers that at the one place it can be enforced — the merge boundary, in CI —
-deterministically, where the agent can't switch the gate off or talk its way past
-it (there's no model in the decision path to jailbreak).
+An AI agent opens a pull request. Did it touch **only** the paths a human
+authorized, and nothing off-limits? Quill answers that at the merge boundary, in
+CI, deterministically (there is no model in the decision path to jailbreak), and
+records a signed verdict. It checks *where* the change went and *whether* it
+leaked secrets; it does not prove the in-scope code is correct or free of a
+backdoor. That is the honest scope, and it is the part a human reviewer most
+often misses on a large agent PR.
 
 ```bash
 # 1. capture the approved task (once, at the start of the work)
@@ -172,13 +181,16 @@ quill guard --key approver.pem --forbid 'migrations/**' --forbid 'src/auth/**'
   approve its own PR, and the approval is dismissed when new code is pushed.
 
 **What this requires to be a real boundary (not optional):** the trust root must
-live where a PR can't edit it — hold the approver/gate **private keys off the
+live where a PR can't edit it. Hold the approver/gate **private keys off the
 build machine** (a repo/org secret: `QUILL_GATE_KEY`, `QUILL_APPROVER_PUBKEYS`),
-**pin the Action to a published tag** (`uses: manumarri-sudo/quill@v0`, not the
-PR's own checkout), and make the **Status Check required** in branch protection.
-With those three in place an adversarial agent cannot fool the gate; without them
-it is honest review automation for a cooperative one. The full threat model and
-the exact deployment checklist are in [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md).
+**sign the contract** (`quill begin --key`) and require it in strict mode,
+**pin the Action to a published tag** (not the PR's own checkout), and make the
+**Status Check required** in branch protection. With those in place the bypasses
+above are closed; without them it is honest review automation for a cooperative
+agent. This has **not yet had an external security audit**, and known remaining
+hardening items (Action-wrapper fail-closed behavior, binary/rename diff
+coverage) are tracked in the security model. Treat
+[docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) as authoritative over this README.
 
 ## The local runtime gate (optional, defense-in-depth)
 

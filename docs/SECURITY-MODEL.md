@@ -184,6 +184,34 @@ All three are required; any one missing drops it back to cooperative-only:
    a modified gate that judges itself.
 3. **Make the Status Check required** in branch protection, with admin-bypass and
    force-push disabled — otherwise a `BLOCK` is merely advisory.
+4. **Sign the contract** with the approver key (`quill begin --key`). The contract
+   supplies the base commit and allowed scope, so an unsigned one is forgeable by
+   the agent (it could move the base to hide commits, or widen scope). In strict
+   mode an unsigned/forged contract is a BLOCK.
+
+### CI gate: known limits and the external-review status
+
+An independent skeptical security review (2026-06-23) found, and we fixed, two
+complete bypasses: an unsigned per-PR contract whose base commit could be moved
+to hide malicious commits (P0-1, now requires a signed contract in strict mode),
+and an unsigned wildcard exceptions file that could waive whole finding classes
+(P0-2, strict mode no longer honors branch-authored exceptions). Both are covered
+by adversarial tests in `tests/test_trust_spine.py`.
+
+Still open, do not rely on the CI gate against a determined adversary until these
+land (tracked from the same review):
+
+- **Action-wrapper fail-closed behavior.** `scripts/quill-passport.sh` should run
+  in a fresh temp dir, fail closed on an internal verifier error (not just BLOCK),
+  and verify the passport signature before reporting success. Until then a
+  pre-seeded passport plus a forced verifier crash is a theoretical fail-open.
+- **Binary / rename diff coverage.** The unified-diff parser can miss a binary
+  addition or a rename *out of* a forbidden path. File inventory should come from
+  `git diff --name-status -z` and evaluate both old and new paths.
+- **Off-box evidence anchoring.** The Merkle transparency tree head is built but
+  not yet anchored off the runner, so a CI passport's MAC is not independently
+  resolvable. There has been **no external security audit** of the full
+  end-to-end construction; treat the CI gate as alpha.
 | Auditor evidence pack | **Partial** | Maps to evidence requests (SOC 2, EU AI Act Art 12-shaped, ISO 42001 A.6.2.8); does not certify compliance by itself. |
 | Enterprise-grade / production-safe | **Not yet** | Alpha, squatted dist name, no external audit. Do not claim. |
 | Cannot be bypassed / agent-proof | **Dangerous** | False - see limits 1-4. Never claim. |

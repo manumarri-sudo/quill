@@ -59,18 +59,21 @@ def _sign_perimeter(repo: Path, priv_pem: str, *, forbidden: tuple[str, ...] = (
     provenance_mod.sign_artifact(p.to_dict(), priv_pem, perimeter_mod.signature_path(repo))
 
 
-def _begin(repo: Path) -> contract_mod.Contract:
+def _begin(repo: Path, priv: str | None = None) -> contract_mod.Contract:
     """Commit the perimeter/approver setup into `base`, then capture a contract.
 
     In a real repo the signed perimeter and approver keys live on the base
     branch (committed once, out of band), so a feature PR's diff never contains
     them. Mirroring that here keeps the setup out of the gated diff; only changes
-    committed *after* this call land in base..HEAD.
+    committed *after* this call land in base..HEAD. When `priv` is given the
+    contract is signed (required for `verify --strict`).
     """
     _git(repo, "add", "-A")
     if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=repo).returncode != 0:
         _git(repo, "commit", "-m", "perimeter setup")
     c, _ = contract_mod.begin("standing perimeter task", allowed_paths=(), root=repo)
+    if priv is not None:
+        provenance_mod.sign_artifact(c.to_dict(), priv, repo / ".quill" / "contract.sig")
     return c
 
 
@@ -99,7 +102,7 @@ def _verify(
 def test_signed_perimeter_in_bounds_passes(repo: Path) -> None:
     priv = _approver(repo)
     _sign_perimeter(repo, priv)
-    contract = _begin(repo)
+    contract = _begin(repo, priv)
     _commit_change(repo, "src/feature.py", "y = 2\n")
     result = _verify(repo, contract)
     assert result.verdict is Verdict.PASS
@@ -112,7 +115,7 @@ def test_approve_once_scale_to_many(repo: Path) -> None:
     priv = _approver(repo)
     _sign_perimeter(repo, priv)
     for i in range(5):
-        contract = _begin(repo)
+        contract = _begin(repo, priv)
         _commit_change(repo, f"src/f{i}.py", f"v = {i}\n")
         assert _verify(repo, contract).verdict is Verdict.PASS
 
@@ -196,7 +199,7 @@ def test_env_pinned_approver_without_committed_dir(
     p.write(repo)
     provenance_mod.sign_artifact(p.to_dict(), priv_pem, perimeter_mod.signature_path(repo))
     monkeypatch.setenv(provenance_mod.APPROVER_ENV, pub_pem)
-    contract = _begin(repo)
+    contract = _begin(repo, priv_pem)
     _commit_change(repo, "src/feature.py", "y = 2\n")
     import os
 
@@ -278,3 +281,69 @@ def test_passport_signed_by_untrusted_gate_key_rejected(repo: Path) -> None:
     passport = passport_mod.sign_passport(passport_mod.build_passport(result), rogue_priv_pem)
     trusted_pub = attest.load_public_key(trusted_gate_pub_pem)
     assert passport_mod.verify_passport(passport, {attest.key_id(trusted_pub): trusted_pub}) is None
+
+
+# --------------------------------------------------------------------------- #
+# Security review P0-1 / P0-2: the contract is the authorization root          #
+# --------------------------------------------------------------------------- #
+
+
+def test_p0_1_contract_rebase_after_malicious_commit_blocks(repo: Path) -> None:
+    """The complete bypass the security review found: an agent commits malicious
+    code in M, then rewrites the signed contract to set base=M (so the diff hides
+    M) and widen scope. The rewritten contract no longer matches its signature,
+    so strict verification BLOCKs."""
+    import json as _json
+
+    priv = _approver(repo)
+    _sign_perimeter(repo, priv)
+    _begin(repo, priv)  # human-signs the contract at begin (writes .quill/contract.sig)
+
+    _commit_change(repo, "src/evil.py", "backdoor = 1\n")  # malicious commit M
+    m_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+    ).stdout.strip()
+
+    # Forge: rewrite the contract to base=M and a wildcard scope, keep the old sig.
+    cpath = repo / ".quill" / "contract.json"
+    data = _json.loads(cpath.read_text())
+    data["base_commit"] = m_sha
+    data["allowed_paths"] = ["**"]
+    cpath.write_text(_json.dumps(data))
+    forged = contract_mod.Contract.from_dict(data)
+
+    result = verify_mod.verify(
+        contract=forged, root=repo, perimeter=perimeter_mod.load(repo), strict=True
+    )
+    assert result.verdict is Verdict.BLOCK
+    assert any("contract provenance" in r for r in result.reasons)
+
+
+def test_unsigned_contract_blocks_in_strict(repo: Path) -> None:
+    priv = _approver(repo)
+    _sign_perimeter(repo, priv)
+    contract = _begin(repo)  # NOT signed
+    _commit_change(repo, "src/feature.py", "y = 2\n")
+    result = _verify(repo, contract, strict=True)
+    assert result.verdict is Verdict.BLOCK
+    assert any("contract provenance" in r for r in result.reasons)
+
+
+def test_p0_2_unsigned_exceptions_do_not_waive_in_strict(repo: Path) -> None:
+    """An unsigned wildcard exceptions file must not waive a finding in strict."""
+    import json as _json
+
+    priv = _approver(repo)
+    _sign_perimeter(repo, priv)
+    # Wildcard 'secret' exception (no path) would waive every secret in cooperative mode.
+    (repo / ".quill" / "exceptions.json").write_text(
+        _json.dumps({"exceptions": [{"type": "secret", "reason": "approved"}]})
+    )
+    contract = _begin(repo, priv)
+    key = "AKIA" + "IOSFODNN7EXAMPLE"
+    _commit_change(repo, "src/config.py", f'KEY = "{key}"\n')
+    # Strict ignores the unsigned exception, so the secret stands -> BLOCK.
+    assert _verify(repo, contract, strict=True).verdict is Verdict.BLOCK
+    # Cooperative mode still honors it (the secret is waived).
+    coop = _verify(repo, contract, strict=False)
+    assert not coop.secret_findings

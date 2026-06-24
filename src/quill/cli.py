@@ -149,13 +149,26 @@ def begin_cmd(
         str | None,
         typer.Option("--approved-by", help="who approved this task (recorded in the contract)."),
     ] = None,
+    key: Annotated[
+        Path | None,
+        typer.Option(
+            "--key",
+            "-k",
+            help="approver PRIVATE key (PEM) to sign the contract. Required for "
+            "`quill verify --strict`: an unsigned contract is forgeable by the agent.",
+        ),
+    ] = None,
 ) -> None:
     """Capture the human-approved task into .quill/contract.json.
 
     Records WHAT was approved, WHERE it may touch (--scope), and the current
-    HEAD as the base commit. `quill verify` later measures the diff against it.
+    HEAD as the base commit. Sign it with --key so `quill verify --strict` can
+    prove a human (not the agent) authored it. `quill verify` measures the diff
+    against it. Commit the contract (and .sig) to the BASE branch, not the PR.
     """
     from quill import contract as contract_mod
+    from quill import perimeter as perimeter_mod
+    from quill import provenance as provenance_mod
 
     try:
         with AuditLog(path=default_audit_path(), hmac_key=_hmac_key()) as audit:
@@ -169,8 +182,24 @@ def begin_cmd(
         console.print(f"[red]cannot create contract:[/red] {e}")
         raise typer.Exit(code=2) from e
 
+    signed = False
+    if key is not None:
+        root = perimeter_mod.perimeter_path(contract_mod.repo_root()).parent.parent
+        provenance_mod.sign_artifact(
+            contract.to_dict(), key.read_text(), root / ".quill" / "contract.sig"
+        )
+        signed = True
+
     out = Console()  # stdout - this is the command's primary output
-    out.print(f"[green]✓[/green] contract [bold]{contract.contract_id}[/bold] written to {path}")
+    out.print(
+        f"[green]✓[/green] contract [bold]{contract.contract_id}[/bold] written to {path}"
+        + ("  [dim](signed)[/dim]" if signed else "")
+    )
+    if not signed:
+        out.print(
+            "  [yellow]unsigned[/yellow] - pass --key <approver.pem> so "
+            "`quill verify --strict` can establish provenance."
+        )
     out.print(f"  task: {contract.task}")
     scope_str = ", ".join(contract.allowed_paths) or "(no path restriction)"
     out.print(f"  scope: {scope_str}")

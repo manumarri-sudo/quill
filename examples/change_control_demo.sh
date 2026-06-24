@@ -37,7 +37,10 @@ mkdir -p .quill/approvers && cp "$W/approver.pem.pub" .quill/approvers/human.pub
   --allow 'src/**' --allow 'README.md' \
   --forbid 'src/auth/**' --forbid 'migrations/**' --approved-by alice | sed 's/^/  /'
 git add -A && git commit -qm "quill: sign perimeter"
-"$Q" begin "sprint: ship the checkout flow" --scope 'src/**' --scope 'README.md' >/dev/null
+# Sign the contract with the approver key so `verify --strict` can prove a human
+# (not the agent) authored the base commit and scope.
+"$Q" begin "sprint: ship the checkout flow" --scope 'src/**' --scope 'README.md' \
+  --key "$W/approver.pem" >/dev/null
 git add -A && git commit -qm "quill: open contract"
 MAIN="$(git rev-parse HEAD)"
 export QUILL_GATE_KEY="$(cat "$W/gate.pem")"
