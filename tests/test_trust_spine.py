@@ -406,3 +406,18 @@ def test_p0_1_composite_rogue_key_plus_base_move_blocks(repo: Path) -> None:
         env={provenance_mod.APPROVER_ENV: human_pub},  # only the human key is pinned
     )
     assert result.verdict is Verdict.BLOCK
+
+
+def test_perimeter_allow_list_is_enforced(repo: Path) -> None:
+    """The signed perimeter allow-list is the outer bound (re-review P0/P1): a
+    contract cannot widen past it. Perimeter allows only src/**; a contract with
+    no restriction still can't authorize a change to docs/."""
+    priv = _approver(repo)
+    p = perimeter_mod.default_perimeter(allowed_paths=("src/**",), approved_by="human")
+    p.write(repo)
+    provenance_mod.sign_artifact(p.to_dict(), priv, perimeter_mod.signature_path(repo))
+    contract = _begin(repo, priv)  # contract allowed_paths = () (no per-task restriction)
+    _commit_change(repo, "docs/readme.md", "x\n")  # outside the perimeter allow-list
+    result = _verify(repo, contract)
+    assert result.verdict is Verdict.BLOCK
+    assert "docs/readme.md" in result.out_of_scope

@@ -174,6 +174,7 @@ class VerifyResult:
     audit_mac: str | None = None
     # Trust spine (all optional so the contract-only path is unchanged):
     provenance: ProvenanceResult | None = None  # was the perimeter signed by a human?
+    contract_provenance: ProvenanceResult | None = None  # was the contract signed by a human?
     forbidden_hits: tuple[str, ...] = ()  # paths the perimeter forbids outright
     gate_tamper_hits: tuple[str, ...] = ()  # edits to the gate's own trust surfaces
     perimeter_id: str | None = None
@@ -271,6 +272,18 @@ def verify(
         provenance = provenance_mod.verify_artifact(
             perimeter.to_dict(), perimeter_mod.signature_path(root), root, env, strict=strict
         )
+        # Enforce the signed perimeter's allow-list (security re-review): the
+        # standing perimeter is the OUTER bound. A path is in effective scope only
+        # if it is allowed by BOTH the contract and the perimeter, so a contract
+        # cannot widen past the boundary a human signed. Empty perimeter allow-list
+        # means "anywhere not forbidden". These join the scope violations.
+        if perimeter.allowed_paths:
+            for p in changed:
+                if (
+                    not any(_glob_hit(p, g) for g in perimeter.allowed_paths)
+                    and p not in unwaived_scope
+                ):
+                    unwaived_scope.append(p)
 
     # Contract provenance (security review P0-1): the contract supplies the base
     # commit and the allowed scope the whole verdict rests on, so in strict mode
@@ -372,6 +385,8 @@ def verify(
                 "perimeter_id": perimeter_id or "",
                 "provenance": provenance.status.value if provenance is not None else "n/a",
                 "provenance_key_id": provenance.key_id if provenance is not None else "",
+                "contract_provenance": contract_prov.status.value,
+                "contract_signer_key_id": contract_prov.key_id or "",
                 "strict": strict,
                 "exceptions_applied": len(applied),
             },
@@ -390,6 +405,7 @@ def verify(
         reasons=tuple(reasons),
         audit_mac=audit_mac,
         provenance=provenance,
+        contract_provenance=contract_prov,
         forbidden_hits=forbidden_hits,
         gate_tamper_hits=gate_tamper,
         perimeter_id=perimeter_id,

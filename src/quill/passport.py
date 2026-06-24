@@ -67,6 +67,12 @@ def build_passport(result: VerifyResult, *, generated_at: str | None = None) -> 
             "strict": result.strict,
             "provenance": result.provenance.status.value if result.provenance else None,
             "provenance_key_id": result.provenance.key_id if result.provenance else None,
+            "contract_provenance": (
+                result.contract_provenance.status.value if result.contract_provenance else None
+            ),
+            "contract_signer_key_id": (
+                result.contract_provenance.key_id if result.contract_provenance else None
+            ),
         },
         "audit": {"verification_run_mac": result.audit_mac},
     }
