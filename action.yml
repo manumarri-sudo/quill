@@ -51,6 +51,14 @@ inputs:
       e.g. ${{ secrets.QUILL_GATE_KEY }}. Never commit this.
     required: false
     default: ""
+  gate-pubkeys:
+    description: >-
+      Trusted gate PUBLIC key(s) (PEM) matching the gate-key. When set, the wrapper
+      re-verifies the passport's own signature before trusting the verdict, so a
+      tampered or unsigned passport fails the job closed. Pass from a secret/variable,
+      e.g. ${{ vars.QUILL_GATE_PUBKEYS }}.
+    required: false
+    default: ""
   approver-pubkeys:
     description: >-
       Trusted approver PUBLIC keys (PEM) that may sign the perimeter. Pass from a
@@ -96,6 +104,7 @@ runs:
         QUILL_HEAD_SHA: ${{ inputs.head-sha }}
         QUILL_STRICT: ${{ inputs.strict }}
         QUILL_GATE_KEY: ${{ inputs.gate-key }}
+        QUILL_GATE_PUBKEYS: ${{ inputs.gate-pubkeys }}
         QUILL_APPROVER_PUBKEYS: ${{ inputs.approver-pubkeys }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: bash "${{ github.action_path }}/scripts/quill-passport.sh"

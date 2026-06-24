@@ -1336,16 +1336,36 @@ def _normalize_diff_path(raw: str) -> str:
     return raw.removeprefix("./")
 
 
+def _parse_diff_git_header(line: str) -> tuple[str | None, str | None]:
+    """Best-effort (old, new) paths from a ``diff --git a/<old> b/<new>`` header.
+
+    Git emits this header for EVERY changed file - text, binary, rename, or a
+    mode-only change - so it is the reliable per-file marker for the inventory.
+    The ``---``/``+++``/rename/Binary lines that follow refine the paths when
+    present; this only has to give a usable fallback (notably for binary files,
+    which carry no ``---``/``+++`` lines at all). Quoted/spaced paths that this
+    heuristic can't split are left to those follow-up lines."""
+    rest = line[len("diff --git ") :].strip()
+    idx = rest.find(" b/")
+    if rest.startswith("a/") and idx != -1:
+        return rest[:idx], rest[idx + 1 :]
+    return None, None
+
+
 def parse_unified_diff(diff_text: str) -> list[DiffFile]:
     """Parse `git diff` output into per-file records with added lines.
 
     Tolerant by design: it tracks file boundaries from `diff --git` headers,
     paths from the `---`/`+++` lines (and rename headers), and new-file line
-    numbers from `@@` hunk headers. Binary-file stanzas yield a DiffFile with
-    no added lines. Anything it cannot interpret is skipped rather than raising,
-    because a parse error must never make the gate fail open silently - callers
-    treat an empty result as "no changes", which is the conservative direction
-    for a PASS gate (no evidence of safety, not proof of it).
+    numbers from `@@` hunk headers. The `diff --git` header seeds the path so a
+    file with no text hunks is still inventoried: binary stanzas (`Binary files
+    a/x and b/y differ`) and mode-only changes yield a DiffFile with no added
+    lines rather than vanishing - a binary blob written anywhere must still be
+    counted against scope and the gate-tamper surfaces. Anything it cannot
+    interpret is skipped rather than raising, because a parse error must never
+    make the gate fail open silently - callers treat an empty result as "no
+    changes", which is the conservative direction for a PASS gate (no evidence
+    of safety, not proof of it).
     """
     files: list[DiffFile] = []
     cur_old: str | None = None
@@ -1376,6 +1396,16 @@ def parse_unified_diff(diff_text: str) -> list[DiffFile]:
     for line in diff_text.splitlines():
         if line.startswith("diff --git "):
             flush()
+            # Seed paths from the header so a file with no `---`/`+++` lines
+            # (binary, mode-only) is still inventoried; later lines refine it.
+            cur_old, cur_new = _parse_diff_git_header(line)
+            continue
+        if line.startswith("Binary files ") and line.rstrip().endswith(" differ"):
+            body = line.rstrip()[len("Binary files ") : -len(" differ")]
+            if " and " in body:
+                old_raw, new_raw = body.rsplit(" and ", 1)
+                cur_old = old_raw if old_raw.strip() != "/dev/null" else cur_old
+                cur_new = new_raw if new_raw.strip() != "/dev/null" else cur_new
             continue
         if line.startswith("new file"):
             status = "added"
@@ -1512,13 +1542,24 @@ def evaluate_diff(diff_text: str, allowed_paths: Sequence[str]) -> DiffEvaluatio
     surfaces: dict[str, list[str]] = {"tests": [], "ci": [], "lockfiles": []}
 
     for f in files:
-        scope_path = f.path or (f.old_path or "")
-        if not path_in_scope(scope_path, allowed):
-            out_of_scope.append(scope_path)
+        # A rename touches BOTH ends: the new location AND the old one it moved
+        # away from. Evaluate each against scope so a rename can't smuggle a file
+        # out of (or into) a protected path - checking only the new path missed
+        # the source side (security re-review P0-4).
+        scope_targets = [f.path or (f.old_path or "")]
+        if f.status == "renamed" and f.old_path and f.old_path != f.path:
+            scope_targets.append(f.old_path)
+        for sp in scope_targets:
+            if sp and not path_in_scope(sp, allowed) and sp not in out_of_scope:
+                out_of_scope.append(sp)
 
-        surface = classify_sensitive_surface(f.path)
-        if surface is not None and f.path not in surfaces[surface]:
-            surfaces[surface].append(f.path)
+        surface_paths = [f.path]
+        if f.status == "renamed" and f.old_path and f.old_path != f.path:
+            surface_paths.append(f.old_path)
+        for sp in surface_paths:
+            surface = classify_sensitive_surface(sp)
+            if surface is not None and sp not in surfaces[surface]:
+                surfaces[surface].append(sp)
 
         for lineno, text in f.added_lines:
             for hit in _secrets.scan(text):

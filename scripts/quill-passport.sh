@@ -6,54 +6,111 @@
 # commit Status Check, exposes the verdict as a step output, and exits 0 for
 # PASS / NEEDS_REVIEW or 1 for BLOCK so the job gates the merge.
 #
+# Fail-closed design (security re-review P0-3): the verdict is read ONLY from a
+# passport this run wrote into a fresh temp dir, never from the repo working
+# tree, so a passport committed into the PR (or left over from a prior step)
+# can never be mistaken for a real verdict. Any unexpected verifier exit, a
+# missing/malformed passport, an unrecognised verdict, or (when a gate public
+# key is configured) a passport whose signature does not verify, all fail the
+# job rather than letting the merge through.
+#
 # Inputs (environment):
 #   QUILL_HEAD          ref to verify against the contract base (default HEAD)
-#   QUILL_PASSPORT_DIR  where passport.{json,md} are written (default .quill)
+#   QUILL_PASSPORT_DIR  where the published passport.{json,md} are copied
+#                       (default .quill); the verdict is NOT trusted from here
+#   QUILL_STRICT        "true" (default) requires a signed perimeter + contract
 #   QUILL_FAIL_ON_BLOCK "true" to exit 1 on BLOCK (default true)
+#   QUILL_GATE_PUBKEYS  trusted gate PUBLIC key(s) (PEM/paths). When set, the
+#                       passport signature MUST verify or the job fails closed.
 #   QUILL_HEAD_SHA      commit SHA to attach the Status Check to (default: git HEAD)
 #   GITHUB_TOKEN        token for the Status Check + PR comment (optional)
 #   GITHUB_REPOSITORY   owner/repo (provided by Actions)
 #   GITHUB_OUTPUT       step-output file (provided by Actions)
 #   GITHUB_STEP_SUMMARY job-summary file (provided by Actions)
 #
-set -uo pipefail
+set -euo pipefail
 
 HEAD_REF="${QUILL_HEAD:-HEAD}"
-PASSPORT_DIR="${QUILL_PASSPORT_DIR:-.quill}"
+PUBLISH_DIR="${QUILL_PASSPORT_DIR:-.quill}"
 FAIL_ON_BLOCK="${QUILL_FAIL_ON_BLOCK:-true}"
 STATUS_CONTEXT="quill/change-control"
 
-# --strict (default on) requires a signed perimeter from a trusted approver, so
-# an unsigned / tampered / absent boundary BLOCKs rather than silently passing.
+# A private temp dir we own: the verifier writes here, and the verdict is read
+# back ONLY from here. Nothing in the repo tree can influence the decision.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/quill.XXXXXX")"
+cleanup() { rm -rf "$WORK"; }
+trap cleanup EXIT
+
+# --strict (default on) requires a signed perimeter AND signed contract from a
+# trusted approver, so an unsigned / tampered / absent boundary BLOCKs rather
+# than silently passing.
 STRICT_FLAG=""
 if [[ "${QUILL_STRICT:-true}" == "true" ]]; then
   STRICT_FLAG="--strict"
 fi
 
-# 1. Run the verifier. It exits 1 on BLOCK; we capture that without aborting so
-#    we can still publish the passport and a Status Check before deciding. The
-#    passport is gate-signed automatically when QUILL_GATE_KEY is in the env
-#    (an off-box CI secret), so reviewers can verify the verdict independently.
-quill verify $STRICT_FLAG --head "$HEAD_REF" --passport-dir "$PASSPORT_DIR" \
-  >/dev/null 2>"$PASSPORT_DIR.err" || true
+# 1. Run the verifier into the temp dir. It exits 1 on BLOCK and 0 on
+#    PASS/NEEDS_REVIEW; any OTHER exit is a crash / bad invocation. Capture the
+#    real exit code without aborting so we can tell BLOCK apart from failure.
+set +e
+quill verify $STRICT_FLAG --head "$HEAD_REF" --passport-dir "$WORK" \
+  >"$WORK/stdout" 2>"$WORK/stderr"
+QUILL_RC=$?
+set -e
 
-PASSPORT_JSON="$PASSPORT_DIR/passport.json"
-PASSPORT_MD="$PASSPORT_DIR/passport.md"
+PASSPORT_JSON="$WORK/passport.json"
+PASSPORT_MD="$WORK/passport.md"
 
-if [[ ! -f "$PASSPORT_JSON" ]]; then
-  echo "::error::quill verify did not produce a passport. stderr:"
-  cat "$PASSPORT_DIR.err" 2>/dev/null || true
+# 2. Fail closed on any non-verdict exit. BLOCK is rc=1 WITH a passport; rc 0/1
+#    are the only sanctioned codes. Anything else (or a missing passport) is an
+#    error, never a pass.
+if [[ "$QUILL_RC" != "0" && "$QUILL_RC" != "1" ]] || [[ ! -f "$PASSPORT_JSON" ]]; then
+  echo "::error::quill verify failed to produce a verdict (rc=$QUILL_RC)"
+  cat "$WORK/stderr" 2>/dev/null || true
   exit 2
 fi
 
-# 2. Read the verdict + reasons from the passport (python is always present).
-VERDICT="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["verdict"])' "$PASSPORT_JSON")"
-EXIT_CODE="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["exit_code"])' "$PASSPORT_JSON")"
+# 3. Read the verdict + reasons from THIS run's passport only.
+read_field() {
+  python -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' \
+    "$PASSPORT_JSON" "$1"
+}
+VERDICT="$(read_field verdict)"
+EXIT_CODE="$(read_field exit_code)"
 REASONS="$(python -c 'import json,sys; print("; ".join(json.load(open(sys.argv[1]))["reasons"]))' "$PASSPORT_JSON")"
+
+# 3a. The verdict must be one Quill actually emits. A malformed / truncated /
+#     hand-crafted passport that decodes to anything else fails closed.
+case "$VERDICT" in
+  PASS | NEEDS_REVIEW | BLOCK) ;;
+  *)
+    echo "::error::unrecognised verdict '$VERDICT' in passport; failing closed"
+    exit 2
+    ;;
+esac
+
+# 3b. If a gate public key is configured, the passport's signature MUST verify.
+#     This binds the verdict to the off-box gate identity: a passport whose body
+#     was edited (e.g. a flipped verdict) or signed by an untrusted key fails the
+#     job. Without a configured pubkey we cannot check a signature, so we do not
+#     pretend to - the deployment checklist calls for setting it in CI.
+if [[ -n "${QUILL_GATE_PUBKEYS:-}" ]]; then
+  if ! quill verify-passport "$PASSPORT_JSON" >/dev/null 2>"$WORK/sig.err"; then
+    echo "::error::passport signature did not verify against the trusted gate key"
+    cat "$WORK/sig.err" 2>/dev/null || true
+    exit 2
+  fi
+fi
 
 echo "Quill verdict: $VERDICT ($REASONS)"
 
-# 3. Step output (so later steps / the job can branch on the verdict).
+# 4. Publish the verified passport to the repo-visible dir for humans/tooling.
+#    This is a copy of the artifact we already trusted, not the source of truth.
+mkdir -p "$PUBLISH_DIR"
+cp "$PASSPORT_JSON" "$PUBLISH_DIR/passport.json"
+[[ -f "$PASSPORT_MD" ]] && cp "$PASSPORT_MD" "$PUBLISH_DIR/passport.md"
+
+# 5. Step output (so later steps / the job can branch on the verdict).
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     echo "verdict=$VERDICT"
@@ -61,18 +118,18 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   } >>"$GITHUB_OUTPUT"
 fi
 
-# 4. Job summary: the full markdown passport, visible on the PR's Checks tab.
+# 6. Job summary: the full markdown passport, visible on the PR's Checks tab.
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" && -f "$PASSPORT_MD" ]]; then
   cat "$PASSPORT_MD" >>"$GITHUB_STEP_SUMMARY"
 fi
 
-# 5. Commit Status Check. PASS / NEEDS_REVIEW -> success (NEEDS_REVIEW is a soft
+# 7. Commit Status Check. PASS / NEEDS_REVIEW -> success (NEEDS_REVIEW is a soft
 #    signal); BLOCK -> failure. Best-effort: a missing token just skips it.
 case "$VERDICT" in
   BLOCK) STATE="failure" ;;
   *)     STATE="success" ;;
 esac
-SHA="${QUILL_HEAD_SHA:-$(git rev-parse HEAD 2>/dev/null)}"
+SHA="${QUILL_HEAD_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}"
 if [[ -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_REPOSITORY:-}" && -n "$SHA" ]]; then
   DESC="$VERDICT: ${REASONS:0:130}"
   python - "$STATE" "$DESC" "$SHA" <<'PY' || echo "::warning::could not publish Status Check"
@@ -101,7 +158,7 @@ print("published Status Check:", state)
 PY
 fi
 
-# 6. Exit code: fail the job only on BLOCK (when fail-on-block is on).
+# 8. Exit code: fail the job only on BLOCK (when fail-on-block is on).
 if [[ "$VERDICT" == "BLOCK" && "$FAIL_ON_BLOCK" == "true" ]]; then
   exit 1
 fi
