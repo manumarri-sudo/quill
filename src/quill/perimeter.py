@@ -19,6 +19,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -121,16 +122,98 @@ class Perimeter:
         """True if `path` matches any forbidden glob (the gate-tamper set is
         always included, even if a hand-edited perimeter dropped it)."""
         globs = set(self.forbidden_paths) | set(GATE_TAMPER_GLOBS)
-        return any(_glob_hit(path, g) for g in globs)
+        return any(deny_hit(path, g) for g in globs)
 
 
-def _glob_hit(path: str, glob: str) -> bool:
+# Common Cyrillic / Greek (and a few Latin) glyphs that are visually identical to
+# an ASCII letter. An attacker uses one (e.g. Cyrillic "а") to name `src/аuth/`
+# so it reads as the forbidden `src/auth/` but is a distinct codepoint a naive
+# matcher misses. We fold these to their ASCII look-alike on the DENY side only,
+# so a homoglyph of a forbidden surface still matches. (Not exhaustive - Unicode
+# has thousands of confusables; this covers the realistic, demonstrated set.)
+_CONFUSABLES = {
+    "а": "a",
+    "е": "e",
+    "о": "o",
+    "р": "p",
+    "с": "c",
+    "у": "y",
+    "х": "x",
+    "ѕ": "s",
+    "і": "i",
+    "ј": "j",
+    "һ": "h",
+    "ԁ": "d",
+    "ӏ": "l",
+    "А": "A",
+    "Е": "E",
+    "О": "O",
+    "Р": "P",
+    "С": "C",
+    "Х": "X",
+    "Β": "B",
+    "Α": "A",
+    "Ε": "E",
+    "Ο": "O",
+    "Ρ": "P",
+    "Τ": "T",
+    "α": "a",
+    "ο": "o",
+    "ν": "v",
+    "ι": "i",
+    "κ": "k",
+    "ρ": "p",
+    "τ": "t",
+    "Ι": "I",
+    "Κ": "K",
+    "Μ": "M",
+    "Ν": "N",
+    "Υ": "Y",
+    "Χ": "X",
+    "Ѕ": "S",
+    "Ӏ": "I",
+}
+
+
+def _fold(s: str) -> str:
+    """Normalize the way a case-insensitive filesystem effectively does: NFKC to
+    collapse compatibility forms, then casefold for Unicode-aware case folding.
+    `fnmatch` uses os.path.normcase, which is identity on macOS/Linux, so it is
+    case-SENSITIVE even on a case-insensitive FS - this makes folding explicit
+    and deterministic across platforms."""
+    return unicodedata.normalize("NFKC", s).casefold()
+
+
+def _confusable_skeleton(s: str) -> str:
+    return "".join(_CONFUSABLES.get(c, c) for c in s)
+
+
+def _glob_hit(path: str, glob: str, *, casefold: bool = False) -> bool:
     # Support "dir/**" prefix semantics in addition to fnmatch's flat globbing,
     # so "src/auth/**" matches "src/auth/x/y.py".
+    if casefold:
+        path, glob = _fold(path), _fold(glob)
     if glob.endswith("/**"):
         prefix = glob[:-3]
         return path == prefix or path.startswith(prefix + "/")
     return fnmatch.fnmatch(path, glob)
+
+
+def deny_hit(path: str, glob: str) -> bool:
+    """Deny-side path match (forbidden + gate-tamper surfaces).
+
+    Deliberately over-matches, because a deny check must fail safe: it folds case
+    + compatibility forms (`src/Auth` == `src/auth` on a case-insensitive FS) AND
+    maps common homoglyphs to ASCII (`src/аuth` -> `src/auth`), so a variant that
+    resolves to - or is meant to pass for - a protected path still BLOCKs. The
+    ALLOW side stays strict (see policy._path_matches / the perimeter allow-list),
+    so the two asymmetries squeeze a case/lookalike attack from both ends: it is
+    caught here, or it falls out of the allow-list as out-of-scope. (Security
+    red-team: case-fold + homoglyph escape of the forbid glob.)"""
+    if _glob_hit(path, glob, casefold=True):
+        return True
+    skel = _confusable_skeleton(path)
+    return skel != path and _glob_hit(skel, glob, casefold=True)
 
 
 def _perimeter_id(allowed: Sequence[str], forbidden: Sequence[str], created: str) -> str:

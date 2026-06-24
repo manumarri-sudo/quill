@@ -30,7 +30,7 @@ from quill import policy
 from quill import provenance as provenance_mod
 from quill.contract import Contract, head_sha, repo_root
 from quill.errors import QuillError
-from quill.perimeter import GATE_TAMPER_GLOBS, Perimeter, _glob_hit
+from quill.perimeter import GATE_TAMPER_GLOBS, Perimeter, _glob_hit, deny_hit
 from quill.provenance import ProvenanceResult
 
 if TYPE_CHECKING:
@@ -195,7 +195,7 @@ def _gate_tamper_hits(diff_text: str) -> tuple[str, ...]:
     perimeter edits this check exists to catch.
     """
     paths = {f.path for f in policy.parse_unified_diff(diff_text)}
-    return tuple(sorted(p for p in paths if any(_glob_hit(p, g) for g in GATE_TAMPER_GLOBS)))
+    return tuple(sorted(p for p in paths if any(deny_hit(p, g) for g in GATE_TAMPER_GLOBS)))
 
 
 def verify(
