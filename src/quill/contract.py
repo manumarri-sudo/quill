@@ -102,14 +102,16 @@ class Contract:
     contract_id: str
     approved_by: str | None = None
     expires_at: str | None = None  # ISO-8601; the approval lapses after this
+    repo: str | None = None  # e.g. "owner/name"; binds the approval to one repo
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["allowed_paths"] = list(self.allowed_paths)
-        # Omit expires_at when unset so a contract WITHOUT an expiry serializes
-        # exactly as before this field existed - keeping older signatures valid.
-        if self.expires_at is None:
-            d.pop("expires_at", None)
+        # Omit optional fields when unset so a contract WITHOUT them serializes
+        # exactly as before they existed - keeping older signatures valid.
+        for opt in ("expires_at", "repo"):
+            if getattr(self, opt) is None:
+                d.pop(opt, None)
         return d
 
     @classmethod
@@ -125,6 +127,7 @@ class Contract:
                 contract_id=str(data.get("contract_id", "")),
                 approved_by=data.get("approved_by"),
                 expires_at=data.get("expires_at"),
+                repo=data.get("repo"),
             )
         except (KeyError, TypeError, ValueError) as e:
             msg = f"malformed contract: {e}"
@@ -200,6 +203,7 @@ def begin(
     root: Path | None = None,
     approved_by: str | None = None,
     expires_in_days: int | None = None,
+    repo: str | None = None,
     audit: AuditLog | None = None,
     session_id: str = "quill-change-control",
 ) -> tuple[Contract, Path]:
@@ -236,6 +240,7 @@ def begin(
         contract_id=_contract_id(task, base, created, allowed_paths),
         approved_by=approved_by,
         expires_at=expires_at,
+        repo=repo or None,
     )
     path = contract.write(root)
 

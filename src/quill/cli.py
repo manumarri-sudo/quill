@@ -166,6 +166,15 @@ def begin_cmd(
             "BLOCKs so a stale contract can't authorize work indefinitely.",
         ),
     ] = None,
+    repo: Annotated[
+        str | None,
+        typer.Option(
+            "--repo",
+            help="bind this approval to a repository (owner/name). `quill verify "
+            "--strict` then BLOCKs if run elsewhere, so a signed contract can't be "
+            "replayed across repos. Defaults to $GITHUB_REPOSITORY when present.",
+        ),
+    ] = None,
 ) -> None:
     """Capture the human-approved task into .quill/contract.json.
 
@@ -185,6 +194,7 @@ def begin_cmd(
                 allowed_paths=tuple(scope or ()),
                 approved_by=approved_by,
                 expires_in_days=expires_in,
+                repo=repo or os.environ.get("GITHUB_REPOSITORY"),
                 audit=audit,
             )
     except QuillError as e:

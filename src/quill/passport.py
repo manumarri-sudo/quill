@@ -47,6 +47,7 @@ def build_passport(result: VerifyResult, *, generated_at: str | None = None) -> 
             "approved_by": c.approved_by,
             "created_at": c.created_at,
             "expires_at": c.expires_at,
+            "repo": c.repo,
         },
         "base_commit": result.base_commit,
         "head_commit": result.head_commit,

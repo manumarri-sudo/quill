@@ -103,6 +103,40 @@ def test_malformed_expiry_blocks_in_strict(repo: Path) -> None:
     assert any("malformed" in r for r in result.reasons), result.reasons
 
 
+def _sign_perimeter_and_commit(repo: Path, priv_pem: str) -> perimeter_mod.Perimeter:
+    perim = perimeter_mod.default_perimeter(allowed_paths=("src/**",), approved_by="human")
+    perim.write(repo)
+    provenance_mod.sign_artifact(perim.to_dict(), priv_pem, perimeter_mod.signature_path(repo))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "perimeter")
+    return perim
+
+
+def test_contract_bound_to_other_repo_blocks_in_strict(repo: Path) -> None:
+    """A contract bound to owner/A must not authorize a change in owner/B (H-5)."""
+    priv_pem, pub_pem = attest.generate_keypair()
+    perim = _sign_perimeter_and_commit(repo, priv_pem)
+    c, _ = contract_mod.begin("task", allowed_paths=["src/**"], root=repo, repo="owner/A")
+    provenance_mod.sign_artifact(c.to_dict(), priv_pem, repo / ".quill" / "contract.sig")
+    env = {provenance_mod.APPROVER_ENV: pub_pem, "QUILL_REPO_ID": "owner/B"}
+    result = verify_mod.verify(contract=c, root=repo, perimeter=perim, strict=True, env=env)
+    assert result.verdict is Verdict.BLOCK
+    assert any("bound to repo" in r for r in result.reasons), result.reasons
+
+
+def test_contract_bound_to_matching_repo_passes_strict(repo: Path) -> None:
+    priv_pem, pub_pem = attest.generate_keypair()
+    perim = _sign_perimeter_and_commit(repo, priv_pem)
+    c, _ = contract_mod.begin("task", allowed_paths=["src/**"], root=repo, repo="owner/A")
+    provenance_mod.sign_artifact(c.to_dict(), priv_pem, repo / ".quill" / "contract.sig")
+    (repo / "src" / "app.py").write_text("x = 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "edit")
+    env = {provenance_mod.APPROVER_ENV: pub_pem, "QUILL_REPO_ID": "owner/A"}
+    result = verify_mod.verify(contract=c, root=repo, perimeter=perim, strict=True, env=env)
+    assert result.verdict is Verdict.PASS, result.reasons
+
+
 def test_unexpired_signed_contract_passes_strict(repo: Path) -> None:
     priv_pem, pub_pem = attest.generate_keypair()
     perim = perimeter_mod.default_perimeter(allowed_paths=("src/**",), approved_by="human")

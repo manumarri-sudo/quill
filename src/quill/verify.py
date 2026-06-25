@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import enum
 import json
+import os
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -434,6 +435,30 @@ def verify(
     )
     strict_no_perimeter = bool(strict and perimeter is None)
     contract_provenance_blocks = bool(strict and not contract_prov.status.is_trustworthy)
+    # Repository binding (security review H-5): a contract bound to "owner/name"
+    # must not authorize a change in a DIFFERENT repo, so a signed contract can't
+    # be replayed across repos/forks that share the approver trust root. The
+    # expected repo comes from QUILL_REPO_ID (or GITHUB_REPOSITORY). When the
+    # contract names a repo but we can't determine the current one, strict refuses
+    # rather than assuming a match.
+    _env = env if env is not None else dict(os.environ)
+    expected_repo = (_env.get("QUILL_REPO_ID") or _env.get("GITHUB_REPOSITORY") or "").strip()
+    repo_mismatch = bool(contract.repo and contract.repo != expected_repo)
+    repo_blocks = bool(strict and repo_mismatch)
+    if repo_blocks:
+        if expected_repo:
+            reasons.append(
+                f"contract is bound to repo {contract.repo!r}, but this is {expected_repo!r}"
+            )
+        else:
+            reasons.append(
+                f"contract is bound to repo {contract.repo!r}, but the current repo is unknown (set QUILL_REPO_ID)"
+            )
+    elif repo_mismatch:
+        reasons.append(
+            f"warning: contract repo {contract.repo!r} != {expected_repo or 'unknown'} (not enforced; cooperative mode)"
+        )
+
     contract_expired = contract.is_expired()
     contract_expiry_malformed = contract.expiry_is_malformed()
     contract_expiry_blocks = bool(strict and (contract_expired or contract_expiry_malformed))
@@ -474,6 +499,7 @@ def verify(
         or strict_no_perimeter
         or contract_provenance_blocks
         or contract_expiry_blocks
+        or repo_blocks
     )
     if block:
         verdict = Verdict.BLOCK
