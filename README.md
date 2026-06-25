@@ -112,13 +112,18 @@ Calibration matters more than marketing.
 ```bash
 quill begin "Add rate-limiting to the login endpoint" \
             --scope "src/auth/**" --scope "tests/auth/**" \
-            --approved-by alice
+            --approved-by alice \
+            --key approver.pem \
+            --expires-in 7 --repo owner/repo
 ```
 
 Writes `.quill/contract.json`: the approved task (text or a URL to a ticket), the
 `allowed_paths` scope (globs, directory prefixes, or exact paths), the base commit
-the change starts from, and a `contract_id`. Commit this file to the branch — it is
-the fixed record the diff is later measured against, and the Change Passport cites it.
+the change starts from, and a `contract_id`. `--key` signs it so `verify --strict`
+can prove a human authored it (required in strict mode); `--expires-in` sets a lapse
+deadline; `--repo` binds the approval to one repository so a signed contract can't be
+replayed elsewhere. Commit the contract (and `.sig`) to the branch — it is the fixed
+record the diff is later measured against, and the Change Passport cites it.
 
 ### 2. `quill verify` — gate the diff
 
@@ -136,7 +141,8 @@ quill verify                 # local/cooperative: advisory, forgeable by the age
 2. matches every changed path (both ends of a rename) against the contract scope,
 3. scans added lines for the 26 vendor-format secret patterns in
    [`src/quill/secrets.py`](src/quill/secrets.py),
-4. classifies sensitive surfaces (CI/workflow files, lockfiles, test deletions),
+4. classifies sensitive surfaces (CI/workflow files, lockfiles, test deletions,
+   git configuration like `.gitattributes` that controls diff visibility),
 5. applies any logged exceptions in `.quill/exceptions.json` (ignored entirely in
    strict mode — an unsigned waiver file cannot weaken a strict verdict),
 6. composes a verdict — **PASS**, **NEEDS_REVIEW**, or **BLOCK** — and chains a
@@ -170,15 +176,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }   # full history so the base commit resolves
-      - uses: manumarri-sudo/quill@v0   # runs `quill verify`, publishes a Status Check
+      - uses: manumarri-sudo/quill@v0
+        with:
+          strict: "true"                          # enforced mode (default)
+          approver-pubkeys: ${{ secrets.QUILL_APPROVER_PUBKEYS }}
+          gate-key: ${{ secrets.QUILL_GATE_KEY }}
+          gate-pubkeys: ${{ vars.QUILL_GATE_PUBKEYS }}
 ```
 
-The composite action ([`action.yml`](action.yml)) runs `quill verify`, publishes a
-commit Status Check, and fails the job on `BLOCK`. If a PR has no
-`.quill/contract.json`, verification **errors and the job fails closed** (exit 2),
-rather than passing silently — so deleting or omitting the contract cannot wave a
-change through. Initialize Change Control on the base branch (`quill begin`) before
-requiring the check.
+The composite action ([`action.yml`](action.yml)) runs `quill verify --strict`,
+publishes a commit Status Check, and fails the job on `BLOCK`. The approver public
+key and gate signing key come from repo/org secrets a PR cannot read or edit — that is
+what makes the trust root external. If a PR has no `.quill/contract.json`,
+verification **errors and the job fails closed** (exit 2), rather than passing
+silently — so deleting or omitting the contract cannot wave a change through.
+Initialize Change Control on the base branch (`quill begin --key`) before requiring
+the check.
 
 ## Trust spine: sign the boundary once, the agent can't forge it
 
