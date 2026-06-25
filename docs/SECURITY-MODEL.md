@@ -277,6 +277,32 @@ added `.gitattributes` surface detection:
   enforcement uses `datetime.now()`; the README now states this honestly
   (an explicit human-set deadline, not a heuristic).
 
+A sixth pass (2026-06-25, deployment-path review, scored 4.5/10) exposed gaps
+between the source code and what a user can actually deploy:
+
+- **Base-commit option injection (H-1, closed).** An untrusted
+  `contract.base_commit` like `--output=/path` was passed to git where it could
+  be interpreted as an option. `verify()` now validates it as a hex SHA before
+  any git call; strict BLOCKs, cooperative falls back to no base.
+  `tests/test_security_regressions.py::TestH1BaseCommitOptionInjection`.
+- **Renamed-file secret evasion (H-4, closed).** A 100% rename produces no
+  added lines in the diff, so secrets in renamed files escaped the added-line
+  scanner. The verifier now reads the destination blob directly and runs the
+  secret patterns over it.
+  `tests/test_security_regressions.py::TestH4RenameSecretDetection`.
+- **Glob matcher stack overflow (M-2, closed).** The recursive segment-aware
+  glob matcher hit `RecursionError` on paths with 1600+ segments. Rewritten as
+  iterative bottom-up DP with O(n*m) worst case.
+  `tests/test_security_regressions.py::TestM2DeepPathGlob`.
+- **Wrapper strict head_commit binding (H-3, closed).** In strict mode the
+  wrapper now requires the passport to contain a `head_commit` SHA, so an
+  empty value can't bypass the candidate-binding check.
+- **Dogfood workflow fail-open (C-2, closed).** The skip-on-missing-contract
+  step (which was fail-open: GitHub reports skipped jobs as success) and
+  `continue-on-error` were removed; the Action fails closed on missing contract.
+- **Action version default (C-1, closed in source).** `action.yml` now defaults
+  to `>=0.3.0` so the Change Control engine is required.
+
 Genuinely still open — do not rely on the CI gate against a determined adversary
 until these land:
 
@@ -290,11 +316,10 @@ until these land:
   alone. The Critical rename-out case that previously hid behind NEEDS_REVIEW now
   BLOCKs, but a strict deployment that must HARD-stop on sensitive surfaces needs
   the approval gate wired up.
-- **Action supply chain.** The Action pins `quillx` to an exact version
-  (`==0.2.0a5` by default) and the wrapper validates the passport from a fresh
-  temp dir, but the third-party `actions/setup-python` and `actions/checkout` are
-  referenced by mutable major tags; pin exact versions/digests in a hardened
-  deployment.
+- **Action supply chain.** The Action specifies `quillx>=0.3.0` by default
+  and the wrapper validates the passport from a fresh temp dir, but the
+  third-party `actions/setup-python` and `actions/checkout` are referenced by
+  mutable major tags; pin exact versions/digests in a hardened deployment.
 
 - **Off-box evidence anchoring.** The Merkle transparency tree head is built but
   not yet anchored off the runner, so a CI passport's MAC is not independently

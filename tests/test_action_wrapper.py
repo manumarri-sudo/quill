@@ -95,18 +95,26 @@ def test_committed_passport_cannot_fake_a_pass(repo: tuple[Path, dict[str, str]]
     assert "PAYLOAD.txt" in published["evidence"]["out_of_scope"]
 
 
-def _install_fake_quill(bin_dir: Path, *, rc: int, verdict: str, exit_code: int) -> None:
+def _install_fake_quill(
+    bin_dir: Path,
+    *,
+    rc: int,
+    verdict: str,
+    exit_code: int,
+    head_commit: str = "",
+) -> None:
     """A stand-in `quill` that writes a passport with the given verdict/exit_code
     into --passport-dir and exits with `rc`, to drive the wrapper's evidence-
     consistency check without depending on the real verifier's behavior."""
     bin_dir.mkdir(parents=True, exist_ok=True)
     fake = bin_dir / "quill"
+    hc_field = f',"head_commit":"{head_commit}"' if head_commit else ""
     fake.write_text(
         "#!/usr/bin/env bash\n"
         'dir="."; prev=""\n'
         'for a in "$@"; do [[ "$prev" == "--passport-dir" ]] && dir="$a"; prev="$a"; done\n'
         'mkdir -p "$dir"\n'
-        f'printf \'{{"verdict":"{verdict}","exit_code":{exit_code},"reasons":["fake"]}}\' '
+        f'printf \'{{"verdict":"{verdict}","exit_code":{exit_code},"reasons":["fake"]{hc_field}}}\' '
         '> "$dir/passport.json"\n'
         'printf "# passport\\n" > "$dir/passport.md"\n'
         f"exit {rc}\n"
@@ -170,7 +178,7 @@ def test_strict_requires_gate_signature_by_default(repo: tuple[Path, dict[str, s
         pytest.skip("wrapper script not present")
     root, env = repo
     bin_dir = root.parent / "fakebin_pass"
-    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0)
+    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0, head_commit="abc1234")
     proc = _wrapper(
         root,
         env,
@@ -186,7 +194,7 @@ def test_strict_unsigned_evidence_opt_out_is_explicit(repo: tuple[Path, dict[str
         pytest.skip("wrapper script not present")
     root, env = repo
     bin_dir = root.parent / "fakebin_pass2"
-    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0)
+    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0, head_commit="abc1234")
     proc = _wrapper(
         root,
         env,

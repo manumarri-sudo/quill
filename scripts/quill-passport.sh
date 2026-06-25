@@ -143,8 +143,13 @@ fi
 
 # 3c. Candidate binding: the passport must describe the SAME commit the Status
 #     Check reports against, so evidence can't identify a different candidate
-#     than the one being gated (security review H-6).
+#     than the one being gated (security review H-6). In strict mode the passport
+#     MUST contain a valid head_commit; an empty one bypasses the binding check.
 HEAD_COMMIT="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("head_commit") or "")' "$PASSPORT_JSON")"
+if [[ -n "$STRICT_FLAG" && -z "$HEAD_COMMIT" ]]; then
+  echo "::error::strict mode requires the passport to contain a head_commit SHA; failing closed."
+  exit 2
+fi
 if [[ -n "${QUILL_HEAD_SHA:-}" && -n "$HEAD_COMMIT" && "$HEAD_COMMIT" != "$QUILL_HEAD_SHA" ]]; then
   echo "::error::candidate mismatch: passport head_commit=$HEAD_COMMIT but status SHA=$QUILL_HEAD_SHA; failing closed."
   exit 2

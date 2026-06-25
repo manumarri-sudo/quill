@@ -2,6 +2,14 @@ name: quill-change-control
 
 # Gate every pull request: verify the diff against the human-approved contract
 # (.quill/contract.json) and publish a Change Passport as a Status Check.
+#
+# ⚠ DOGFOOD CONFIGURATION: This workflow uses `uses: ./` and `install-from-source`
+# because this repo IS the Quill source — we verify with HEAD's own code. A
+# CONSUMER of Quill should NEVER do this; pin a published tag instead:
+#
+#   uses: manumarri-sudo/quill@v0
+#
+# See README.md and docs/SECURITY-MODEL.md for the secure deployment checklist.
 on:
   pull_request:
     branches: [main]
@@ -20,23 +28,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Skip when no contract is present
-        id: guard
-        run: |
-          if [[ -f .quill/contract.json ]]; then
-            echo "have_contract=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "have_contract=false" >>"$GITHUB_OUTPUT"
-            echo "::notice::No .quill/contract.json found - run 'quill begin' and commit the contract to enable Change Control."
-          fi
-
+      # No skip-on-missing-contract: the Action itself fails closed (exit 2)
+      # when no contract exists. Skipping was a fail-open: GitHub reports
+      # skipped jobs as successful, so a PR that deletes the contract would
+      # pass the required check.
       - name: Quill Change Control
-        if: steps.guard.outputs.have_contract == 'true'
         id: quill
-        # install-from-source runs THIS repo's checkout as the gate, which is only
-        # safe when the repo dogfooding the action is also the one that owns it.
-        # Consumers should instead pin a published tag (uses: manumarri-sudo/quill@v0)
-        # so a PR cannot modify the gate that judges it.
+        # install-from-source: ONLY safe for the repo that owns the Action.
+        # Consumers pin a published tag so a PR cannot modify the gate.
         uses: ./
         with:
           install-from-source: "true"
@@ -44,31 +43,11 @@ jobs:
           head-sha: ${{ github.event.pull_request.head.sha }}
           fail-on-block: "true"
           strict: "true"
-          # The trust root lives in secrets so a PR cannot edit it. Set these in
-          # repo/org settings; absent, strict mode BLOCKs (no established perimeter).
           gate-key: ${{ secrets.QUILL_GATE_KEY }}
           gate-pubkeys: ${{ vars.QUILL_GATE_PUBKEYS }}
           approver-pubkeys: ${{ secrets.QUILL_APPROVER_PUBKEYS }}
-          # This repo dogfoods without a gate key configured; accept report-grade
-          # unsigned evidence explicitly rather than failing the self-check.
+          # Dogfood without a gate key: accept report-grade unsigned evidence.
           allow-unsigned-evidence: "true"
 
-      # The other root of trust: require a human (non-author) GitHub approval on
-      # the current head. Either this OR a signed perimeter is sufficient; run
-      # both for defense in depth. Soft here (continue-on-error) so a repo using
-      # only the signed-perimeter path is not forced to require reviews too.
-      - name: Require human PR approval (optional second root of trust)
-        if: steps.guard.outputs.have_contract == 'true'
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          pip install -e . >/dev/null 2>&1 || pip install quillx >/dev/null 2>&1
-          quill check-approval \
-            --pr ${{ github.event.pull_request.number }} \
-            --head-sha ${{ github.event.pull_request.head.sha }} \
-            --author ${{ github.event.pull_request.user.login }}
-
       - name: Report verdict
-        if: steps.guard.outputs.have_contract == 'true'
         run: echo "Quill verdict was ${{ steps.quill.outputs.verdict }}"

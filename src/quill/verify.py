@@ -19,6 +19,7 @@ from __future__ import annotations
 import enum
 import json
 import os
+import re
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -244,6 +245,39 @@ class VerifyResult:
         return self.inventory_paths or self.evaluation.changed_paths
 
 
+_HEX_SHA_RE = re.compile(r"^[0-9a-f]{7,64}$")
+
+
+def _is_hex_sha(ref: str) -> bool:
+    return bool(_HEX_SHA_RE.match(ref))
+
+
+def _block_result(
+    contract: Contract, reason: str, *, strict: bool = False
+) -> VerifyResult:
+    """Produce a minimal BLOCK result for early-exit validation failures."""
+    empty_eval = policy.DiffEvaluation(
+        files=(),
+        out_of_scope=(),
+        secret_findings=(),
+        sensitive_surfaces={},
+        allowed_paths=tuple(contract.allowed_paths),
+    )
+    return VerifyResult(
+        verdict=Verdict.BLOCK,
+        contract=contract,
+        evaluation=empty_eval,
+        base_commit=contract.base_commit,
+        head_commit=None,
+        out_of_scope=(),
+        secret_findings=(),
+        sensitive_surfaces={},
+        exceptions_applied=(),
+        reasons=(reason,),
+        strict=strict,
+    )
+
+
 def verify(
     *,
     contract: Contract,
@@ -270,6 +304,25 @@ def verify(
     the perimeter itself) are always a BLOCK, perimeter or not.
     """
     root = repo_root(root)
+
+    # Validate base_commit before passing it to git. The contract is untrusted
+    # until its provenance is checked (below), and a crafted base_commit like
+    # "--output=/path" could be interpreted as a git option. Resolve to a full
+    # hex SHA first; reject anything that doesn't look like one.
+    base = contract.base_commit
+    if base is not None:
+        base = base.strip()
+        if not _is_hex_sha(base):
+            base = _resolve_sha(root, base)
+            if not _is_hex_sha(base):
+                if strict:
+                    return _block_result(
+                        contract,
+                        f"contract base_commit {contract.base_commit!r} is not a valid commit SHA",
+                        strict=strict,
+                    )
+                base = None
+
     # Resolve the candidate to ONE concrete SHA and use it for the diff, the
     # inventory, and the recorded head, so evaluated == recorded (security review:
     # candidate identity mismatch).
@@ -279,7 +332,7 @@ def verify(
     # lines from the scanner (security review H-2). Real binaries become text
     # hunks here; the authoritative inventory below, not this diff, drives path
     # policy, so that is only a secret-scan input.
-    diff_text = git_diff(contract.base_commit, root, head=candidate_sha, text=True)
+    diff_text = git_diff(base, root, head=candidate_sha, text=True)
     # INVARIANT: the secret scan inside evaluate_diff runs over this --text diff,
     # not the authoritative inventory. Dropping --text would silently regress secret
     # detection on files marked `-diff` in .gitattributes (test_gitattributes_secret).
@@ -289,7 +342,7 @@ def verify(
     # binary + mode-only included). This is the source of truth for every path
     # rule; the textual diff above is kept only for added-line secret scanning.
     # We police the UNION of the two so a path either parser sees is never lost.
-    inventory = git_name_status(contract.base_commit, root, head=candidate_sha)
+    inventory = git_name_status(base, root, head=candidate_sha)
     raw_changed: set[str] = set()  # every touched path, both ends, incl. .quill/
     policed_changed: set[str] = set()  # scope/surface set: .quill/ excluded
     for cp in inventory:
@@ -305,6 +358,33 @@ def verify(
                 raw_changed.add(p)
                 if not p.startswith(".quill/"):
                     policed_changed.add(p)
+
+    # Scan renamed/copied files at the blob level: a 100% rename produces no
+    # added lines in the diff, so a secret in the file escapes the added-line
+    # scanner. Read the destination file's content and run the secret patterns
+    # over it. Also catches UTF-16 and other encodings the diff can't represent
+    # (security review H-4/H-5).
+    from quill import secrets as _secrets
+
+    rename_secret_findings: list[policy.SecretFinding] = []
+    for cp in inventory:
+        if cp.status not in ("R", "C"):
+            continue
+        dest = cp.path
+        if dest.startswith(".quill/"):
+            continue
+        blob_path = root / dest
+        if not blob_path.is_file():
+            continue
+        try:
+            content = blob_path.read_text(errors="replace")
+        except OSError:
+            continue
+        for lineno, line in enumerate(content.splitlines(), 1):
+            for hit in _secrets.scan(line):
+                rename_secret_findings.append(
+                    policy.SecretFinding(path=dest, line=lineno, pattern_name=hit.pattern_name)
+                )
 
     # Strict mode does NOT honor branch-authored exceptions (security review
     # P0-2): an unsigned .quill/exceptions.json could waive whole classes of
@@ -329,8 +409,19 @@ def verify(
         else:
             applied.append(e)
 
+    # Merge diff-based and blob-based secret findings, dedup by (path, line, pattern).
+    all_secret_findings = list(evaluation.secret_findings)
+    seen_secrets: set[tuple[str, int, str]] = {
+        (f.path, f.line, f.pattern_name) for f in all_secret_findings
+    }
+    for f in rename_secret_findings:
+        key = (f.path, f.line, f.pattern_name)
+        if key not in seen_secrets:
+            all_secret_findings.append(f)
+            seen_secrets.add(key)
+
     unwaived_secrets: list[policy.SecretFinding] = []
-    for f in evaluation.secret_findings:
+    for f in all_secret_findings:
         e = _waived_secret(f, exceptions)
         if e is None:
             unwaived_secrets.append(f)
@@ -447,8 +538,9 @@ def verify(
     _env = env if env is not None else dict(os.environ)
     expected_repo = (_env.get("QUILL_REPO_ID") or _env.get("GITHUB_REPOSITORY") or "").strip()
     repo_mismatch = bool(contract.repo and contract.repo != expected_repo)
-    repo_blocks = bool(strict and repo_mismatch)
-    if repo_blocks:
+    repo_missing = bool(strict and not contract.repo and expected_repo)
+    repo_blocks = bool(strict and (repo_mismatch or repo_missing))
+    if strict and repo_mismatch:
         if expected_repo:
             reasons.append(
                 f"contract is bound to repo {contract.repo!r}, but this is {expected_repo!r}"
@@ -457,6 +549,11 @@ def verify(
             reasons.append(
                 f"contract is bound to repo {contract.repo!r}, but the current repo is unknown (set QUILL_REPO_ID)"
             )
+    elif strict and repo_missing:
+        reasons.append(
+            f"contract has no repository binding; strict requires --repo "
+            f"(expected {expected_repo!r})"
+        )
     elif repo_mismatch:
         reasons.append(
             f"warning: contract repo {contract.repo!r} != {expected_repo or 'unknown'} (not enforced; cooperative mode)"

@@ -1547,22 +1547,21 @@ def _glob_segments(path_segs: Sequence[str], pat_segs: Sequence[str]) -> bool:
     match WITHIN a single segment (never crossing ``/``). This is the gitignore /
     pathspec convention a human expects: ``src/auth/*`` authorizes the direct
     children of ``src/auth``, NOT ``src/auth/admin/backdoor.py`` (security review
-    H-1: fnmatch's ``*`` crossed ``/`` and silently widened scope)."""
-    if not pat_segs:
-        return not path_segs
-    head = pat_segs[0]
-    rest = pat_segs[1:]
-    if head == "**":
-        # zero segments consumed...
-        if _glob_segments(path_segs, rest):
-            return True
-        # ...or one-or-more: consume a segment and keep the ** in play.
-        return bool(path_segs) and _glob_segments(path_segs[1:], pat_segs)
-    if not path_segs:
-        return False
-    if fnmatch.fnmatchcase(path_segs[0], head):  # head has no '/', so '*' stays in-segment
-        return _glob_segments(path_segs[1:], rest)
-    return False
+    H-1: fnmatch's ``*`` crossed ``/`` and silently widened scope).
+
+    Iterative bottom-up DP to avoid stack overflow on deep paths (security review
+    M-2: a 1600-segment path hit RecursionError). O(len(path) * len(pattern))."""
+    pn, gn = len(path_segs), len(pat_segs)
+    # dp[pi][gi] = True iff path_segs[pi:] matches pat_segs[gi:]
+    dp = [[False] * (gn + 1) for _ in range(pn + 1)]
+    dp[pn][gn] = True  # both exhausted = match
+    for gi in range(gn - 1, -1, -1):
+        for pi in range(pn, -1, -1):
+            if pat_segs[gi] == "**":
+                dp[pi][gi] = dp[pi][gi + 1] or (pi < pn and dp[pi + 1][gi])
+            elif pi < pn and fnmatch.fnmatchcase(path_segs[pi], pat_segs[gi]):
+                dp[pi][gi] = dp[pi + 1][gi + 1]
+    return dp[0][0]
 
 
 def _path_matches(path: str, pattern: str) -> bool:
