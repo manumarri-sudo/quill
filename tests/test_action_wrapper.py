@@ -140,3 +140,60 @@ def test_wrapper_fails_closed_on_rc_verdict_mismatch(
         f"expected fail-closed exit 2, got {proc.returncode}: {proc.stderr}"
     )
     assert "inconsistent verdict evidence" in (proc.stdout + proc.stderr)
+
+
+def _wrapper(
+    root: Path, env: dict[str, str], extra: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(WRAPPER)],
+        cwd=root,
+        env={**env, "QUILL_PASSPORT_DIR": ".quill", **extra},
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_strict_rejects_fail_on_block_false(repo: tuple[Path, dict[str, str]]) -> None:
+    """Strict mode must not let fail-on-block=false neuter a BLOCK (review M-3)."""
+    if not WRAPPER.exists():
+        pytest.skip("wrapper script not present")
+    root, env = repo
+    proc = _wrapper(root, env, {"QUILL_STRICT": "true", "QUILL_FAIL_ON_BLOCK": "false"})
+    assert proc.returncode == 2
+    assert "fail-on-block=false" in (proc.stdout + proc.stderr)
+
+
+def test_strict_requires_gate_signature_by_default(repo: tuple[Path, dict[str, str]]) -> None:
+    """A real PASS but no gate key -> strict refuses unsigned evidence (review M-4)."""
+    if not WRAPPER.exists():
+        pytest.skip("wrapper script not present")
+    root, env = repo
+    bin_dir = root.parent / "fakebin_pass"
+    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0)
+    proc = _wrapper(
+        root,
+        env,
+        {"PATH": str(bin_dir) + os.pathsep + env["PATH"], "QUILL_STRICT": "true"},
+    )
+    assert proc.returncode == 2
+    assert "requires a gate-signed passport" in (proc.stdout + proc.stderr)
+
+
+def test_strict_unsigned_evidence_opt_out_is_explicit(repo: tuple[Path, dict[str, str]]) -> None:
+    """With the explicit opt-out, the same PASS is accepted (visible downgrade)."""
+    if not WRAPPER.exists():
+        pytest.skip("wrapper script not present")
+    root, env = repo
+    bin_dir = root.parent / "fakebin_pass2"
+    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0)
+    proc = _wrapper(
+        root,
+        env,
+        {
+            "PATH": str(bin_dir) + os.pathsep + env["PATH"],
+            "QUILL_STRICT": "true",
+            "QUILL_ALLOW_UNSIGNED_EVIDENCE": "true",
+        },
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr

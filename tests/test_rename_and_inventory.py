@@ -172,3 +172,25 @@ def test_candidate_sha_is_single_source_of_truth(repo: Path) -> None:
     result = verify_mod.verify(contract=contract, root=repo, head="candidate")
     # The recorded head must be the EVALUATED candidate, not repo HEAD (main).
     assert result.head_commit == candidate_sha
+
+
+def test_passport_evidence_uses_authoritative_inventory(repo: Path) -> None:
+    """The passport's changed-file list must come from the name-status inventory,
+    not the textual parser, so a mode-only change can't make it say 'no changes'
+    while enforcement blocks (review M-1)."""
+    from quill import passport as passport_mod
+
+    (repo / "src").mkdir()
+    (repo / "src" / "app.py").write_text("x\n")
+    (repo / "tool.sh").write_text("echo hi\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    contract, _ = contract_mod.begin("task", allowed_paths=[], root=repo)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "contract")
+    _git(repo, "update-index", "--chmod=+x", "tool.sh")
+    _git(repo, "commit", "-qm", "chmod only")
+    result = verify_mod.verify(contract=contract, root=repo)
+    assert "tool.sh" in result.changed_paths
+    passport = passport_mod.build_passport(result)
+    assert "tool.sh" in passport["evidence"]["changed_files"]

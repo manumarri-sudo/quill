@@ -30,16 +30,15 @@
 #
 set -euo pipefail
 
-HEAD_REF="${QUILL_HEAD:-HEAD}"
 PUBLISH_DIR="${QUILL_PASSPORT_DIR:-.quill}"
 FAIL_ON_BLOCK="${QUILL_FAIL_ON_BLOCK:-true}"
 STATUS_CONTEXT="quill/change-control"
 
-# A private temp dir we own: the verifier writes here, and the verdict is read
-# back ONLY from here. Nothing in the repo tree can influence the decision.
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/quill.XXXXXX")"
-cleanup() { rm -rf "$WORK"; }
-trap cleanup EXIT
+# Evaluate the SAME commit the Status Check reports against, so the evaluated
+# candidate, the passport, and the published status all describe one SHA
+# (security review H-6: evaluated ref and status SHA could diverge). Prefer the
+# explicit candidate SHA; fall back to QUILL_HEAD, then HEAD.
+EVAL_REF="${QUILL_HEAD_SHA:-${QUILL_HEAD:-HEAD}}"
 
 # --strict (default on) requires a signed perimeter AND signed contract from a
 # trusted approver, so an unsigned / tampered / absent boundary BLOCKs rather
@@ -49,11 +48,25 @@ if [[ "${QUILL_STRICT:-true}" == "true" ]]; then
   STRICT_FLAG="--strict"
 fi
 
+# Strict mode must not expose switches that silently degrade it to cooperative
+# behavior. fail-on-block=false would let a literal BLOCK return success, which
+# is incompatible with an enforced boundary (security review M-3).
+if [[ -n "$STRICT_FLAG" && "$FAIL_ON_BLOCK" != "true" ]]; then
+  echo "::error::strict mode cannot run with fail-on-block=false (a BLOCK must fail the job)."
+  exit 2
+fi
+
+# A private temp dir we own: the verifier writes here, and the verdict is read
+# back ONLY from here. Nothing in the repo tree can influence the decision.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/quill.XXXXXX")"
+cleanup() { rm -rf "$WORK"; }
+trap cleanup EXIT
+
 # 1. Run the verifier into the temp dir. It exits 1 on BLOCK and 0 on
 #    PASS/NEEDS_REVIEW; any OTHER exit is a crash / bad invocation. Capture the
 #    real exit code without aborting so we can tell BLOCK apart from failure.
 set +e
-quill verify $STRICT_FLAG --head "$HEAD_REF" --passport-dir "$WORK" \
+quill verify $STRICT_FLAG --head "$EVAL_REF" --passport-dir "$WORK" \
   >"$WORK/stdout" 2>"$WORK/stderr"
 QUILL_RC=$?
 set -e
@@ -115,11 +128,26 @@ if [[ -n "${QUILL_GATE_PUBKEYS:-}" ]]; then
     exit 2
   fi
 elif [[ -n "$STRICT_FLAG" ]]; then
-  # Strict authenticates the contract/perimeter, but without a configured gate
-  # key the published passport is UNSIGNED: a reviewer cannot re-verify the
-  # verdict independently of this repo. Say so rather than implying signed
-  # evidence (security review: strict accepts unsigned passport by default).
-  echo "::warning::strict mode but no QUILL_GATE_PUBKEYS configured — the passport is UNSIGNED and its verdict cannot be independently re-verified. Set gate-key + gate-pubkeys for signed evidence."
+  # Strict authenticates the contract/perimeter; an unsigned passport cannot be
+  # re-verified independently of this repo, so strict-grade EVIDENCE requires a
+  # gate key. This is mandatory by default (no silent downgrade); an operator who
+  # wants report-grade evidence must opt out EXPLICITLY and visibly (security
+  # review M-4 + "strict must not expose silent degrade switches").
+  if [[ "${QUILL_ALLOW_UNSIGNED_EVIDENCE:-false}" == "true" ]]; then
+    echo "::warning::strict mode with QUILL_ALLOW_UNSIGNED_EVIDENCE=true — the passport is UNSIGNED and cannot be independently re-verified."
+  else
+    echo "::error::strict mode requires a gate-signed passport. Set gate-key + gate-pubkeys, or set QUILL_ALLOW_UNSIGNED_EVIDENCE=true to accept report-grade unsigned evidence."
+    exit 2
+  fi
+fi
+
+# 3c. Candidate binding: the passport must describe the SAME commit the Status
+#     Check reports against, so evidence can't identify a different candidate
+#     than the one being gated (security review H-6).
+HEAD_COMMIT="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("head_commit") or "")' "$PASSPORT_JSON")"
+if [[ -n "${QUILL_HEAD_SHA:-}" && -n "$HEAD_COMMIT" && "$HEAD_COMMIT" != "$QUILL_HEAD_SHA" ]]; then
+  echo "::error::candidate mismatch: passport head_commit=$HEAD_COMMIT but status SHA=$QUILL_HEAD_SHA; failing closed."
+  exit 2
 fi
 
 echo "Quill verdict: $VERDICT ($REASONS)"

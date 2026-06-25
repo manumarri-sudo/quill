@@ -230,10 +230,17 @@ class VerifyResult:
     gate_tamper_hits: tuple[str, ...] = ()  # edits to the gate's own trust surfaces
     perimeter_id: str | None = None
     strict: bool = False
+    # Authoritative changed-path inventory from `git diff --name-status -z` (both
+    # rename endpoints, binary + mode-only included). The passport/audit evidence
+    # uses THIS, not the weaker textual parser, so evidence can't under-report a
+    # change the enforcement layer acted on (security review M-1).
+    inventory_paths: tuple[str, ...] = ()
 
     @property
     def changed_paths(self) -> tuple[str, ...]:
-        return self.evaluation.changed_paths
+        # Prefer the authoritative inventory; fall back to the textual evaluation
+        # only when no inventory was supplied (direct DiffEvaluation callers).
+        return self.inventory_paths or self.evaluation.changed_paths
 
 
 def verify(
@@ -286,6 +293,8 @@ def verify(
             raw_changed.add(p)
             if not p.startswith(".quill/"):
                 policed_changed.add(p)
+    # Authoritative changed-file list for the evidence layer (both endpoints).
+    inventory_paths = tuple(sorted({p for cp in inventory for p in cp.endpoints}))
     for df in policy.parse_unified_diff(diff_text):
         for p in (df.path, df.old_path):
             if p and p != "/dev/null":  # /dev/null is the add/delete sentinel
@@ -480,7 +489,7 @@ def verify(
                 "verdict": verdict.value,
                 "base_commit": contract.base_commit or "",
                 "head_commit": head_commit or "",
-                "changed_files": len(evaluation.files),
+                "changed_files": len(inventory_paths),
                 "out_of_scope": list(unwaived_scope),
                 "secret_findings": [
                     {"path": f.path, "line": f.line, "pattern": f.pattern_name}
@@ -517,4 +526,5 @@ def verify(
         gate_tamper_hits=gate_tamper,
         perimeter_id=perimeter_id,
         strict=strict,
+        inventory_paths=inventory_paths,
     )

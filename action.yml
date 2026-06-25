@@ -60,6 +60,14 @@ inputs:
       e.g. ${{ vars.QUILL_GATE_PUBKEYS }}.
     required: false
     default: ""
+  allow-unsigned-evidence:
+    description: >-
+      In strict mode a gate-signed passport is REQUIRED by default. Set this to
+      "true" to explicitly accept report-grade UNSIGNED evidence (no gate key).
+      This is a visible, deliberate downgrade - strict mode never silently accepts
+      unsigned evidence.
+    required: false
+    default: "false"
   approver-pubkeys:
     description: >-
       Trusted approver PUBLIC keys (PEM) that may sign the perimeter/contract. Pass
@@ -108,6 +116,7 @@ runs:
         QUILL_STRICT: ${{ inputs.strict }}
         QUILL_GATE_KEY: ${{ inputs.gate-key }}
         QUILL_GATE_PUBKEYS: ${{ inputs.gate-pubkeys }}
+        QUILL_ALLOW_UNSIGNED_EVIDENCE: ${{ inputs.allow-unsigned-evidence }}
         QUILL_APPROVER_PUBKEYS: ${{ inputs.approver-pubkeys }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: bash "${{ github.action_path }}/scripts/quill-passport.sh"

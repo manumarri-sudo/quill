@@ -47,7 +47,11 @@ jobs:
           # The trust root lives in secrets so a PR cannot edit it. Set these in
           # repo/org settings; absent, strict mode BLOCKs (no established perimeter).
           gate-key: ${{ secrets.QUILL_GATE_KEY }}
+          gate-pubkeys: ${{ vars.QUILL_GATE_PUBKEYS }}
           approver-pubkeys: ${{ secrets.QUILL_APPROVER_PUBKEYS }}
+          # This repo dogfoods without a gate key configured; accept report-grade
+          # unsigned evidence explicitly rather than failing the self-check.
+          allow-unsigned-evidence: "true"
 
       # The other root of trust: require a human (non-author) GitHub approval on
       # the current head. Either this OR a signed perimeter is sufficient; run
