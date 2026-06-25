@@ -85,6 +85,24 @@ def test_expired_contract_blocks_in_strict(repo: Path) -> None:
     assert any("expired" in r for r in result.reasons), result.reasons
 
 
+def test_malformed_expiry_blocks_in_strict(repo: Path) -> None:
+    """A malformed expiry must not be silently treated as unlimited (review M-6)."""
+    priv_pem, pub_pem = attest.generate_keypair()
+    perim = perimeter_mod.default_perimeter(allowed_paths=("src/**",), approved_by="human")
+    perim.write(repo)
+    provenance_mod.sign_artifact(perim.to_dict(), priv_pem, perimeter_mod.signature_path(repo))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "perimeter")
+    c, _ = contract_mod.begin("task", allowed_paths=["src/**"], root=repo)
+    bad = dataclasses.replace(c, expires_at="not-a-date")
+    bad.write(repo)
+    provenance_mod.sign_artifact(bad.to_dict(), priv_pem, repo / ".quill" / "contract.sig")
+    env = {provenance_mod.APPROVER_ENV: pub_pem}
+    result = verify_mod.verify(contract=bad, root=repo, perimeter=perim, strict=True, env=env)
+    assert result.verdict is Verdict.BLOCK
+    assert any("malformed" in r for r in result.reasons), result.reasons
+
+
 def test_unexpired_signed_contract_passes_strict(repo: Path) -> None:
     priv_pem, pub_pem = attest.generate_keypair()
     perim = perimeter_mod.default_perimeter(allowed_paths=("src/**",), approved_by="human")

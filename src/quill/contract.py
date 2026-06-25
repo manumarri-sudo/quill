@@ -130,10 +130,22 @@ class Contract:
             msg = f"malformed contract: {e}"
             raise ContractError(msg) from e
 
+    def expiry_is_malformed(self) -> bool:
+        """True iff an expiry was set but cannot be parsed. A security control must
+        not silently reinterpret a malformed expiry as unlimited authorization
+        (security review M-6), so strict mode treats this as a BLOCK."""
+        if not self.expires_at:
+            return False
+        try:
+            datetime.fromisoformat(self.expires_at)
+        except ValueError:
+            return True
+        return False
+
     def is_expired(self, now: datetime | None = None) -> bool:
         """True iff an expiry was set and has passed. A contract with no expiry
-        never expires; an unparseable expiry is ignored (operator typo, not a
-        reason to brick the gate)."""
+        never expires; an unparseable expiry is NOT 'expired' here (see
+        ``expiry_is_malformed`` - strict mode blocks on that separately)."""
         if not self.expires_at:
             return False
         try:

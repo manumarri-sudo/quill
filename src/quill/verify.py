@@ -435,12 +435,23 @@ def verify(
     strict_no_perimeter = bool(strict and perimeter is None)
     contract_provenance_blocks = bool(strict and not contract_prov.status.is_trustworthy)
     contract_expired = contract.is_expired()
-    contract_expiry_blocks = bool(strict and contract_expired)
-    if contract_expiry_blocks:
+    contract_expiry_malformed = contract.expiry_is_malformed()
+    contract_expiry_blocks = bool(strict and (contract_expired or contract_expiry_malformed))
+    if strict and contract_expiry_malformed:
+        reasons.append(
+            f"contract expiry is malformed ({contract.expires_at!r}); "
+            "refusing to treat it as unlimited authorization"
+        )
+    elif contract_expiry_blocks:
         reasons.append(f"contract expired at {contract.expires_at}; re-approve to authorize")
     elif contract_expired:
         reasons.append(
             f"warning: contract expired at {contract.expires_at} (not enforced; cooperative mode)"
+        )
+    elif contract_expiry_malformed:
+        reasons.append(
+            f"warning: contract expiry is malformed ({contract.expires_at!r}); "
+            "ignored in cooperative mode"
         )
     if provenance_blocks and provenance is not None:
         reasons.append(f"perimeter provenance not established: {provenance.detail}")

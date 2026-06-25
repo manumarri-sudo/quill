@@ -433,17 +433,35 @@ def verify_passport_cmd(
         list[Path] | None,
         typer.Option("--gate-key", help="trusted gate PUBLIC key (PEM). Repeatable."),
     ] = None,
+    head_sha: Annotated[
+        str | None,
+        typer.Option(
+            "--head-sha",
+            help="require the passport to describe THIS candidate commit (else fail).",
+        ),
+    ] = None,
+    max_age_days: Annotated[
+        float | None,
+        typer.Option(
+            "--max-age-days",
+            help="reject a passport older than this many days (freshness).",
+        ),
+    ] = None,
 ) -> None:
-    """Independently verify a signed passport's verdict.
+    """Independently verify a signed passport's verdict AND its validity.
 
     Checks the passport's signature against the trusted gate public keys (from
     --gate-key files and/or the QUILL_GATE_PUBKEYS env). A passport with no
     signature, a tampered body (e.g. a flipped verdict), or an untrusted signer
     fails with exit 1 - so a reviewer can trust the verdict without trusting the
-    repo it came from.
+    repo it came from. Authenticity is not validity, so optionally bind the
+    passport to the expected candidate (--head-sha), reject stale evidence
+    (--max-age-days), and reject a passport whose contract has expired (security
+    review M-5).
     """
     import json
     import os
+    from datetime import UTC, datetime
 
     from quill import attest
     from quill import passport as passport_mod
@@ -484,6 +502,40 @@ def verify_passport_cmd(
     if signer is None:
         out.print("[red]✗ passport signature INVALID[/red] — untrusted signer or tampered content")
         raise typer.Exit(code=1)
+
+    # Authenticity established; now validity. Each check fails closed (exit 1).
+    if head_sha is not None and passport.get("head_commit") != head_sha:
+        out.print(
+            f"[red]✗ candidate mismatch[/red] — passport describes "
+            f"{passport.get('head_commit')!r}, expected {head_sha!r}"
+        )
+        raise typer.Exit(code=1)
+
+    contract_block = passport.get("contract") or {}
+    expires_at = contract_block.get("expires_at")
+    if expires_at:
+        try:
+            exp = datetime.fromisoformat(expires_at)
+        except ValueError:
+            out.print(f"[red]✗ contract expiry malformed[/red] ({expires_at!r})")
+            raise typer.Exit(code=1) from None
+        if datetime.now(UTC) >= exp:
+            out.print(f"[red]✗ contract expired[/red] at {expires_at}")
+            raise typer.Exit(code=1)
+
+    if max_age_days is not None:
+        generated_at = passport.get("generated_at")
+        try:
+            gen = datetime.fromisoformat(generated_at)
+        except (ValueError, TypeError):
+            out.print(f"[red]✗ passport timestamp malformed[/red] ({generated_at!r})")
+            raise typer.Exit(code=1) from None
+        if (datetime.now(UTC) - gen).total_seconds() > max_age_days * 86400:
+            out.print(
+                f"[red]✗ passport too old[/red] — generated {generated_at}, max age {max_age_days}d"
+            )
+            raise typer.Exit(code=1)
+
     out.print(
         f"[green]✓ passport verified[/green] · verdict [bold]{passport.get('verdict')}[/bold] "
         f"· signed by gate {signer}"

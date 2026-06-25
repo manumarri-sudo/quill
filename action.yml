@@ -32,9 +32,13 @@ inputs:
     required: false
     default: ${{ github.event.pull_request.head.sha }}
   quill-version:
-    description: "Version spec for the quillx package (e.g. '==0.2.0a5'). Empty installs latest."
+    description: >-
+      Version spec for the quillx package (e.g. '==0.2.0a5'). Defaults to the exact
+      version this Action release was cut from, so pinning the Action tag also pins
+      the verifier rather than installing whatever is latest on PyPI (security
+      review H-4). Override only to deliberately track a different build.
     required: false
-    default: ""
+    default: "==0.2.0a5"
   install-from-source:
     description: "Install quill from this checked-out repo instead of PyPI (used for dogfooding)."
     required: false
