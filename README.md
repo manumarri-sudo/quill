@@ -210,12 +210,15 @@ quill guard --key approver.pem --forbid 'migrations/**' --forbid 'src/auth/**'
 
 - **A human signs the perimeter once; every PR is enforced with no per-change
   approval.** That is the answer to "I'm not going to sit and approve a hundred
-  agents." Forbidden paths and gate-tamper edits BLOCK; secrets BLOCK; in-bounds
-  work PASSes silently.
+  agents." Forbidden paths and gate-tamper edits BLOCK; secrets BLOCK by default
+  (a signed perimeter can relax to review); in-bounds work PASSes silently.
 - **The agent can't authorize itself (in strict mode, with an off-box trust
   root).** Editing the perimeter, the approver keys (`.quill/approvers/**`), or
-  the workflow that runs the gate is itself a BLOCK, and tampering with a signed
-  perimeter or contract invalidates the signature. The committed
+  the workflow that runs the gate is itself a BLOCK (gate-tamper detection), and
+  tampering with a signed perimeter or contract invalidates the signature.
+  The contract is protected by its Ed25519 signature, not the gate-tamper glob
+  set — in strict mode an unsigned or forged contract is a BLOCK because its
+  provenance check fails. The committed
   `.quill/approvers/*.pub` set is a *convenience*, not a boundary: in strict mode
   only the externally-pinned `QUILL_APPROVER_PUBKEYS` are trusted, because an
   agent could otherwise plant a key in the base commit and sign its own approval.

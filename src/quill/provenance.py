@@ -221,7 +221,7 @@ def verify_artifact(
         return ProvenanceResult(
             ProvenanceStatus.UNSIGNED,
             None,
-            "artifact is not signed; run `quill guard sign --key <approver.pem>`",
+            "artifact is not signed; run `quill guard --key <approver.pem>` or `quill begin --key <approver.pem>`",
             len(trusted),
         )
     matched = attest.verify_against_any(payload, sig, trusted)

@@ -280,6 +280,9 @@ def verify(
     # hunks here; the authoritative inventory below, not this diff, drives path
     # policy, so that is only a secret-scan input.
     diff_text = git_diff(contract.base_commit, root, head=candidate_sha, text=True)
+    # INVARIANT: the secret scan inside evaluate_diff runs over this --text diff,
+    # not the authoritative inventory. Dropping --text would silently regress secret
+    # detection on files marked `-diff` in .gitattributes (test_gitattributes_secret).
     evaluation = policy.evaluate_diff(diff_text, contract.allowed_paths)
 
     # Authoritative changed-path inventory (NUL-delimited, both rename endpoints,
