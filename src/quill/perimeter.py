@@ -245,7 +245,7 @@ def default_perimeter(
         version=PERIMETER_VERSION,
         allowed_paths=tuple(allowed_paths),
         forbidden_paths=forbidden,
-        review_surfaces=("ci", "lockfiles"),
+        review_surfaces=("ci", "lockfiles", "gitconfig"),
         block_secrets=True,
         created_at=created,
         perimeter_id=_perimeter_id(allowed_paths, forbidden, created),
