@@ -146,7 +146,9 @@ quill verify                 # local/cooperative: advisory, forgeable by the age
 surfaced without hard-stopping the pipeline. The whole thing is deterministic: given
 the same inputs — the diff, the contract, the signed perimeter, the trusted approver
 keys, the strict flag, and any (signed) exceptions — it returns the same verdict,
-explainable line by line. There is no model and no clock in the decision path.
+explainable line by line. There is no model in the decision path; the only clock
+reference is contract-expiry enforcement (`--expires-in`), which is an explicit
+human-set deadline, not a heuristic.
 
 ### 3. The Change Passport
 
@@ -327,7 +329,7 @@ read [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) before using them).
 (`begin`/`verify`/passport + GitHub Action), the HMAC-chained audit log (32k+ entries
 dogfooded, truncation-detectable, `quill audit verify` clean), the local PreToolUse
 gate with Touch ID approvals and 26-pattern secret detection, the write-then-run AST
-scan, and the read-side surfaces (receipts, trifecta, pins, decay). 1030 tests pass;
+scan, and the read-side surfaces (receipts, trifecta, pins, decay). 1150 tests pass;
 `ruff`, `ruff format`, and `mypy --strict` are green and enforced in CI.
 
 **Roadmap (not shipping today, do not assume present):** PR-comment rendering of the

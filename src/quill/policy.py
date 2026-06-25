@@ -1605,6 +1605,10 @@ def classify_sensitive_surface(path: str) -> str | None:
                   deserves a second look).
     "ci"        - CI/CD pipeline definitions (they run with credentials).
     "lockfiles" - dependency lockfiles (silent supply-chain surface).
+    "gitconfig" - git configuration that controls diff visibility, merge
+                  strategy, or tracked-file set (security review H-2 residual:
+                  a `.gitattributes -diff` entry can suppress secret scanning
+                  in tools that don't use `--text`).
     """
     p = path.removeprefix("./")
     base = p.rsplit("/", 1)[-1]
@@ -1612,6 +1616,8 @@ def classify_sensitive_surface(path: str) -> str | None:
 
     if base in _LOCKFILE_NAMES:
         return "lockfiles"
+    if base in (".gitattributes", ".gitignore"):
+        return "gitconfig"
     if (
         p.startswith(".github/workflows/")
         or p.startswith(".github/actions/")
@@ -1653,7 +1659,7 @@ def evaluate_diff(diff_text: str, allowed_paths: Sequence[str]) -> DiffEvaluatio
 
     out_of_scope: list[str] = []
     secret_findings: list[SecretFinding] = []
-    surfaces: dict[str, list[str]] = {"tests": [], "ci": [], "lockfiles": []}
+    surfaces: dict[str, list[str]] = {"tests": [], "ci": [], "lockfiles": [], "gitconfig": []}
 
     for f in files:
         # A rename touches BOTH ends: the new location AND the old one it moved

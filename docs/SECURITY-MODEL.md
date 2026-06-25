@@ -259,22 +259,42 @@ the remaining inventory and evidence bugs to closure:
 - **block_secrets honored (closed).** The signed perimeter's block_secrets now
   composes the verdict (default BLOCK; a signed false downgrades to review).
 
+A fifth pass closed the remaining context-binding gaps from earlier reviews and
+added `.gitattributes` surface detection:
+
+- **Contract context-binding: repo, expiry, candidate SHA (closed).** The signed
+  contract now binds the repository (`quill begin --repo`, strict BLOCKs on
+  mismatch), an expiry deadline (`--expires-in`, strict BLOCKs on expired or
+  malformed), and the candidate SHA is resolved once and used for the diff,
+  the inventory, and the recorded head. These close the cross-repo replay,
+  stale-approval, and candidate-identity-mismatch vectors. Regression tests
+  in `tests/test_contract_expiry.py`.
+- **`.gitattributes` as a sensitive surface (closed).** A `.gitattributes` change
+  can suppress diff visibility in tools that don't use `--text` (H-2 residual);
+  it is now classified as a `gitconfig` sensitive surface, triggering
+  NEEDS_REVIEW so a human sees it.
+- **"No clock in the decision path" claim corrected.** Contract expiry
+  enforcement uses `datetime.now()`; the README now states this honestly
+  (an explicit human-set deadline, not a heuristic).
+
 Genuinely still open — do not rely on the CI gate against a determined adversary
 until these land:
 
-- **Contract context-binding.** The signed contract binds task, scope, and base
-  commit, but NOT the repository id, protected branch, candidate SHA, an expiry,
-  or a one-use nonce, so a valid contract is replayable anywhere its signer key
-  is trusted and the base object resolves. Bind these before trusting the gate
-  across repositories/tenants.
+- **Contract replay / one-use nonce.** The contract now binds repo, scope, base,
+  and expiry, but NOT a one-use nonce or protected branch, so a valid contract
+  is replayable within the same repo until it expires. For tenants that share an
+  approver key across repos, the repo binding closes cross-repo replay; within a
+  single repo, expiry is the time-bound.
 - **NEEDS_REVIEW is non-blocking.** It exits 0 (a soft signal); enforcing review
   still depends on `quill check-approval` + branch protection, not the verdict
   alone. The Critical rename-out case that previously hid behind NEEDS_REVIEW now
   BLOCKs, but a strict deployment that must HARD-stop on sensitive surfaces needs
   the approval gate wired up.
-- **Action supply chain.** The Action installs the latest `quillx` and references
-  third-party actions by mutable major tags unless the caller pins exact
-  versions/digests; pin them in a hardened deployment.
+- **Action supply chain.** The Action pins `quillx` to an exact version
+  (`==0.2.0a5` by default) and the wrapper validates the passport from a fresh
+  temp dir, but the third-party `actions/setup-python` and `actions/checkout` are
+  referenced by mutable major tags; pin exact versions/digests in a hardened
+  deployment.
 
 - **Off-box evidence anchoring.** The Merkle transparency tree head is built but
   not yet anchored off the runner, so a CI passport's MAC is not independently
@@ -299,6 +319,9 @@ until these land:
   config) does not change the CI verdict, but could alter the optional local
   runtime hook's behavior on a machine that re-reads it; treat `.quill/` as
   trusted only to the extent its trust-bearing files are signed.
+
+| Claim | Status | Honest form |
+|---|---|---|
 | Auditor evidence pack | **Partial** | Maps to evidence requests (SOC 2, EU AI Act Art 12-shaped, ISO 42001 A.6.2.8); does not certify compliance by itself. |
 | Enterprise-grade / production-safe | **Not yet** | Alpha, squatted dist name, no external audit. Do not claim. |
 | Cannot be bypassed / agent-proof | **Dangerous** | False - see limits 1-4. Never claim. |

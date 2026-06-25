@@ -344,7 +344,7 @@ def verify(
         if cat is not None and p not in surfaces_all.setdefault(cat, []):
             surfaces_all[cat].append(p)
 
-    unwaived_surfaces: dict[str, list[str]] = {"tests": [], "ci": [], "lockfiles": []}
+    unwaived_surfaces: dict[str, list[str]] = {"tests": [], "ci": [], "lockfiles": [], "gitconfig": []}
     for category, paths in surfaces_all.items():
         for p in paths:
             e = _waived_surface(category, p, exceptions)
