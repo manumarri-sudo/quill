@@ -189,13 +189,19 @@ def _confusable_skeleton(s: str) -> str:
 
 
 def _glob_hit(path: str, glob: str, *, casefold: bool = False) -> bool:
-    # Support "dir/**" prefix semantics in addition to fnmatch's flat globbing,
-    # so "src/auth/**" matches "src/auth/x/y.py".
+    # Deny-side match (forbidden + gate-tamper). Inclusive by design.
     if casefold:
         path, glob = _fold(path), _fold(glob)
     if glob.endswith("/**"):
         prefix = glob[:-3]
         return path == prefix or path.startswith(prefix + "/")
+    # A bare directory or exact path (no glob metachars) covers itself AND
+    # everything under it, so `--forbid src/auth` denies `src/auth/login.py` -
+    # matching the scope side's directory semantics rather than the surprising
+    # "exact file only" fnmatch gave (security review M-8).
+    if not any(ch in glob for ch in "*?["):
+        g = glob.rstrip("/")
+        return path == g or path.startswith(g + "/")
     return fnmatch.fnmatch(path, glob)
 
 

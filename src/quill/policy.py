@@ -1542,11 +1542,35 @@ def parse_unified_diff(diff_text: str) -> list[DiffFile]:
     return files
 
 
+def _glob_segments(path_segs: Sequence[str], pat_segs: Sequence[str]) -> bool:
+    """Segment-aware glob: ``**`` matches zero or more path segments, ``*``/`?`/`[`
+    match WITHIN a single segment (never crossing ``/``). This is the gitignore /
+    pathspec convention a human expects: ``src/auth/*`` authorizes the direct
+    children of ``src/auth``, NOT ``src/auth/admin/backdoor.py`` (security review
+    H-1: fnmatch's ``*`` crossed ``/`` and silently widened scope)."""
+    if not pat_segs:
+        return not path_segs
+    head = pat_segs[0]
+    rest = pat_segs[1:]
+    if head == "**":
+        # zero segments consumed...
+        if _glob_segments(path_segs, rest):
+            return True
+        # ...or one-or-more: consume a segment and keep the ** in play.
+        return bool(path_segs) and _glob_segments(path_segs[1:], pat_segs)
+    if not path_segs:
+        return False
+    if fnmatch.fnmatchcase(path_segs[0], head):  # head has no '/', so '*' stays in-segment
+        return _glob_segments(path_segs[1:], rest)
+    return False
+
+
 def _path_matches(path: str, pattern: str) -> bool:
     """True iff `path` is covered by one allowed-scope `pattern`.
 
     Three shapes, most-permissive-wins because this is an allow-list:
-      - glob (`*`, `?`, `[`): fnmatch, e.g. `src/**/*.py`, `src/*`.
+      - glob (`*`, `?`, `[`): segment-aware (``*`` within a segment, ``**``
+        recursive), e.g. ``src/**/*.py`` or ``src/*`` (direct children only).
       - directory (`src/` or bare `src`): the prefix and everything under it.
       - exact file path.
     """
@@ -1554,13 +1578,10 @@ def _path_matches(path: str, pattern: str) -> bool:
     pattern = pattern.strip().removeprefix("./")
     if not pattern:
         return False
-    if pattern in ("*", "**", "."):
+    if pattern in ("**", "."):
         return True
     if any(ch in pattern for ch in "*?["):
-        # fnmatch treats `*` as crossing `/`, so `src/*` already covers nested
-        # files; collapse `**/` so `src/**/x` behaves like the glob a human means.
-        collapsed = pattern.replace("**/", "*/").replace("**", "*")
-        return fnmatch.fnmatch(path, collapsed) or fnmatch.fnmatch(path, pattern)
+        return _glob_segments(path.split("/"), pattern.split("/"))
     pattern = pattern.rstrip("/")
     return path == pattern or path.startswith(pattern + "/")
 

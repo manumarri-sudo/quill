@@ -30,7 +30,7 @@ from quill import policy
 from quill import provenance as provenance_mod
 from quill.contract import Contract, repo_root
 from quill.errors import QuillError
-from quill.perimeter import GATE_TAMPER_GLOBS, Perimeter, _glob_hit, deny_hit
+from quill.perimeter import GATE_TAMPER_GLOBS, Perimeter, deny_hit
 from quill.provenance import ProvenanceResult
 
 if TYPE_CHECKING:
@@ -77,20 +77,27 @@ def load_exceptions(root: Path) -> list[dict[str, Any]]:
     return [e for e in data if isinstance(e, dict)]
 
 
-def git_diff(base_commit: str | None, root: Path, *, head: str = "HEAD") -> str:
+def git_diff(base_commit: str | None, root: Path, *, head: str = "HEAD", text: bool = False) -> str:
     """Return ``git diff <base_commit> <head>`` for the repo at `root`.
 
     When no base commit is recorded (a contract created before the first
     commit), diff the empty tree against HEAD so the whole history shows up as
     additions rather than silently producing an empty - and falsely passing -
     diff.
+
+    ``text=True`` adds ``--text``, forcing a textual diff even for files git would
+    treat as binary. The secret scan uses this so a ``.gitattributes`` entry like
+    ``secret.txt -diff`` (which makes git render the file as ``Binary files …
+    differ`` and hide its added lines) cannot suppress secret detection (security
+    review H-2).
     """
+    flags = ["--text"] if text else []
     if base_commit:
-        args = ["git", "diff", base_commit, head]
+        args = ["git", "diff", *flags, base_commit, head]
     else:
         # 4b825dc... is git's well-known empty-tree object; diffing against it
         # surfaces every line as an addition.
-        args = ["git", "diff", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", head]
+        args = ["git", "diff", *flags, "4b825dc642cb6eb9a060e54bf8d69288fbee4904", head]
     try:
         # errors="replace": real repos contain binary blobs (images, compiled
         # fixtures) whose diff stanzas are not valid UTF-8. Strict decoding
@@ -259,7 +266,12 @@ def verify(
     # inventory, and the recorded head, so evaluated == recorded (security review:
     # candidate identity mismatch).
     candidate_sha = _resolve_sha(root, head)
-    diff_text = git_diff(contract.base_commit, root, head=candidate_sha)
+    # --text forces a textual diff even for files git would call binary, so a
+    # `.gitattributes` `-diff` entry cannot hide a secret-bearing file's added
+    # lines from the scanner (security review H-2). Real binaries become text
+    # hunks here; the authoritative inventory below, not this diff, drives path
+    # policy, so that is only a secret-scan input.
+    diff_text = git_diff(contract.base_commit, root, head=candidate_sha, text=True)
     evaluation = policy.evaluate_diff(diff_text, contract.allowed_paths)
 
     # Authoritative changed-path inventory (NUL-delimited, both rename endpoints,
@@ -360,10 +372,7 @@ def verify(
         # join the scope violations.
         if perimeter.allowed_paths:
             for p in sorted(policed_changed):
-                if (
-                    not any(_glob_hit(p, g) for g in perimeter.allowed_paths)
-                    and p not in unwaived_scope
-                ):
+                if not policy.path_in_scope(p, perimeter.allowed_paths) and p not in unwaived_scope:
                     unwaived_scope.append(p)
 
     # Contract provenance (security review P0-1): the contract supplies the base
