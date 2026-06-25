@@ -133,7 +133,7 @@ def test_approve_once_scale_to_many(repo: Path) -> None:
 def test_forbidden_path_blocks(repo: Path) -> None:
     priv = _approver(repo)
     _sign_perimeter(repo, priv, forbidden=("src/auth/**",))
-    contract = _begin(repo)
+    contract = _begin(repo, priv)
     _commit_change(repo, "src/auth/login.py", "secret_logic = 1\n")
     result = _verify(repo, contract)
     assert result.verdict is Verdict.BLOCK
@@ -145,7 +145,7 @@ def test_gate_tamper_workflow_edit_blocks(repo: Path) -> None:
     """Editing the workflow that runs the gate is always a BLOCK."""
     priv = _approver(repo)
     _sign_perimeter(repo, priv)
-    contract = _begin(repo)
+    contract = _begin(repo, priv)
     _commit_change(repo, ".github/workflows/ci.yml", "name: ci\non: push\n")
     result = _verify(repo, contract)
     assert result.verdict is Verdict.BLOCK
@@ -158,7 +158,7 @@ def test_agent_cannot_bootstrap_trust_by_committing_its_own_key(repo: Path) -> N
     so it can never authorize itself."""
     priv = _approver(repo)
     _sign_perimeter(repo, priv)
-    contract = _begin(repo)
+    contract = _begin(repo, priv)
     _, rogue_pub = attest.generate_keypair()
     _commit_change(repo, ".quill/approvers/rogue.pub", rogue_pub)
     result = _verify(repo, contract)
@@ -167,15 +167,16 @@ def test_agent_cannot_bootstrap_trust_by_committing_its_own_key(repo: Path) -> N
 
 
 def test_strict_unsigned_perimeter_blocks(repo: Path) -> None:
-    """A perimeter with no approver keys configured cannot establish trust -> BLOCK."""
+    """An unsigned perimeter cannot establish trust -> BLOCK in strict mode."""
+    priv = _approver(repo)
     p = perimeter_mod.default_perimeter()
-    p.write(repo)  # no signature, no approvers
-    contract = _begin(repo)
+    p.write(repo)  # no signature
+    contract = _begin(repo, priv)
     _commit_change(repo, "src/feature.py", "y = 2\n")
     result = _verify(repo, contract, strict=True)
     assert result.verdict is Verdict.BLOCK
     assert result.provenance is not None
-    assert result.provenance.status is provenance_mod.ProvenanceStatus.NO_APPROVERS
+    assert not result.provenance.status.is_trustworthy
 
 
 def test_strict_tampered_perimeter_blocks(repo: Path) -> None:
@@ -184,7 +185,7 @@ def test_strict_tampered_perimeter_blocks(repo: Path) -> None:
     _sign_perimeter(repo, priv, forbidden=("src/auth/**",))
     # Tamper: rewrite the perimeter to drop the forbidden path, keep the old sig.
     perimeter_mod.default_perimeter(forbidden_paths=()).write(repo)
-    contract = _begin(repo)
+    contract = _begin(repo, priv)
     _commit_change(repo, "src/auth/login.py", "x = 1\n")
     result = _verify(repo, contract, strict=True)
     assert result.verdict is Verdict.BLOCK
@@ -193,7 +194,9 @@ def test_strict_tampered_perimeter_blocks(repo: Path) -> None:
 
 
 def test_strict_no_perimeter_blocks(repo: Path) -> None:
-    contract = _begin(repo)
+    priv = _approver(repo)
+    _sign_perimeter(repo, priv)
+    contract = _begin(repo, priv)
     _commit_change(repo, "src/feature.py", "y = 2\n")
     result = verify_mod.verify(contract=contract, root=repo, perimeter=None, strict=True)
     assert result.verdict is Verdict.BLOCK
@@ -228,7 +231,7 @@ def test_env_pinned_approver_without_committed_dir(
 def test_secret_on_added_line_blocks(repo: Path) -> None:
     priv = _approver(repo)
     _sign_perimeter(repo, priv)
-    contract = _begin(repo)
+    contract = _begin(repo, priv)
     key = "AKIA" + "IOSFODNN7EXAMPLE"
     _commit_change(repo, "src/config.py", f'KEY = "{key}"\n')
     result = _verify(repo, contract)
@@ -246,7 +249,7 @@ def test_signed_passport_roundtrips(repo: Path) -> None:
 
     priv = _approver(repo)
     _sign_perimeter(repo, priv)
-    contract = _begin(repo)
+    contract = _begin(repo, priv)
     _commit_change(repo, "src/feature.py", "y = 2\n")
     result = _verify(repo, contract)
 
@@ -263,7 +266,7 @@ def test_forged_passport_verdict_is_rejected(repo: Path) -> None:
 
     priv = _approver(repo)
     _sign_perimeter(repo, priv)
-    contract = _begin(repo)
+    contract = _begin(repo, priv)
     _commit_change(repo, ".github/workflows/ci.yml", "name: ci\n")  # gate-tamper -> BLOCK
     result = _verify(repo, contract)
     assert result.verdict is Verdict.BLOCK
@@ -282,7 +285,7 @@ def test_passport_signed_by_untrusted_gate_key_rejected(repo: Path) -> None:
 
     priv = _approver(repo)
     _sign_perimeter(repo, priv)
-    contract = _begin(repo)
+    contract = _begin(repo, priv)
     _commit_change(repo, "src/feature.py", "y = 2\n")
     result = _verify(repo, contract)
 

@@ -252,6 +252,53 @@ def _is_hex_sha(ref: str) -> bool:
     return bool(_HEX_SHA_RE.match(ref))
 
 
+_UTF16_LE_BOM = b"\xff\xfe"
+_UTF16_BE_BOM = b"\xfe\xff"
+
+
+def _decode_blob(raw: bytes) -> str:
+    """Decode a git blob to text, handling UTF-16 and UTF-8 (with and without BOM).
+
+    Returns the decoded string so ASCII-oriented secret patterns can match.
+    Falls back to latin-1 (lossless for arbitrary bytes) so we never silently
+    skip content."""
+    if raw.startswith(_UTF16_LE_BOM):
+        return raw.decode("utf-16-le")
+    if raw.startswith(_UTF16_BE_BOM):
+        return raw.decode("utf-16-be")
+    if b"\x00" in raw[:512]:
+        # Heuristic: NUL bytes early in the file suggest UTF-16 without BOM.
+        # Try both endiannesses; prefer whichever doesn't produce replacement chars.
+        for enc in ("utf-16-le", "utf-16-be"):
+            try:
+                decoded = raw.decode(enc)
+                if "�" not in decoded[:256]:
+                    return decoded
+            except (UnicodeDecodeError, ValueError):
+                continue
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
+
+
+def _read_candidate_blob(root: Path, candidate_sha: str, path: str) -> str | None:
+    """Read a file from the candidate commit's tree, not the worktree.
+
+    Returns decoded text (handling UTF-16/UTF-8), or None if the blob doesn't
+    exist at that commit."""
+    try:
+        proc = subprocess.run(
+            ["git", "cat-file", "blob", f"{candidate_sha}:{path}"],
+            cwd=root,
+            capture_output=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+    return _decode_blob(proc.stdout)
+
+
 def _block_result(
     contract: Contract, reason: str, *, strict: bool = False
 ) -> VerifyResult:
@@ -323,6 +370,51 @@ def verify(
                     )
                 base = None
 
+    # Early-exit checks: verify contract provenance, repo binding, and expiry
+    # BEFORE consuming any contract-controlled fields (base_commit, scope) in
+    # expensive git operations. A forged contract should not force git work
+    # (security review round 6, M-1).
+    _env = env if env is not None else dict(os.environ)
+    contract_prov = provenance_mod.verify_artifact(
+        contract.to_dict(), root / ".quill" / "contract.sig", root, _env, strict=strict
+    )
+    if strict and not contract_prov.status.is_trustworthy:
+        return _block_result(
+            contract,
+            f"contract provenance not established: {contract_prov.detail}",
+            strict=strict,
+        )
+
+    expected_repo = (_env.get("QUILL_REPO_ID") or _env.get("GITHUB_REPOSITORY") or "").strip()
+    if strict and contract.repo and contract.repo != expected_repo:
+        repo_msg = (
+            f"contract is bound to repo {contract.repo!r}, but this is {expected_repo!r}"
+            if expected_repo
+            else f"contract is bound to repo {contract.repo!r}, but the current repo is unknown (set QUILL_REPO_ID)"
+        )
+        return _block_result(contract, repo_msg, strict=strict)
+    if strict and not contract.repo and expected_repo:
+        return _block_result(
+            contract,
+            f"contract has no repository binding; strict requires --repo (expected {expected_repo!r})",
+            strict=strict,
+        )
+
+    contract_expired = contract.is_expired()
+    contract_expiry_malformed = contract.expiry_is_malformed()
+    if strict and contract_expiry_malformed:
+        return _block_result(
+            contract,
+            f"contract expiry is malformed ({contract.expires_at!r}); refusing to treat it as unlimited authorization",
+            strict=strict,
+        )
+    if strict and contract_expired:
+        return _block_result(
+            contract,
+            f"contract expired at {contract.expires_at}; re-approve to authorize",
+            strict=strict,
+        )
+
     # Resolve the candidate to ONE concrete SHA and use it for the diff, the
     # inventory, and the recorded head, so evaluated == recorded (security review:
     # candidate identity mismatch).
@@ -359,30 +451,29 @@ def verify(
                 if not p.startswith(".quill/"):
                     policed_changed.add(p)
 
-    # Scan renamed/copied files at the blob level: a 100% rename produces no
-    # added lines in the diff, so a secret in the file escapes the added-line
-    # scanner. Read the destination file's content and run the secret patterns
-    # over it. Also catches UTF-16 and other encodings the diff can't represent
-    # (security review H-4/H-5).
+    # Blob-level secret scan: read each touched file from the CANDIDATE COMMIT
+    # (not the worktree) and run secret patterns over the decoded content. This
+    # catches secrets that the diff-based scanner misses:
+    #   - 100% renames (no added lines in the diff) — H-4
+    #   - UTF-16/UTF-16BE files (diff --text garbles NUL bytes) — round-6 H-1
+    #   - worktree != candidate divergence — round-6 H-2
+    # Covers A (added), M (modified), R (renamed), C (copied). D (deleted) is
+    # skipped since the file no longer exists in the candidate.
     from quill import secrets as _secrets
 
-    rename_secret_findings: list[policy.SecretFinding] = []
+    blob_secret_findings: list[policy.SecretFinding] = []
     for cp in inventory:
-        if cp.status not in ("R", "C"):
+        if cp.status == "D":
             continue
         dest = cp.path
         if dest.startswith(".quill/"):
             continue
-        blob_path = root / dest
-        if not blob_path.is_file():
-            continue
-        try:
-            content = blob_path.read_text(errors="replace")
-        except OSError:
+        content = _read_candidate_blob(root, candidate_sha, dest)
+        if content is None:
             continue
         for lineno, line in enumerate(content.splitlines(), 1):
             for hit in _secrets.scan(line):
-                rename_secret_findings.append(
+                blob_secret_findings.append(
                     policy.SecretFinding(path=dest, line=lineno, pattern_name=hit.pattern_name)
                 )
 
@@ -414,7 +505,7 @@ def verify(
     seen_secrets: set[tuple[str, int, str]] = {
         (f.path, f.line, f.pattern_name) for f in all_secret_findings
     }
-    for f in rename_secret_findings:
+    for f in blob_secret_findings:
         key = (f.path, f.line, f.pattern_name)
         if key not in seen_secrets:
             all_secret_findings.append(f)
@@ -479,15 +570,8 @@ def verify(
                 if not policy.path_in_scope(p, perimeter.allowed_paths) and p not in unwaived_scope:
                     unwaived_scope.append(p)
 
-    # Contract provenance (security review P0-1): the contract supplies the base
-    # commit and the allowed scope the whole verdict rests on, so in strict mode
-    # it must itself be signed by a trusted approver. Otherwise a PR could ship a
-    # fully forged contract (wide scope / a base that hides commits). Gate-tamper
-    # already blocks *editing* it inside the diff; this blocks a forged one that
-    # was committed to the branch.
-    contract_prov = provenance_mod.verify_artifact(
-        contract.to_dict(), root / ".quill" / "contract.sig", root, env, strict=strict
-    )
+    # contract_prov was already computed and strict failures early-exited above.
+    # The variable is in scope for cooperative-mode warnings and the verdict.
 
     # Honor the signed perimeter's block_secrets setting: it BLOCKs by default
     # (and always, with no perimeter), but a human who signed block_secrets=false
@@ -528,48 +612,20 @@ def verify(
         and not provenance.status.is_trustworthy
     )
     strict_no_perimeter = bool(strict and perimeter is None)
-    contract_provenance_blocks = bool(strict and not contract_prov.status.is_trustworthy)
-    # Repository binding (security review H-5): a contract bound to "owner/name"
-    # must not authorize a change in a DIFFERENT repo, so a signed contract can't
-    # be replayed across repos/forks that share the approver trust root. The
-    # expected repo comes from QUILL_REPO_ID (or GITHUB_REPOSITORY). When the
-    # contract names a repo but we can't determine the current one, strict refuses
-    # rather than assuming a match.
-    _env = env if env is not None else dict(os.environ)
-    expected_repo = (_env.get("QUILL_REPO_ID") or _env.get("GITHUB_REPOSITORY") or "").strip()
+    # Strict contract provenance/repo/expiry already early-exited above. These
+    # blocks handle cooperative-mode warnings (strict cases can't reach here).
+    contract_provenance_blocks = False  # strict already exited
     repo_mismatch = bool(contract.repo and contract.repo != expected_repo)
-    repo_missing = bool(strict and not contract.repo and expected_repo)
-    repo_blocks = bool(strict and (repo_mismatch or repo_missing))
-    if strict and repo_mismatch:
-        if expected_repo:
-            reasons.append(
-                f"contract is bound to repo {contract.repo!r}, but this is {expected_repo!r}"
-            )
-        else:
-            reasons.append(
-                f"contract is bound to repo {contract.repo!r}, but the current repo is unknown (set QUILL_REPO_ID)"
-            )
-    elif strict and repo_missing:
-        reasons.append(
-            f"contract has no repository binding; strict requires --repo "
-            f"(expected {expected_repo!r})"
-        )
-    elif repo_mismatch:
+    repo_blocks = False  # strict already exited
+    if repo_mismatch:
         reasons.append(
             f"warning: contract repo {contract.repo!r} != {expected_repo or 'unknown'} (not enforced; cooperative mode)"
         )
 
     contract_expired = contract.is_expired()
     contract_expiry_malformed = contract.expiry_is_malformed()
-    contract_expiry_blocks = bool(strict and (contract_expired or contract_expiry_malformed))
-    if strict and contract_expiry_malformed:
-        reasons.append(
-            f"contract expiry is malformed ({contract.expires_at!r}); "
-            "refusing to treat it as unlimited authorization"
-        )
-    elif contract_expiry_blocks:
-        reasons.append(f"contract expired at {contract.expires_at}; re-approve to authorize")
-    elif contract_expired:
+    contract_expiry_blocks = False  # strict already exited
+    if contract_expired:
         reasons.append(
             f"warning: contract expired at {contract.expires_at} (not enforced; cooperative mode)"
         )
@@ -585,9 +641,7 @@ def verify(
         reasons.append(f"warning: perimeter provenance unverified ({provenance.detail})")
     if strict_no_perimeter:
         reasons.append("strict mode requires a signed perimeter, but none is configured")
-    if contract_provenance_blocks:
-        reasons.append(f"contract provenance not established: {contract_prov.detail}")
-    elif not strict and not contract_prov.status.is_trustworthy:
+    if not contract_prov.status.is_trustworthy:
         reasons.append(f"warning: contract provenance unverified ({contract_prov.detail})")
 
     block = bool(

@@ -300,12 +300,40 @@ between the source code and what a user can actually deploy:
 - **Dogfood workflow fail-open (C-2, closed).** The skip-on-missing-contract
   step (which was fail-open: GitHub reports skipped jobs as success) and
   `continue-on-error` were removed; the Action fails closed on missing contract.
-- **Action version default (C-1, closed in source).** `action.yml` now defaults
-  to `>=0.3.0` so the Change Control engine is required.
+- **Action version pinned (C-2, closed in source).** `action.yml` now defaults
+  to `==0.3.0` (exact pin). Version bumped to 0.3.0.
+- **Contract provenance checked early (M-1, closed).** Strict mode now verifies
+  contract signature, repo binding, and expiry BEFORE consuming contract fields
+  in expensive git operations. A forged contract is rejected immediately.
+- **UTF-16 secret detection (R6-H1, closed).** Blob scanner now detects
+  UTF-16LE/BE (with and without BOM) and decodes before applying secret
+  patterns. Files that can't be decoded as UTF-8 fall back to latin-1.
+- **Candidate blob scanning (R6-H2, closed).** The secret scanner reads file
+  content from the candidate commit's git objects (`git cat-file blob`), not the
+  worktree. A divergence between the checkout and the evaluated commit can no
+  longer cause the scanner to miss a secret or scan the wrong version.
 
 Genuinely still open — do not rely on the CI gate against a determined adversary
 until these land:
 
+- **Caller workflow impersonation (round-6 C-1: CRITICAL).** The GitHub Action
+  runs inside a caller workflow that lives in the candidate repository. A PR can
+  modify that workflow to remove the Quill step or replace it with a direct
+  `statuses: write` API call posting `"state": "success"` on the
+  `quill/change-control` context. GitHub runs the PR's version of the workflow
+  for `pull_request` events. The required status check on the context name is
+  necessary but not sufficient: it proves a status was posted, not that Quill
+  posted it. **Mitigations** (choose one):
+  1. A dedicated Quill GitHub App that posts the status, selected as the
+     expected source for the required check.
+  2. An organization/enterprise ruleset-required workflow stored in a separate
+     trusted repository.
+  3. A `pull_request_target` workflow that runs from the base branch and never
+     executes candidate code.
+  Until one of these is in place, the CI gate is advisory against a workflow-
+  aware adversary. The gate-tamper BLOCK on `.github/workflows/**` catches
+  naive workflow edits but not an adversary who removes the step entirely
+  (because the modified workflow never runs Quill to detect the edit).
 - **Contract replay / one-use nonce.** The contract now binds repo, scope, base,
   and expiry, but NOT a one-use nonce or protected branch, so a valid contract
   is replayable within the same repo until it expires. For tenants that share an
@@ -316,7 +344,7 @@ until these land:
   alone. The Critical rename-out case that previously hid behind NEEDS_REVIEW now
   BLOCKs, but a strict deployment that must HARD-stop on sensitive surfaces needs
   the approval gate wired up.
-- **Action supply chain.** The Action specifies `quillx>=0.3.0` by default
+- **Action supply chain.** The Action pins `quillx==0.3.0` by default
   and the wrapper validates the passport from a fresh temp dir, but the
   third-party `actions/setup-python` and `actions/checkout` are referenced by
   mutable major tags; pin exact versions/digests in a hardened deployment.

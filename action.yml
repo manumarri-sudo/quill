@@ -33,12 +33,11 @@ inputs:
     default: ${{ github.event.pull_request.head.sha }}
   quill-version:
     description: >-
-      Version spec for the quillx package (e.g. '>=0.3.0'). Pinned to the exact
-      version this Action release was cut from when a release is published. The
-      Change Control engine (quill begin/verify) requires >=0.3.0; earlier versions
-      do not contain it. Override only to deliberately track a different build.
+      Version spec for the quillx package. Pinned to the exact version this
+      Action release was cut from. The Change Control engine (quill begin/verify)
+      requires >=0.3.0; earlier versions do not contain it.
     required: false
-    default: ">=0.3.0"
+    default: "==0.3.0"
   install-from-source:
     description: "Install quill from this checked-out repo instead of PyPI (used for dogfooding)."
     required: false
