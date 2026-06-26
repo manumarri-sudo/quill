@@ -168,21 +168,32 @@ rather than asking you to trust the document.
 ```yaml
 # .github/workflows/quill-change-control.yml
 on:
-  pull_request:
+  pull_request_target:          # NOT pull_request — see "Why pull_request_target" below
     branches: [main]
 jobs:
   change-control:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }   # full history so the base commit resolves
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}   # check out the PR's code
+          fetch-depth: 0
       - uses: manumarri-sudo/quill@v0
         with:
-          strict: "true"                          # enforced mode (default)
+          head: ${{ github.event.pull_request.head.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          strict: "true"
           approver-pubkeys: ${{ secrets.QUILL_APPROVER_PUBKEYS }}
           gate-key: ${{ secrets.QUILL_GATE_KEY }}
           gate-pubkeys: ${{ vars.QUILL_GATE_PUBKEYS }}
 ```
+
+**Why `pull_request_target`:** the `pull_request` event runs the PR's version of the
+workflow, so an AI agent can modify the workflow to remove the Quill step entirely —
+and the gate never fires. `pull_request_target` runs from the base branch (main),
+making the workflow tamper-proof. Strict mode **refuses to run** under
+`pull_request` to enforce this. A full secure template is at
+[`docs/secure-workflow.yml`](docs/secure-workflow.yml).
 
 The composite action ([`action.yml`](action.yml)) runs `quill verify --strict`,
 publishes a commit Status Check, and fails the job on `BLOCK`. The approver public
@@ -345,7 +356,7 @@ read [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) before using them).
 (`begin`/`verify`/passport + GitHub Action), the HMAC-chained audit log (32k+ entries
 dogfooded, truncation-detectable, `quill audit verify` clean), the local PreToolUse
 gate with Touch ID approvals and 26-pattern secret detection, the write-then-run AST
-scan, and the read-side surfaces (receipts, trifecta, pins, decay). 1180 tests pass;
+scan, and the read-side surfaces (receipts, trifecta, pins, decay). 1183 tests pass;
 `ruff`, `ruff format`, and `mypy --strict` are green and enforced in CI.
 
 **Roadmap (not shipping today, do not assume present):** PR-comment rendering of the

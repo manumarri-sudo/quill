@@ -1,0 +1,44 @@
+# Quill Change Control — secure workflow template.
+#
+# Copy this into .github/workflows/quill-check.yml in your repo.
+#
+# WHY pull_request_target: the 'pull_request' event runs the PR's version of
+# the workflow, so an AI agent (or any contributor) can modify the workflow to
+# remove the Quill step and the gate never fires. 'pull_request_target' runs
+# from the BASE branch (main), so only merged code controls the gate. This is
+# non-negotiable for tamper-proof enforcement.
+#
+# SAFETY: this workflow checks out the PR's code (for git diff) but does NOT
+# execute it. Quill is installed from PyPI, not from the checkout. The checkout
+# is read-only input to `quill verify`.
+#
+name: quill-change-control
+
+on:
+  pull_request_target:
+    branches: [main]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  change-control:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head (read-only, for git diff)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Quill Change Control
+        uses: manumarri-sudo/quill@v0
+        with:
+          head: ${{ github.event.pull_request.head.sha }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          strict: "true"
+          fail-on-block: "true"
+          gate-key: ${{ secrets.QUILL_GATE_KEY }}
+          gate-pubkeys: ${{ vars.QUILL_GATE_PUBKEYS }}
+          approver-pubkeys: ${{ secrets.QUILL_APPROVER_PUBKEYS }}

@@ -214,3 +214,70 @@ def test_strict_unsigned_evidence_opt_out_is_explicit(repo: tuple[Path, dict[str
         },
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_strict_rejects_pull_request_trigger(repo: tuple[Path, dict[str, str]]) -> None:
+    """Strict mode must refuse to run under the 'pull_request' event because
+    the PR controls the workflow and can remove Quill entirely (C-1)."""
+    if not WRAPPER.exists():
+        pytest.skip("wrapper script not present")
+    root, env = repo
+    head_sha = _repo_head(root, env)
+    bin_dir = root.parent / "fakebin_pr"
+    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0, head_commit=head_sha)
+    proc = _wrapper(
+        root,
+        env,
+        {
+            "PATH": str(bin_dir) + os.pathsep + env["PATH"],
+            "QUILL_STRICT": "true",
+            "QUILL_ALLOW_UNSIGNED_EVIDENCE": "true",
+            "GITHUB_EVENT_NAME": "pull_request",
+        },
+    )
+    assert proc.returncode == 2
+    assert "pull_request_target" in (proc.stdout + proc.stderr)
+
+
+def test_strict_allows_pull_request_target_trigger(repo: tuple[Path, dict[str, str]]) -> None:
+    """pull_request_target is the secure trigger and must be accepted."""
+    if not WRAPPER.exists():
+        pytest.skip("wrapper script not present")
+    root, env = repo
+    head_sha = _repo_head(root, env)
+    bin_dir = root.parent / "fakebin_prt"
+    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0, head_commit=head_sha)
+    proc = _wrapper(
+        root,
+        env,
+        {
+            "PATH": str(bin_dir) + os.pathsep + env["PATH"],
+            "QUILL_STRICT": "true",
+            "QUILL_ALLOW_UNSIGNED_EVIDENCE": "true",
+            "GITHUB_EVENT_NAME": "pull_request_target",
+        },
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_strict_pull_request_with_opt_in(repo: tuple[Path, dict[str, str]]) -> None:
+    """The explicit opt-in allows pull_request for dogfood repos."""
+    if not WRAPPER.exists():
+        pytest.skip("wrapper script not present")
+    root, env = repo
+    head_sha = _repo_head(root, env)
+    bin_dir = root.parent / "fakebin_opt"
+    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0, head_commit=head_sha)
+    proc = _wrapper(
+        root,
+        env,
+        {
+            "PATH": str(bin_dir) + os.pathsep + env["PATH"],
+            "QUILL_STRICT": "true",
+            "QUILL_ALLOW_UNSIGNED_EVIDENCE": "true",
+            "GITHUB_EVENT_NAME": "pull_request",
+            "QUILL_ALLOW_PULL_REQUEST_TRIGGER": "true",
+        },
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "candidate-controlled" in (proc.stdout + proc.stderr)

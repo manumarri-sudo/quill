@@ -48,6 +48,9 @@ jobs:
           approver-pubkeys: ${{ secrets.QUILL_APPROVER_PUBKEYS }}
           # Dogfood without a gate key: accept report-grade unsigned evidence.
           allow-unsigned-evidence: "true"
+          # Dogfood: this repo uses pull_request + install-from-source because it
+          # IS the Quill source. Consumers MUST use pull_request_target instead.
+          allow-pull-request-trigger: "true"
 
       - name: Report verdict
         run: echo "Quill verdict was ${{ steps.quill.outputs.verdict }}"

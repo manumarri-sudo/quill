@@ -61,6 +61,20 @@ if [[ -n "$STRICT_FLAG" && "$FAIL_ON_BLOCK" != "true" ]]; then
   exit 2
 fi
 
+# Workflow impersonation guard (C-1). Under the 'pull_request' event GitHub runs
+# the PR's version of the workflow, so a PR can remove or replace this step and
+# the gate never fires. 'pull_request_target' runs from the base branch and is
+# immune. In strict mode this is a hard error unless explicitly opted out,
+# because the entire trust spine is bypassed if the workflow is candidate-controlled.
+if [[ -n "$STRICT_FLAG" && "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+  if [[ "${QUILL_ALLOW_PULL_REQUEST_TRIGGER:-false}" != "true" ]]; then
+    echo "::error::strict mode requires pull_request_target (not pull_request). The pull_request event runs the PR's workflow, so a PR can remove Quill entirely. See docs/SECURITY-MODEL.md for the secure template. Set QUILL_ALLOW_PULL_REQUEST_TRIGGER=true to override (NOT recommended)."
+    exit 2
+  else
+    echo "::warning::running under pull_request with QUILL_ALLOW_PULL_REQUEST_TRIGGER=true — the caller workflow is candidate-controlled. A PR can remove this step."
+  fi
+fi
+
 # A private temp dir we own: the verifier writes here, and the verdict is read
 # back ONLY from here. Nothing in the repo tree can influence the decision.
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/quill.XXXXXX")"

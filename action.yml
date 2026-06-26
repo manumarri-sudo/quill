@@ -81,6 +81,14 @@ inputs:
       trusted. In cooperative mode the committed set is used in addition.
     required: false
     default: ""
+  allow-pull-request-trigger:
+    description: >-
+      In strict mode the Action refuses to run under the 'pull_request' event
+      because the PR controls the workflow and can remove Quill entirely. Set to
+      "true" ONLY for dogfood repos that install-from-source. Consumers MUST use
+      pull_request_target instead. See docs/SECURITY-MODEL.md.
+    required: false
+    default: "false"
 
 outputs:
   verdict:
@@ -120,6 +128,7 @@ runs:
         QUILL_GATE_KEY: ${{ inputs.gate-key }}
         QUILL_GATE_PUBKEYS: ${{ inputs.gate-pubkeys }}
         QUILL_ALLOW_UNSIGNED_EVIDENCE: ${{ inputs.allow-unsigned-evidence }}
+        QUILL_ALLOW_PULL_REQUEST_TRIGGER: ${{ inputs.allow-pull-request-trigger }}
         QUILL_APPROVER_PUBKEYS: ${{ inputs.approver-pubkeys }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
       run: bash "${{ github.action_path }}/scripts/quill-passport.sh"

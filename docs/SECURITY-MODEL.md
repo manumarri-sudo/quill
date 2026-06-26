@@ -336,24 +336,22 @@ A seventh pre-flight pass (2026-06-26, self-review before round-7 external) clos
 Genuinely still open — do not rely on the CI gate against a determined adversary
 until these land:
 
-- **Caller workflow impersonation (round-6 C-1: CRITICAL).** The GitHub Action
-  runs inside a caller workflow that lives in the candidate repository. A PR can
-  modify that workflow to remove the Quill step or replace it with a direct
-  `statuses: write` API call posting `"state": "success"` on the
-  `quill/change-control` context. GitHub runs the PR's version of the workflow
-  for `pull_request` events. The required status check on the context name is
-  necessary but not sufficient: it proves a status was posted, not that Quill
-  posted it. **Mitigations** (choose one):
-  1. A dedicated Quill GitHub App that posts the status, selected as the
-     expected source for the required check.
-  2. An organization/enterprise ruleset-required workflow stored in a separate
-     trusted repository.
-  3. A `pull_request_target` workflow that runs from the base branch and never
-     executes candidate code.
-  Until one of these is in place, the CI gate is advisory against a workflow-
-  aware adversary. The gate-tamper BLOCK on `.github/workflows/**` catches
-  naive workflow edits but not an adversary who removes the step entirely
-  (because the modified workflow never runs Quill to detect the edit).
+- **Caller workflow impersonation (round-6 C-1: MITIGATED).** The GitHub Action
+  runs inside a caller workflow that lives in the candidate repository. Under the
+  `pull_request` event, a PR can modify that workflow to remove Quill entirely.
+  **Mitigation (shipped):** strict mode now **refuses to run** under the
+  `pull_request` event (exit 2) unless explicitly opted out with
+  `QUILL_ALLOW_PULL_REQUEST_TRIGGER=true`. The secure setup uses
+  `pull_request_target`, which runs the workflow from the base branch — immune
+  to PR modifications. A secure workflow template is shipped at
+  `docs/secure-workflow.yml`. The opt-out exists only for the dogfood repo
+  (which uses `install-from-source` and intentionally runs from the PR branch).
+  **Residual risk:** `pull_request_target` + `actions/checkout@v4` with
+  `ref: PR-head` checks out untrusted code, but Quill does not execute it — it
+  only reads the git tree for `git diff`. The remaining escalation paths are:
+  1. A GitHub App as the status check source (strongest, eliminates even the
+     `statuses: write` fake-check vector).
+  2. An org/enterprise ruleset-required workflow in a trusted repo.
 - **Contract replay / one-use nonce.** The contract now binds repo, scope, base,
   and expiry, but NOT a one-use nonce or protected branch, so a valid contract
   is replayable within the same repo until it expires. For tenants that share an
