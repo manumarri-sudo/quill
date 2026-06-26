@@ -211,7 +211,7 @@ quill_event_types = ["tool.attempted"]
 standard = "NIST GenAI Profile"
 code = "GENAI-MS-2.6"
 title = "Pre-deployment testing evidence for agent tool surfaces"
-description = """Pre-deployment testing covers agent tool-call surfaces. Quill's `quill audit verify` and `quill doctor` give a per-deployment integrity baseline; the project's own test corpus (1,168+ unit + integration tests, including adversarial regression tests) is the substrate."""
+description = """Pre-deployment testing covers agent tool-call surfaces. Quill's `quill audit verify` and `quill doctor` give a per-deployment integrity baseline; the project's own test corpus (1,180+ unit + integration tests, including adversarial regression tests) is the substrate."""
 quill_event_types = ["chain.repaired"]
 
 # ============================================================================

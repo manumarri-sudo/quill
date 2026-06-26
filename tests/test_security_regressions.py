@@ -290,3 +290,122 @@ class TestH3CandidateBinding:
         result = verify_mod.verify(contract=contract, root=repo)
         assert result.head_commit is not None
         assert len(result.head_commit) >= 7
+
+
+# ── R7: _block_result → build_passport roundtrip ────────────────────────────
+
+class TestBlockResultPassportRoundtrip:
+    """_block_result() must produce a VerifyResult that build_passport() accepts
+    without crashing, since every strict-mode early-exit uses this path."""
+
+    def test_block_result_builds_valid_passport(self, repo: Path) -> None:
+        from quill import passport as passport_mod
+        contract, _ = contract_mod.begin("test task", allowed_paths=["**"], root=repo)
+        result = verify_mod._block_result(
+            contract, "test block reason", strict=True, root=repo, head="HEAD",
+        )
+        passport = passport_mod.build_passport(result)
+        assert passport["verdict"] == "BLOCK"
+        assert passport["head_commit"] is not None
+        assert "test block reason" in passport["reasons"]
+        assert passport["evidence"]["changed_files"] == []
+
+    def test_block_result_renders_markdown(self, repo: Path) -> None:
+        from quill import passport as passport_mod
+        contract, _ = contract_mod.begin("test task", allowed_paths=["**"], root=repo)
+        result = verify_mod._block_result(
+            contract, "provenance failure", strict=True, root=repo, head="HEAD",
+        )
+        md = passport_mod.render_markdown(result)
+        assert "BLOCK" in md
+        assert "provenance failure" in md
+
+
+# ── R7: candidate_sha validation ────────────────────────────────────────────
+
+class TestCandidateShaValidation:
+    """candidate_sha must be validated as a hex SHA after resolution, so a
+    malicious ref that doesn't resolve can't be injected into git commands."""
+
+    def test_bad_ref_blocks(self, repo: Path) -> None:
+        contract, _ = contract_mod.begin("test task", allowed_paths=["**"], root=repo)
+        result = verify_mod.verify(
+            contract=contract, root=repo, head="--output=/tmp/evil",
+        )
+        assert result.verdict is Verdict.BLOCK
+        assert any("did not resolve" in r for r in result.reasons)
+
+
+# ── R7: _decode_blob UTF-8-BOM handling ─────────────────────────────────────
+
+class TestDecodeBlobBom:
+    """_decode_blob must strip BOMs from all supported encodings."""
+
+    def test_utf8_bom_stripped(self) -> None:
+        content = b"\xef\xbb\xbfhello world"
+        decoded = verify_mod._decode_blob(content)
+        assert decoded == "hello world"
+        assert not decoded.startswith("﻿")
+
+    def test_utf16le_bom_stripped(self) -> None:
+        content = b"\xff\xfe" + "secret_key".encode("utf-16-le")
+        decoded = verify_mod._decode_blob(content)
+        assert decoded == "secret_key"
+        assert not decoded.startswith("﻿")
+
+    def test_utf16be_bom_stripped(self) -> None:
+        content = b"\xfe\xff" + "secret_key".encode("utf-16-be")
+        decoded = verify_mod._decode_blob(content)
+        assert decoded == "secret_key"
+
+    def test_plain_utf8_unchanged(self) -> None:
+        decoded = verify_mod._decode_blob(b"just ascii")
+        assert decoded == "just ascii"
+
+    def test_latin1_fallback(self) -> None:
+        decoded = verify_mod._decode_blob(b"\xff\xfe\xfd")
+        assert isinstance(decoded, str)
+
+
+# ── R7: _waived_secret int(line) crash guard ────────────────────────────────
+
+class TestWaivedSecretBadLine:
+    """A non-numeric line in exceptions.json must not crash the gate."""
+
+    def test_nonnumeric_line_skips_waiver(self) -> None:
+        from quill.policy import SecretFinding
+        finding = SecretFinding(path="src/app.py", line=10, pattern_name="test")
+        exceptions = [{"type": "secret", "path": "src/app.py", "line": "not-a-number"}]
+        result = verify_mod._waived_secret(finding, exceptions)
+        assert result is None
+
+    def test_none_line_still_matches(self) -> None:
+        from quill.policy import SecretFinding
+        finding = SecretFinding(path="src/app.py", line=10, pattern_name="test")
+        exceptions = [{"type": "secret", "path": "src/app.py"}]
+        result = verify_mod._waived_secret(finding, exceptions)
+        assert result is not None
+
+
+# ── R7: action.yml ↔ pyproject.toml version sync ───────────────────────────
+
+class TestVersionSync:
+    """The version pinned in action.yml must match pyproject.toml and _version.py."""
+
+    def test_action_yml_matches_pyproject(self) -> None:
+        import tomllib
+        root = Path(__file__).parent.parent
+        with open(root / "pyproject.toml", "rb") as f:
+            pyproject_version = tomllib.load(f)["project"]["version"]
+        action_text = (root / "action.yml").read_text()
+        assert f"=={pyproject_version}" in action_text, (
+            f"action.yml should pin =={pyproject_version}"
+        )
+
+    def test_version_py_matches_pyproject(self) -> None:
+        import tomllib
+        root = Path(__file__).parent.parent
+        with open(root / "pyproject.toml", "rb") as f:
+            pyproject_version = tomllib.load(f)["project"]["version"]
+        from quill._version import __version__
+        assert __version__ == pyproject_version

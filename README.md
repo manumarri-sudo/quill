@@ -345,7 +345,7 @@ read [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) before using them).
 (`begin`/`verify`/passport + GitHub Action), the HMAC-chained audit log (32k+ entries
 dogfooded, truncation-detectable, `quill audit verify` clean), the local PreToolUse
 gate with Touch ID approvals and 26-pattern secret detection, the write-then-run AST
-scan, and the read-side surfaces (receipts, trifecta, pins, decay). 1168 tests pass;
+scan, and the read-side surfaces (receipts, trifecta, pins, decay). 1180 tests pass;
 `ruff`, `ruff format`, and `mypy --strict` are green and enforced in CI.
 
 **Roadmap (not shipping today, do not assume present):** PR-comment rendering of the

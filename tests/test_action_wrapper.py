@@ -172,13 +172,21 @@ def test_strict_rejects_fail_on_block_false(repo: tuple[Path, dict[str, str]]) -
     assert "fail-on-block=false" in (proc.stdout + proc.stderr)
 
 
+def _repo_head(root: Path, env: dict[str, str]) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, env=env,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
 def test_strict_requires_gate_signature_by_default(repo: tuple[Path, dict[str, str]]) -> None:
     """A real PASS but no gate key -> strict refuses unsigned evidence (review M-4)."""
     if not WRAPPER.exists():
         pytest.skip("wrapper script not present")
     root, env = repo
+    head_sha = _repo_head(root, env)
     bin_dir = root.parent / "fakebin_pass"
-    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0, head_commit="abc1234")
+    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0, head_commit=head_sha)
     proc = _wrapper(
         root,
         env,
@@ -193,8 +201,9 @@ def test_strict_unsigned_evidence_opt_out_is_explicit(repo: tuple[Path, dict[str
     if not WRAPPER.exists():
         pytest.skip("wrapper script not present")
     root, env = repo
+    head_sha = _repo_head(root, env)
     bin_dir = root.parent / "fakebin_pass2"
-    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0, head_commit="abc1234")
+    _install_fake_quill(bin_dir, rc=0, verdict="PASS", exit_code=0, head_commit=head_sha)
     proc = _wrapper(
         root,
         env,

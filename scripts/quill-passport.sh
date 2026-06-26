@@ -38,6 +38,11 @@ STATUS_CONTEXT="quill/change-control"
 # candidate, the passport, and the published status all describe one SHA
 # (security review H-6: evaluated ref and status SHA could diverge). Prefer the
 # explicit candidate SHA; fall back to QUILL_HEAD, then HEAD.
+# Validate explicit SHA inputs against hex pattern to prevent option injection.
+if [[ -n "${QUILL_HEAD_SHA:-}" ]] && ! [[ "$QUILL_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  echo "::error::QUILL_HEAD_SHA is not a valid 40-hex SHA: '${QUILL_HEAD_SHA}'"
+  exit 2
+fi
 EVAL_REF="${QUILL_HEAD_SHA:-${QUILL_HEAD:-HEAD}}"
 
 # --strict (default on) requires a signed perimeter AND signed contract from a
@@ -85,12 +90,12 @@ fi
 
 # 3. Read the verdict + reasons from THIS run's passport only.
 read_field() {
-  python -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' \
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' \
     "$PASSPORT_JSON" "$1"
 }
 VERDICT="$(read_field verdict)"
 EXIT_CODE="$(read_field exit_code)"
-REASONS="$(python -c 'import json,sys; print("; ".join(json.load(open(sys.argv[1]))["reasons"]))' "$PASSPORT_JSON")"
+REASONS="$(python3 -c 'import json,sys; print("; ".join(json.load(open(sys.argv[1]))["reasons"]))' "$PASSPORT_JSON")"
 
 # 3a. The verdict must be one Quill actually emits. A malformed / truncated /
 #     hand-crafted passport that decodes to anything else fails closed.
@@ -145,17 +150,24 @@ fi
 #     Check reports against, so evidence can't identify a different candidate
 #     than the one being gated (security review H-6). In strict mode the passport
 #     MUST contain a valid head_commit; an empty one bypasses the binding check.
-HEAD_COMMIT="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("head_commit") or "")' "$PASSPORT_JSON")"
+HEAD_COMMIT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("head_commit") or "")' "$PASSPORT_JSON")"
 if [[ -n "$STRICT_FLAG" && -z "$HEAD_COMMIT" ]]; then
   echo "::error::strict mode requires the passport to contain a head_commit SHA; failing closed."
   exit 2
 fi
-if [[ -n "${QUILL_HEAD_SHA:-}" && -n "$HEAD_COMMIT" && "$HEAD_COMMIT" != "$QUILL_HEAD_SHA" ]]; then
-  echo "::error::candidate mismatch: passport head_commit=$HEAD_COMMIT but status SHA=$QUILL_HEAD_SHA; failing closed."
+# The passport head_commit must match the SHA used for the Status Check,
+# regardless of whether QUILL_HEAD_SHA was explicitly set. Resolve HEAD now
+# so the binding is always checked (wrapper-scanner HIGH-1).
+STATUS_SHA="${QUILL_HEAD_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}"
+if [[ -n "$HEAD_COMMIT" && -n "$STATUS_SHA" && "$HEAD_COMMIT" != "$STATUS_SHA" ]]; then
+  echo "::error::candidate mismatch: passport head_commit=$HEAD_COMMIT but status SHA=$STATUS_SHA; failing closed."
   exit 2
 fi
 
-echo "Quill verdict: $VERDICT ($REASONS)"
+# Sanitize REASONS before echoing: strip CR/LF and leading :: to prevent
+# Actions workflow-command injection from attacker-controlled passport data.
+SAFE_REASONS="$(printf '%s' "$REASONS" | tr -d '\r\n' | sed 's/^:://')"
+echo "Quill verdict: $VERDICT ($SAFE_REASONS)"
 
 # 4. Publish the verified passport to the repo-visible dir for humans/tooling.
 #    This is a copy of the artifact we already trusted, not the source of truth.
@@ -182,10 +194,9 @@ case "$VERDICT" in
   BLOCK) STATE="failure" ;;
   *)     STATE="success" ;;
 esac
-SHA="${QUILL_HEAD_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}"
-if [[ -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_REPOSITORY:-}" && -n "$SHA" ]]; then
-  DESC="$VERDICT: ${REASONS:0:130}"
-  python - "$STATE" "$DESC" "$SHA" <<'PY' || echo "::warning::could not publish Status Check"
+if [[ -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_REPOSITORY:-}" && -n "$STATUS_SHA" ]]; then
+  DESC="$VERDICT: ${SAFE_REASONS:0:130}"
+  python3 - "$STATE" "$DESC" "$STATUS_SHA" <<'PY' || echo "::warning::could not publish Status Check"
 import json, os, sys, urllib.request
 state, desc, sha = sys.argv[1], sys.argv[2], sys.argv[3]
 repo = os.environ["GITHUB_REPOSITORY"]

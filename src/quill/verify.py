@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import enum
 import json
+import logging
 import os
 import re
 import subprocess
@@ -38,6 +39,8 @@ from quill.provenance import ProvenanceResult
 if TYPE_CHECKING:
     from quill.audit import AuditLog
     from quill.policy import DiffEvaluation
+
+_log = logging.getLogger(__name__)
 
 
 class VerifyError(QuillError):
@@ -191,8 +194,12 @@ def _waived_secret(
         if not _glob_match(finding.path, e.get("path")):
             continue
         line = e.get("line")
-        if line is not None and int(line) != finding.line:
-            continue
+        if line is not None:
+            try:
+                if int(line) != finding.line:
+                    continue
+            except (ValueError, TypeError):
+                continue
         return e
     return None
 
@@ -254,6 +261,7 @@ def _is_hex_sha(ref: str) -> bool:
 
 _UTF16_LE_BOM = b"\xff\xfe"
 _UTF16_BE_BOM = b"\xfe\xff"
+_UTF8_BOM = b"\xef\xbb\xbf"
 
 
 def _decode_blob(raw: bytes) -> str:
@@ -263,12 +271,21 @@ def _decode_blob(raw: bytes) -> str:
     Falls back to latin-1 (lossless for arbitrary bytes) so we never silently
     skip content."""
     if raw.startswith(_UTF16_LE_BOM):
-        return raw[2:].decode("utf-16-le")
+        try:
+            return raw[2:].decode("utf-16-le")
+        except (UnicodeDecodeError, ValueError):
+            pass
     if raw.startswith(_UTF16_BE_BOM):
-        return raw[2:].decode("utf-16-be")
+        try:
+            return raw[2:].decode("utf-16-be")
+        except (UnicodeDecodeError, ValueError):
+            pass
+    if raw.startswith(_UTF8_BOM):
+        try:
+            return raw[3:].decode("utf-8")
+        except UnicodeDecodeError:
+            pass
     if b"\x00" in raw[:512]:
-        # Heuristic: NUL bytes early in the file suggest UTF-16 without BOM.
-        # Try both endiannesses; prefer whichever doesn't produce replacement chars.
         for enc in ("utf-16-le", "utf-16-be"):
             try:
                 decoded = raw.decode(enc)
@@ -286,7 +303,8 @@ def _read_candidate_blob(root: Path, candidate_sha: str, path: str) -> str | Non
     """Read a file from the candidate commit's tree, not the worktree.
 
     Returns decoded text (handling UTF-16/UTF-8), or None if the blob doesn't
-    exist at that commit."""
+    exist at that commit. Logs a warning on unexpected git failures so silent
+    scan skips are visible."""
     try:
         proc = subprocess.run(
             ["git", "cat-file", "blob", f"{candidate_sha}:{path}"],
@@ -294,7 +312,10 @@ def _read_candidate_blob(root: Path, candidate_sha: str, path: str) -> str | Non
             capture_output=True,
             check=True,
         )
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except FileNotFoundError:
+        return None
+    except subprocess.CalledProcessError as e:
+        _log.warning("blob read failed for %s:%s — %s", candidate_sha[:12], path, e)
         return None
     return _decode_blob(proc.stdout)
 
@@ -428,6 +449,12 @@ def verify(
     # inventory, and the recorded head, so evaluated == recorded (security review:
     # candidate identity mismatch).
     candidate_sha = _resolve_sha(root, head)
+    if not _is_hex_sha(candidate_sha):
+        return _block_result(
+            contract,
+            f"candidate ref {head!r} did not resolve to a valid commit SHA",
+            strict=strict, root=root, head=head,
+        )
     # --text forces a textual diff even for files git would call binary, so a
     # `.gitattributes` `-diff` entry cannot hide a secret-bearing file's added
     # lines from the scanner (security review H-2). Real binaries become text
