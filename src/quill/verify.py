@@ -148,6 +148,28 @@ def _resolve_sha(root: Path, ref: str) -> str:
     return out.stdout.strip() or ref
 
 
+def _is_ancestor(root: Path, base: str, head: str) -> bool:
+    """Return True iff `base` is an ancestor of `head` (or base == head).
+
+    Uses ``git merge-base --is-ancestor`` (exit 0 = ancestor, exit 1 = not).
+    Any other failure - notably a shallow clone where the merge base is beyond
+    the fetched history - raises CalledProcessError, which the caller treats as
+    "can't prove non-ancestry" and warns rather than blocking."""
+    proc = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", base, head],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 0:
+        return True
+    if proc.returncode == 1:
+        return False
+    raise subprocess.CalledProcessError(
+        proc.returncode, proc.args, output=proc.stdout, stderr=proc.stderr
+    )
+
+
 def git_name_status(base_commit: str | None, root: Path, *, head: str = "HEAD") -> list[Any]:
     """Authoritative changed-path inventory via ``git diff --name-status -z``.
 
@@ -396,7 +418,9 @@ def verify(
                     return _block_result(
                         contract,
                         f"contract base_commit {contract.base_commit!r} is not a valid commit SHA",
-                        strict=strict, root=root, head=head,
+                        strict=strict,
+                        root=root,
+                        head=head,
                     )
                 base = None
 
@@ -412,7 +436,9 @@ def verify(
         return _block_result(
             contract,
             f"contract provenance not established: {contract_prov.detail}",
-            strict=strict, root=root, head=head,
+            strict=strict,
+            root=root,
+            head=head,
         )
 
     expected_repo = (_env.get("QUILL_REPO_ID") or _env.get("GITHUB_REPOSITORY") or "").strip()
@@ -427,7 +453,9 @@ def verify(
         return _block_result(
             contract,
             f"contract has no repository binding; strict requires --repo (expected {expected_repo!r})",
-            strict=strict, root=root, head=head,
+            strict=strict,
+            root=root,
+            head=head,
         )
 
     contract_expired = contract.is_expired()
@@ -436,13 +464,17 @@ def verify(
         return _block_result(
             contract,
             f"contract expiry is malformed ({contract.expires_at!r}); refusing to treat it as unlimited authorization",
-            strict=strict, root=root, head=head,
+            strict=strict,
+            root=root,
+            head=head,
         )
     if strict and contract_expired:
         return _block_result(
             contract,
             f"contract expired at {contract.expires_at}; re-approve to authorize",
-            strict=strict, root=root, head=head,
+            strict=strict,
+            root=root,
+            head=head,
         )
 
     # Resolve the candidate to ONE concrete SHA and use it for the diff, the
@@ -453,8 +485,72 @@ def verify(
         return _block_result(
             contract,
             f"candidate ref {head!r} did not resolve to a valid commit SHA",
-            strict=strict, root=root, head=head,
+            strict=strict,
+            root=root,
+            head=head,
         )
+
+    # Defense-in-depth (base ancestry): a human-signed contract whose base_commit
+    # equals HEAD (or otherwise sits off the candidate's history) yields an EMPTY
+    # diff, so every policy check trivially passes — a false-positive PASS. Even
+    # though the contract is signed, a human can make this mistake, so verify the
+    # base is actually an ancestor of the candidate, and reject the degenerate
+    # base == candidate case outright. We only run this when base is a real commit
+    # (not None, not the empty tree), since those legitimately have no ancestry
+    # relationship to HEAD.
+    base_not_ancestor = False
+    reasons_ancestry: tuple[str, ...] = ()
+    if base is not None and base != _EMPTY_TREE and base == candidate_sha:
+        # base == candidate is the canonical empty-diff trap: nothing to compare,
+        # so nothing can be out of scope. Block in strict; warn in cooperative.
+        base_not_ancestor = True
+        if strict:
+            return _block_result(
+                contract,
+                f"contract base_commit {base[:12]} is not an ancestor of "
+                f"candidate {candidate_sha[:12]} (base equals the candidate, so "
+                "the diff is empty and every check trivially passes)",
+                strict=strict,
+                root=root,
+                head=head,
+            )
+        reasons_ancestry = (
+            f"warning: base_commit {base[:12]} equals the candidate; the diff is "
+            "empty so nothing was actually verified (not enforced; cooperative mode)",
+        )
+    elif base is not None and base != _EMPTY_TREE:
+        try:
+            base_not_ancestor = not _is_ancestor(root, base, candidate_sha)
+        except subprocess.CalledProcessError as exc:
+            # Shallow clone or unreachable merge base: can't prove non-ancestry.
+            # Warn (cooperative) but never crash or block on inconclusive data.
+            _log.warning(
+                "base ancestry check inconclusive for %s..%s — %s",
+                base[:12],
+                candidate_sha[:12],
+                exc,
+            )
+            reasons_ancestry = (
+                f"warning: could not verify base_commit {base[:12]} is an ancestor "
+                f"of {candidate_sha[:12]} (shallow clone?)",
+            )
+        else:
+            if base_not_ancestor:
+                if strict:
+                    return _block_result(
+                        contract,
+                        f"contract base_commit {base[:12]} is not an ancestor of "
+                        f"candidate {candidate_sha[:12]}; the diff does not describe "
+                        "work built on the approved base (possible stale or forged base)",
+                        strict=strict,
+                        root=root,
+                        head=head,
+                    )
+                reasons_ancestry = (
+                    f"warning: base_commit {base[:12]} is not an ancestor of "
+                    f"candidate {candidate_sha[:12]} (not enforced; cooperative mode)",
+                )
+
     # --text forces a textual diff even for files git would call binary, so a
     # `.gitattributes` `-diff` entry cannot hide a secret-bearing file's added
     # lines from the scanner (security review H-2). Real binaries become text
@@ -480,6 +576,21 @@ def verify(
                 policed_changed.add(p)
     # Authoritative changed-file list for the evidence layer (both endpoints).
     inventory_paths = tuple(sorted({p for cp in inventory for p in cp.endpoints}))
+
+    # Empty-diff staleness signal: if the base IS a valid ancestor but the diff
+    # is empty while the contract claims a non-trivial scope (anything narrower
+    # than the catch-all ["**"]), the contract probably describes work that was
+    # never produced — a stale base or an accidental no-op. Surface it as a
+    # warning so a reviewer notices the PASS isn't backed by any change. A ["**"]
+    # scope is intentionally broad and an empty diff under it is unremarkable.
+    nontrivial_scope = tuple(contract.allowed_paths) not in ((), ("**",))
+    empty_diff_warning: tuple[str, ...] = ()
+    if not base_not_ancestor and not inventory_paths and nontrivial_scope:
+        empty_diff_warning = (
+            "warning: diff is empty but the contract scopes specific paths "
+            f"({', '.join(contract.allowed_paths)}); the contract may be stale "
+            "or the change was never committed",
+        )
     for df in policy.parse_unified_diff(diff_text):
         for p in (df.path, df.old_path):
             if p and p != "/dev/null":  # /dev/null is the add/delete sentinel
@@ -565,7 +676,12 @@ def verify(
         if cat is not None and p not in surfaces_all.setdefault(cat, []):
             surfaces_all[cat].append(p)
 
-    unwaived_surfaces: dict[str, list[str]] = {"tests": [], "ci": [], "lockfiles": [], "gitconfig": []}
+    unwaived_surfaces: dict[str, list[str]] = {
+        "tests": [],
+        "ci": [],
+        "lockfiles": [],
+        "gitconfig": [],
+    }
     for category, paths in surfaces_all.items():
         for p in paths:
             e = _waived_surface(category, p, exceptions)
@@ -617,6 +733,8 @@ def verify(
     secrets_review = bool(unwaived_secrets) and not secrets_block
 
     reasons: list[str] = []
+    reasons.extend(reasons_ancestry)
+    reasons.extend(empty_diff_warning)
     if unwaived_secrets:
         tail = "" if secrets_block else " (perimeter block_secrets=false: review, not block)"
         reasons.append(f"{len(unwaived_secrets)} secret(s) detected on added lines{tail}")

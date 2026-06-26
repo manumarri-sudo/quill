@@ -13,6 +13,7 @@ import pytest
 
 from quill import contract as contract_mod
 from quill import perimeter as perimeter_mod
+from quill import provenance as provenance_mod
 from quill import verify as verify_mod
 from quill.policy import _glob_segments, classify_sensitive_surface
 from quill.verify import Verdict
@@ -409,3 +410,56 @@ class TestVersionSync:
             pyproject_version = tomllib.load(f)["project"]["version"]
         from quill._version import __version__
         assert __version__ == pyproject_version
+
+
+# ── base_commit ancestry: empty-diff false-positive PASS ─────────────────────
+
+class TestBaseCommitAncestry:
+    """A contract whose base_commit equals HEAD produces an empty diff, so every
+    policy check trivially passes — a false-positive PASS. Strict mode blocks a
+    base that isn't an ancestor of the candidate; the empty-diff case (base ==
+    head) is the canonical instance."""
+
+    def test_base_equals_head_blocks_strict(self, repo: Path) -> None:
+        from quill import attest
+
+        head_sha = _git(repo, "rev-parse", "HEAD")
+        contract = contract_mod.Contract(
+            version=1,
+            task="test",
+            task_source="text",
+            allowed_paths=("**",),
+            base_commit=head_sha,
+            created_at="2026-01-01T00:00:00Z",
+            contract_id="test-ancestry",
+        )
+        # Sign the contract with an externally-pinned key so the strict path
+        # reaches the ancestry check instead of early-exiting on provenance.
+        priv_pem, pub_pem = attest.generate_keypair()
+        provenance_mod.sign_artifact(
+            contract.to_dict(), priv_pem, repo / ".quill" / "contract.sig",
+        )
+        env = {"QUILL_APPROVER_PUBKEYS": pub_pem}
+        result = verify_mod.verify(
+            contract=contract, root=repo, strict=True, env=env,
+        )
+        assert result.verdict is Verdict.BLOCK
+        assert any("not an ancestor" in r for r in result.reasons)
+
+    def test_base_is_ancestor_passes(self, repo: Path) -> None:
+        contract, _ = contract_mod.begin("test task", allowed_paths=["**"], root=repo)
+        (repo / "src" / "new.py").write_text("y = 2\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", "real change on top of base")
+        result = verify_mod.verify(contract=contract, root=repo)
+        assert result.verdict is Verdict.PASS
+        assert not any("not an ancestor" in r for r in result.reasons)
+
+    def test_is_ancestor_helper(self, repo: Path) -> None:
+        base = _git(repo, "rev-parse", "HEAD")
+        (repo / "src" / "x.py").write_text("z = 3\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", "child")
+        head = _git(repo, "rev-parse", "HEAD")
+        assert verify_mod._is_ancestor(repo, base, head) is True
+        assert verify_mod._is_ancestor(repo, head, base) is False

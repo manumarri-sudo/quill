@@ -23,6 +23,13 @@ inputs:
     description: "Exit 1 (fail the job) when the verdict is BLOCK."
     required: false
     default: "true"
+  block-on-review:
+    description: >-
+      Exit 1 (fail the job) on NEEDS_REVIEW verdicts, not just BLOCK. Use this
+      for strict deployments where any finding — including sensitive surfaces —
+      must be explicitly approved before merge.
+    required: false
+    default: "false"
   github-token:
     description: "Token used to publish the commit Status Check."
     required: false
@@ -102,7 +109,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
       with:
         python-version: "3.12"
 
@@ -123,6 +130,7 @@ runs:
         QUILL_HEAD: ${{ inputs.head }}
         QUILL_PASSPORT_DIR: ${{ inputs.passport-dir }}
         QUILL_FAIL_ON_BLOCK: ${{ inputs.fail-on-block }}
+        QUILL_BLOCK_ON_REVIEW: ${{ inputs.block-on-review }}
         QUILL_HEAD_SHA: ${{ inputs.head-sha }}
         QUILL_STRICT: ${{ inputs.strict }}
         QUILL_GATE_KEY: ${{ inputs.gate-key }}

@@ -20,6 +20,9 @@
 #                       (default .quill); the verdict is NOT trusted from here
 #   QUILL_STRICT        "true" (default) requires a signed perimeter + contract
 #   QUILL_FAIL_ON_BLOCK "true" to exit 1 on BLOCK (default true)
+#   QUILL_BLOCK_ON_REVIEW "true" treats NEEDS_REVIEW as BLOCK for the Status
+#                       Check state + job exit (default false). The passport
+#                       verdict itself is left unchanged.
 #   QUILL_GATE_PUBKEYS  trusted gate PUBLIC key(s) (PEM/paths). When set, the
 #                       passport signature MUST verify or the job fails closed.
 #   QUILL_HEAD_SHA      commit SHA to attach the Status Check to (default: git HEAD)
@@ -178,6 +181,15 @@ if [[ -n "$HEAD_COMMIT" && -n "$STATUS_SHA" && "$HEAD_COMMIT" != "$STATUS_SHA" ]
   exit 2
 fi
 
+# Passport fingerprint: the audit MAC binds the status check to THIS passport.
+# A real Quill status carries it in the description; a spoofed "success" posted
+# by an attacker-injected workflow cannot reproduce a MAC it never computed, so
+# fake checks are detectable post-hoc (defense-in-depth against status-check
+# spoofing — an evil PR workflow can still POST to the context, but it can't
+# forge the fingerprint). Sanitize to hex-only so it can't carry an injection.
+MAC="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("audit",{}).get("verification_run_mac",""))' "$PASSPORT_JSON")"
+SAFE_MAC="$(printf '%s' "$MAC" | tr -cd '0-9a-fA-F')"
+
 # Sanitize REASONS before echoing: strip CR/LF and leading :: to prevent
 # Actions workflow-command injection from attacker-controlled passport data.
 SAFE_REASONS="$(printf '%s' "$REASONS" | tr -d '\r\n' | sed 's/^:://')"
@@ -202,14 +214,31 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" && -f "$PASSPORT_MD" ]]; then
   cat "$PASSPORT_MD" >>"$GITHUB_STEP_SUMMARY"
 fi
 
+# NEEDS_REVIEW blocking: when enabled, NEEDS_REVIEW is treated as BLOCK for the
+# Status Check state and the job exit, so the job fails on any finding (not just
+# hard violations). The passport verdict itself is left unchanged — this only
+# affects how the wrapper reports/gates.
+BLOCK_FOR_EXIT="false"
+[[ "$VERDICT" == "BLOCK" ]] && BLOCK_FOR_EXIT="true"
+if [[ "${QUILL_BLOCK_ON_REVIEW:-false}" == "true" && "$VERDICT" == "NEEDS_REVIEW" ]]; then
+  echo "::warning::NEEDS_REVIEW treated as BLOCK (block-on-review=true)"
+  BLOCK_FOR_EXIT="true"
+fi
+
 # 7. Commit Status Check. PASS / NEEDS_REVIEW -> success (NEEDS_REVIEW is a soft
-#    signal); BLOCK -> failure. Best-effort: a missing token just skips it.
-case "$VERDICT" in
-  BLOCK) STATE="failure" ;;
-  *)     STATE="success" ;;
-esac
+#    signal); BLOCK -> failure. With block-on-review, NEEDS_REVIEW -> failure too.
+#    Best-effort: a missing token just skips it.
+if [[ "$BLOCK_FOR_EXIT" == "true" ]]; then
+  STATE="failure"
+else
+  STATE="success"
+fi
 if [[ -n "${GITHUB_TOKEN:-}" && -n "${GITHUB_REPOSITORY:-}" && -n "$STATUS_SHA" ]]; then
-  DESC="$VERDICT: ${SAFE_REASONS:0:130}"
+  if [[ -n "$SAFE_MAC" ]]; then
+    DESC="$VERDICT: ${SAFE_REASONS:0:100} [mac:${SAFE_MAC:0:12}]"
+  else
+    DESC="$VERDICT: ${SAFE_REASONS:0:130}"
+  fi
   python3 - "$STATE" "$DESC" "$STATUS_SHA" <<'PY' || echo "::warning::could not publish Status Check"
 import json, os, sys, urllib.request
 state, desc, sha = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -234,10 +263,18 @@ req = urllib.request.Request(
 urllib.request.urlopen(req, timeout=15).read()
 print("published Status Check:", state)
 PY
+
+  # Record the SHA + MAC we just posted so `quill verify-passport` can
+  # cross-check that the status check on this commit was the one Quill wrote,
+  # not a spoof posted by an injected workflow on the same context.
+  printf 'sha=%s\nmac=%s\ncontext=%s\nstate=%s\n' \
+    "$STATUS_SHA" "$SAFE_MAC" "$STATUS_CONTEXT" "$STATE" \
+    >"$PUBLISH_DIR/status-fingerprint"
 fi
 
-# 8. Exit code: fail the job only on BLOCK (when fail-on-block is on).
-if [[ "$VERDICT" == "BLOCK" && "$FAIL_ON_BLOCK" == "true" ]]; then
+# 8. Exit code: fail the job on BLOCK (when fail-on-block is on), and on
+#    NEEDS_REVIEW when block-on-review promoted it to a blocking state above.
+if [[ "$BLOCK_FOR_EXIT" == "true" && "$FAIL_ON_BLOCK" == "true" ]]; then
   exit 1
 fi
 exit 0

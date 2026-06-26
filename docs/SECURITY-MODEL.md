@@ -333,6 +333,31 @@ A seventh pre-flight pass (2026-06-26, self-review before round-7 external) clos
   `QUILL_HEAD_SHA` against `^[0-9a-fA-F]{40}$` to prevent option injection.
 - **python → python3 (R7-L1, closed).** Wrapper uses `python3` throughout.
 
+A round-8 hardening pass added:
+
+- **Base-commit ancestry check (R8-H1, closed).** `verify()` now checks that
+  `base_commit` is a git ancestor of the candidate via `git merge-base
+  --is-ancestor`. A base that equals the candidate (empty diff, every check
+  trivially passes) is the canonical false-positive PASS — strict mode blocks it
+  outright. A base that is not an ancestor (stale or forged) also blocks in
+  strict. Shallow clones where the merge base is unreachable produce a warning,
+  not a block, to avoid false negatives.
+- **Status-check fingerprint (R8-M1, closed).** The wrapper embeds the passport's
+  audit MAC (first 12 hex chars) in the Status Check description as `[mac:...]`.
+  A spoofed status posted by an attacker-injected workflow cannot reproduce a MAC
+  it never computed, so fake checks are detectable post-hoc. A
+  `status-fingerprint` file records `sha/mac/context/state` for `quill
+  verify-passport` cross-checks. Full closure requires a GitHub App as the check
+  source; the fingerprint is defense-in-depth.
+- **NEEDS_REVIEW blocking (R8-M2, closed).** `block-on-review` input / env
+  `QUILL_BLOCK_ON_REVIEW=true` promotes NEEDS_REVIEW to failure state + exit 1.
+- **Supply-chain SHA pinning (R8-L1, closed).** `actions/setup-python` and
+  `actions/checkout` pinned to commit SHAs in `action.yml` and
+  `docs/secure-workflow.yml`.
+- **Empty-diff staleness warning (R8-L2, closed).** When the diff is empty but
+  the contract scopes specific paths (not `["**"]`), a warning surfaces that the
+  contract may be stale or the work was never committed.
+
 Genuinely still open — do not rely on the CI gate against a determined adversary
 until these land:
 
@@ -357,15 +382,19 @@ until these land:
   is replayable within the same repo until it expires. For tenants that share an
   approver key across repos, the repo binding closes cross-repo replay; within a
   single repo, expiry is the time-bound.
-- **NEEDS_REVIEW is non-blocking.** It exits 0 (a soft signal); enforcing review
-  still depends on `quill check-approval` + branch protection, not the verdict
-  alone. The Critical rename-out case that previously hid behind NEEDS_REVIEW now
-  BLOCKs, but a strict deployment that must HARD-stop on sensitive surfaces needs
-  the approval gate wired up.
-- **Action supply chain.** The Action pins `quillx==0.3.0` by default
-  and the wrapper validates the passport from a fresh temp dir, but the
-  third-party `actions/setup-python` and `actions/checkout` are referenced by
-  mutable major tags; pin exact versions/digests in a hardened deployment.
+- **NEEDS_REVIEW blocking (MITIGATED).** The `block-on-review` input (env
+  `QUILL_BLOCK_ON_REVIEW=true`) promotes NEEDS_REVIEW to a blocking state: the
+  Status Check reports `failure` and the job exits 1 — the same as BLOCK. The
+  passport verdict itself stays `NEEDS_REVIEW` for the audit trail; only the gate
+  behavior changes. Operators that need a hard stop on sensitive surfaces set this
+  rather than wiring up a separate approval gate. Without it, NEEDS_REVIEW still
+  exits 0 (soft signal) and depends on branch protection.
+- **Action supply chain (MITIGATED).** `actions/setup-python` is SHA-pinned to
+  `@a26af69be951a213d495a4c3e4e4022e16d87065` (v5.6.0) in `action.yml`, and the
+  secure workflow template (`docs/secure-workflow.yml`) SHA-pins
+  `actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683` (v4.2.2). The Quill
+  Action reference itself (`manumarri-sudo/quill@v0`) is still a mutable major
+  tag; pin to a commit SHA for defense-grade deployments.
 
 - **Off-box evidence anchoring.** The Merkle transparency tree head is built but
   not yet anchored off the runner, so a CI passport's MAC is not independently
