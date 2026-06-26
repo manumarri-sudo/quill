@@ -33,7 +33,7 @@ jobs:
           fetch-depth: 0
 
       - name: Quill Change Control
-        uses: manumarri-sudo/quill@v0
+        uses: manumarri-sudo/quill@b7d1e64d5779dfbffb6ffd294de06a7935ff4e46  # v0
         with:
           head: ${{ github.event.pull_request.head.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}

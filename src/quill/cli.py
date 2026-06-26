@@ -569,10 +569,10 @@ def verify_passport_cmd(
         if not passport_mac:
             out.print("[red]✗ passport has no audit MAC — cannot verify status fingerprint[/red]")
             raise typer.Exit(code=1)
-        if not fp_mac:
-            out.print("[red]✗ status-fingerprint has no MAC[/red]")
+        if not fp_mac or len(fp_mac) < 12:
+            out.print("[red]✗ status-fingerprint MAC missing or too short (need ≥12 hex chars)[/red]")
             raise typer.Exit(code=1)
-        if not passport_mac.startswith(fp_mac) and not fp_mac.startswith(passport_mac):
+        if passport_mac != fp_mac:
             out.print(
                 f"[red]✗ status fingerprint mismatch[/red] — passport MAC "
                 f"{passport_mac[:12]}… ≠ fingerprint MAC {fp_mac[:12]}…"

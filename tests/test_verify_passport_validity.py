@@ -79,7 +79,7 @@ def test_status_fingerprint_match(tmp_path: Path) -> None:
     mac = "deadbeef" * 8
     pj, pub = _signed_passport(tmp_path, audit={"verification_run_mac": mac})
     fp = tmp_path / "status-fingerprint"
-    fp.write_text(f"sha={'a' * 40}\nmac={mac[:12]}\ncontext=quill/change-control\nstate=success\n")
+    fp.write_text(f"sha={'a' * 40}\nmac={mac}\ncontext=quill/change-control\nstate=success\n")
     r = _run(pj, pub, "--status-fingerprint", str(fp))
     assert r.returncode == 0
 
@@ -88,16 +88,26 @@ def test_status_fingerprint_mismatch(tmp_path: Path) -> None:
     mac = "deadbeef" * 8
     pj, pub = _signed_passport(tmp_path, audit={"verification_run_mac": mac})
     fp = tmp_path / "status-fingerprint"
-    fp.write_text(f"sha={'a' * 40}\nmac={'f' * 12}\ncontext=quill/change-control\nstate=success\n")
+    fp.write_text(f"sha={'a' * 40}\nmac={'f' * 64}\ncontext=quill/change-control\nstate=success\n")
     r = _run(pj, pub, "--status-fingerprint", str(fp))
     assert r.returncode == 1
     assert "fingerprint mismatch" in (r.stdout + r.stderr)
 
 
+def test_status_fingerprint_truncated_mac(tmp_path: Path) -> None:
+    mac = "deadbeef" * 8
+    pj, pub = _signed_passport(tmp_path, audit={"verification_run_mac": mac})
+    fp = tmp_path / "status-fingerprint"
+    fp.write_text(f"sha={'a' * 40}\nmac=bbb\n")
+    r = _run(pj, pub, "--status-fingerprint", str(fp))
+    assert r.returncode == 1
+    assert "too short" in (r.stdout + r.stderr)
+
+
 def test_status_fingerprint_no_passport_mac(tmp_path: Path) -> None:
     pj, pub = _signed_passport(tmp_path)
     fp = tmp_path / "status-fingerprint"
-    fp.write_text("sha=aaa\nmac=bbb\n")
+    fp.write_text(f"sha=aaa\nmac={'b' * 64}\n")
     r = _run(pj, pub, "--status-fingerprint", str(fp))
     assert r.returncode == 1
     assert "no audit MAC" in (r.stdout + r.stderr)

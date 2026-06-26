@@ -422,6 +422,11 @@ def verify(
                         root=root,
                         head=head,
                     )
+                _log.warning(
+                    "contract base_commit %r did not resolve to a valid SHA; "
+                    "falling back to empty-tree diff (entire repo history as additions)",
+                    contract.base_commit,
+                )
                 base = None
 
     # Early-exit checks: verify contract provenance, repo binding, and expiry
