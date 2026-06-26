@@ -263,9 +263,9 @@ def _decode_blob(raw: bytes) -> str:
     Falls back to latin-1 (lossless for arbitrary bytes) so we never silently
     skip content."""
     if raw.startswith(_UTF16_LE_BOM):
-        return raw.decode("utf-16-le")
+        return raw[2:].decode("utf-16-le")
     if raw.startswith(_UTF16_BE_BOM):
-        return raw.decode("utf-16-be")
+        return raw[2:].decode("utf-16-be")
     if b"\x00" in raw[:512]:
         # Heuristic: NUL bytes early in the file suggest UTF-16 without BOM.
         # Try both endiannesses; prefer whichever doesn't produce replacement chars.
@@ -300,9 +300,18 @@ def _read_candidate_blob(root: Path, candidate_sha: str, path: str) -> str | Non
 
 
 def _block_result(
-    contract: Contract, reason: str, *, strict: bool = False
+    contract: Contract,
+    reason: str,
+    *,
+    strict: bool = False,
+    root: Path | None = None,
+    head: str = "HEAD",
 ) -> VerifyResult:
-    """Produce a minimal BLOCK result for early-exit validation failures."""
+    """Produce a minimal BLOCK result for early-exit validation failures.
+
+    Resolves head_commit from the repo so the wrapper's candidate-binding check
+    doesn't reject the passport with a misleading 'missing head_commit' error."""
+    head_commit = _resolve_sha(root, head) if root is not None else None
     empty_eval = policy.DiffEvaluation(
         files=(),
         out_of_scope=(),
@@ -315,7 +324,7 @@ def _block_result(
         contract=contract,
         evaluation=empty_eval,
         base_commit=contract.base_commit,
-        head_commit=None,
+        head_commit=head_commit,
         out_of_scope=(),
         secret_findings=(),
         sensitive_surfaces={},
@@ -366,7 +375,7 @@ def verify(
                     return _block_result(
                         contract,
                         f"contract base_commit {contract.base_commit!r} is not a valid commit SHA",
-                        strict=strict,
+                        strict=strict, root=root, head=head,
                     )
                 base = None
 
@@ -382,7 +391,7 @@ def verify(
         return _block_result(
             contract,
             f"contract provenance not established: {contract_prov.detail}",
-            strict=strict,
+            strict=strict, root=root, head=head,
         )
 
     expected_repo = (_env.get("QUILL_REPO_ID") or _env.get("GITHUB_REPOSITORY") or "").strip()
@@ -392,12 +401,12 @@ def verify(
             if expected_repo
             else f"contract is bound to repo {contract.repo!r}, but the current repo is unknown (set QUILL_REPO_ID)"
         )
-        return _block_result(contract, repo_msg, strict=strict)
+        return _block_result(contract, repo_msg, strict=strict, root=root, head=head)
     if strict and not contract.repo and expected_repo:
         return _block_result(
             contract,
             f"contract has no repository binding; strict requires --repo (expected {expected_repo!r})",
-            strict=strict,
+            strict=strict, root=root, head=head,
         )
 
     contract_expired = contract.is_expired()
@@ -406,13 +415,13 @@ def verify(
         return _block_result(
             contract,
             f"contract expiry is malformed ({contract.expires_at!r}); refusing to treat it as unlimited authorization",
-            strict=strict,
+            strict=strict, root=root, head=head,
         )
     if strict and contract_expired:
         return _block_result(
             contract,
             f"contract expired at {contract.expires_at}; re-approve to authorize",
-            strict=strict,
+            strict=strict, root=root, head=head,
         )
 
     # Resolve the candidate to ONE concrete SHA and use it for the diff, the

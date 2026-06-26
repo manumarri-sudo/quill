@@ -341,11 +341,11 @@ read [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) before using them).
 
 ## What's shipping today vs. on the roadmap
 
-**Shipping (0.2.0a5), with on-disk evidence:** the Change Control flow
+**Shipping (0.3.0), with on-disk evidence:** the Change Control flow
 (`begin`/`verify`/passport + GitHub Action), the HMAC-chained audit log (32k+ entries
 dogfooded, truncation-detectable, `quill audit verify` clean), the local PreToolUse
 gate with Touch ID approvals and 26-pattern secret detection, the write-then-run AST
-scan, and the read-side surfaces (receipts, trifecta, pins, decay). 1150 tests pass;
+scan, and the read-side surfaces (receipts, trifecta, pins, decay). 1168 tests pass;
 `ruff`, `ruff format`, and `mypy --strict` are green and enforced in CI.
 
 **Roadmap (not shipping today, do not assume present):** PR-comment rendering of the
