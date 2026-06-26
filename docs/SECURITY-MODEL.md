@@ -313,6 +313,26 @@ between the source code and what a user can actually deploy:
   worktree. A divergence between the checkout and the evaluated commit can no
   longer cause the scanner to miss a secret or scan the wrong version.
 
+A seventh pre-flight pass (2026-06-26, self-review before round-7 external) closed:
+
+- **Candidate SHA validation (R7-H1, closed).** `candidate_sha` is now validated
+  as a hex SHA after `_resolve_sha()`; a ref that doesn't resolve (e.g.
+  `--output=/tmp/evil`) is blocked rather than passed through to git commands.
+- **Wrapper status-SHA binding (R7-H2, closed).** The wrapper now always
+  compares the passport's `head_commit` against the SHA used for the Status
+  Check, regardless of whether `QUILL_HEAD_SHA` was explicitly set. Eliminates
+  the window where two independent `git rev-parse HEAD` calls could diverge.
+- **Wrapper REASONS sanitization (R7-H3, closed).** `REASONS` from the passport
+  is sanitized (CR/LF stripped, leading `::` removed) before echoing, preventing
+  Actions workflow-command injection from attacker-controlled passport data.
+- **UTF-8 BOM handling (R7-M1, closed).** `_decode_blob` now strips the UTF-8
+  BOM (EF BB BF) and handles truncated BOM-prefixed files gracefully.
+- **_waived_secret crash guard (R7-M2, closed).** Non-numeric `line` values in
+  `.quill/exceptions.json` no longer crash the gate with ValueError.
+- **QUILL_HEAD_SHA validation (R7-M3, closed).** The wrapper validates
+  `QUILL_HEAD_SHA` against `^[0-9a-fA-F]{40}$` to prevent option injection.
+- **python → python3 (R7-L1, closed).** Wrapper uses `python3` throughout.
+
 Genuinely still open — do not rely on the CI gate against a determined adversary
 until these land:
 
