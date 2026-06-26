@@ -102,7 +102,7 @@ outputs:
     description: "PASS, NEEDS_REVIEW, or BLOCK."
     value: ${{ steps.verify.outputs.verdict }}
   exit-code:
-    description: "0 for PASS / NEEDS_REVIEW, 1 for BLOCK."
+    description: "Passport exit code: 0 for PASS / NEEDS_REVIEW, 1 for BLOCK. Note: block-on-review affects the job exit, not this output."
     value: ${{ steps.verify.outputs.exit_code }}
 
 runs:

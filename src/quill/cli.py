@@ -457,6 +457,13 @@ def verify_passport_cmd(
             help="reject a passport older than this many days (freshness).",
         ),
     ] = None,
+    status_fingerprint: Annotated[
+        Path | None,
+        typer.Option(
+            "--status-fingerprint",
+            help="status-fingerprint file written by the wrapper; cross-checks the MAC.",
+        ),
+    ] = None,
 ) -> None:
     """Independently verify a signed passport's verdict AND its validity.
 
@@ -543,6 +550,39 @@ def verify_passport_cmd(
         if (datetime.now(UTC) - gen).total_seconds() > max_age_days * 86400:
             out.print(
                 f"[red]✗ passport too old[/red] — generated {generated_at}, max age {max_age_days}d"
+            )
+            raise typer.Exit(code=1)
+
+    if status_fingerprint is not None:
+        try:
+            fp_text = status_fingerprint.read_text()
+        except OSError as e:
+            out.print(f"[red]✗ cannot read status-fingerprint:[/red] {e}")
+            raise typer.Exit(code=2) from e
+        fp: dict[str, str] = {}
+        for line in fp_text.strip().splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                fp[k.strip()] = v.strip()
+        passport_mac = (passport.get("audit") or {}).get("verification_run_mac", "")
+        fp_mac = fp.get("mac", "")
+        if not passport_mac:
+            out.print("[red]✗ passport has no audit MAC — cannot verify status fingerprint[/red]")
+            raise typer.Exit(code=1)
+        if not fp_mac:
+            out.print("[red]✗ status-fingerprint has no MAC[/red]")
+            raise typer.Exit(code=1)
+        if not passport_mac.startswith(fp_mac) and not fp_mac.startswith(passport_mac):
+            out.print(
+                f"[red]✗ status fingerprint mismatch[/red] — passport MAC "
+                f"{passport_mac[:12]}… ≠ fingerprint MAC {fp_mac[:12]}…"
+            )
+            raise typer.Exit(code=1)
+        fp_sha = fp.get("sha", "")
+        if head_sha is not None and fp_sha and fp_sha != head_sha:
+            out.print(
+                f"[red]✗ status fingerprint SHA mismatch[/red] — "
+                f"fingerprint sha={fp_sha[:12]}… ≠ --head-sha {head_sha[:12]}…"
             )
             raise typer.Exit(code=1)
 
