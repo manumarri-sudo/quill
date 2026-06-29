@@ -58,7 +58,7 @@ dependencies = [
 
 [project.optional-dependencies]
 keyring = ["keyring>=24"]
-postgres = ["asyncpg>=0.29"]
+postgres = ["asyncpg>=0.31.0"]
 # Touch-ID-gated approvals on macOS. Optional because the binding is
 # Apple-platform-only; on Linux/Windows the typed-token flow remains
 # the only option. Quill auto-detects availability at runtime.
