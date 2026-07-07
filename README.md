@@ -35,6 +35,11 @@ leaked secrets; it does not prove the in-scope code is correct or free of a
 backdoor. That is the honest scope, and it is the part a human reviewer most
 often misses on a large agent PR.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/quill-flow-dark.svg">
+  <img src="docs/assets/quill-flow-light.svg" alt="How Quill works: a human signs the task boundary, the AI agent writes the diff, CI verifies the change against the signed boundary and issues a PASS, NEEDS_REVIEW, or BLOCK verdict, recorded in a signed Change Passport any reviewer can re-check." width="920">
+</picture>
+
 ```bash
 # 0. one-time: create a human approver key. Keep the PRIVATE half off the build
 #    box; pin the PUBLIC half so a PR cannot edit the trust root (in CI this is a
@@ -225,6 +230,11 @@ it — but that only matters if the agent also can't *fake its approval* or *edi
 its own judge*. Quill closes both with Ed25519 (verification uses a public key,
 forging needs the private key — not the same secret, which is what the symmetric
 HMAC chain could never give you):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/quill-trust-dark.svg">
+  <img src="docs/assets/quill-trust-light.svg" alt="Why the agent can't cheat: editing the CI workflow is defeated by base-branch control, planting an approver key is defeated by trust roots pinned outside the checkout, forging the verdict is defeated by the gate signature, and hiding changes behind symlinks or submodules surfaces as NEEDS_REVIEW." width="920">
+</picture>
 
 ```bash
 quill keygen --out approver.pem          # human's key; keep the private half OFF the box
