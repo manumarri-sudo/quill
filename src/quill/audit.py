@@ -85,9 +85,20 @@ class AuditLog:
             os.O_WRONLY | os.O_CREAT | os.O_APPEND,
             mode=0o600,  # never world-readable
         )
-        # Anchor: read the last MAC if file already had entries
+        # Anchor: read the last MAC if file already had entries. The read
+        # must happen under the same LOCK_EX that emit() uses: another
+        # process can be mid-append, and an unlocked reader can observe a
+        # torn trailing line (JSONDecodeError -> AuditError at construction).
+        # emit() re-reads the tail under its own lock anyway, so this anchor
+        # only needs to be consistent, not fresh.
         if self.path.stat().st_size > 0:
-            self._prev_mac = self._tail_mac()
+            if _HAS_FLOCK:
+                fcntl.flock(self._fd, fcntl.LOCK_EX)
+            try:
+                self._prev_mac = self._tail_mac()
+            finally:
+                if _HAS_FLOCK:
+                    fcntl.flock(self._fd, fcntl.LOCK_UN)
 
     def _tail_mac(self) -> bytes:
         """Read the last line's mac (for chain continuation across restarts).
