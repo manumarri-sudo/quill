@@ -647,6 +647,14 @@ def explain_cmd(
         str,
         typer.Option("--format", help="output format: text, json, or html."),
     ] = "text",
+    as_fix_prompt: Annotated[
+        bool,
+        typer.Option("--fix-prompt", help="emit the compact coding-agent fix prompt instead."),
+    ] = False,
+    as_agent_brief: Annotated[
+        bool,
+        typer.Option("--agent-brief", help="emit the compact pre-work agent brief instead."),
+    ] = False,
     out_file: Annotated[
         Path | None,
         typer.Option(
@@ -660,11 +668,22 @@ def explain_cmd(
     finding becomes what's wrong in plain English, a concrete self-fix with a
     literal shell command where one applies, and a paste-ready instruction for
     your coding agent. `--format html` writes a page a non-technical reader
-    can act on with copy buttons.
+    can act on with copy buttons. `--fix-prompt` and `--agent-brief` emit the
+    compact agent surfaces (same output as `quill fix-prompt` / `agent-brief`).
     """
     from quill import explain as explain_mod
 
     out = Console()  # stdout - this is the command's primary output
+
+    # Compact agent surfaces: delegate to the same implementations the
+    # standalone `fix-prompt` / `agent-brief` commands use.
+    if as_fix_prompt:
+        _emit_fix_prompt(passport_file)
+        return
+    if as_agent_brief:
+        _emit_agent_brief()
+        return
+
     if fmt not in ("text", "json", "html"):
         out.print(f"[red]unknown --format '{fmt}'[/red] — use text, json, or html")
         raise typer.Exit(code=2)
@@ -750,10 +769,7 @@ def lessons_main(
     promoted_ids = {e["id"] for e in lessons_mod.load_promoted(root)}
     for n, p in enumerate(patterns, start=1):
         mark = " [green](promoted)[/green]" if p["lesson_id"] in promoted_ids else ""
-        out.print(
-            f"{n}. {p['rule_id']}"
-            + (f" · {p['path_kind']}" if p["path_kind"] not in ("", "*") else "")
-        )
+        out.print(f"{n}. {p['headline']}  [dim]({p['severity']})[/dim]")
         out.print(f"   Seen: {p['count']} time(s) · last {p['last_seen'][:10]}{mark}")
         out.print(f"   Suggested lesson: {p['lesson']}")
         out.print(f"   Promote it: [cyan]{p['promote_command']}[/cyan]\n")
@@ -812,19 +828,8 @@ def teach_cmd(
         out.print(f"  {'updated' if changed else 'unchanged'}: {target}")
 
 
-@app.command("fix-prompt")
-def fix_prompt_cmd(
-    passport_file: Annotated[
-        Path | None,
-        typer.Option("--passport", help="passport.json (default: .quill/passport.json)."),
-    ] = None,
-) -> None:
-    """Emit a compact fix prompt for the coding agent — not the full passport.
-
-    Includes the approved task, scope, top findings, and a self-check; never
-    secret values or trust internals. Paste it into Claude Code / Codex /
-    Cursor to fix a blocked PR without wasting context tokens.
-    """
+def _emit_fix_prompt(passport_file: Path | None) -> None:
+    """Shared by `quill fix-prompt` and `quill explain --fix-prompt`."""
     from quill import teach as teach_mod
 
     candidates = (
@@ -845,14 +850,8 @@ def fix_prompt_cmd(
     print(teach_mod.fix_prompt(passport))
 
 
-@app.command("agent-brief")
-def agent_brief_cmd() -> None:
-    """Emit the compact brief an agent should read before starting work.
-
-    Approved task and scope, forbidden paths, human-review surfaces, promoted
-    repo lessons, and the final self-check — small enough to paste at the top
-    of any agent session.
-    """
+def _emit_agent_brief() -> None:
+    """Shared by `quill agent-brief` and `quill explain --agent-brief`."""
     from quill import contract as contract_mod
     from quill import lessons as lessons_mod
     from quill import perimeter as perimeter_mod
@@ -875,6 +874,34 @@ def agent_brief_cmd() -> None:
             promoted=lessons_mod.load_promoted(root),
         )
     )
+
+
+@app.command("fix-prompt")
+def fix_prompt_cmd(
+    passport_file: Annotated[
+        Path | None,
+        typer.Option("--passport", help="passport.json (default: .quill/passport.json)."),
+    ] = None,
+) -> None:
+    """Emit a compact fix prompt for the coding agent — not the full passport.
+
+    Includes the approved task, scope, top findings, and a self-check; never
+    secret values or trust internals. Paste it into Claude Code / Codex /
+    Cursor to fix a blocked PR without wasting context tokens. Alias for
+    `quill explain --fix-prompt`.
+    """
+    _emit_fix_prompt(passport_file)
+
+
+@app.command("agent-brief")
+def agent_brief_cmd() -> None:
+    """Emit the compact brief an agent should read before starting work.
+
+    Approved task and scope, forbidden paths, human-review surfaces, promoted
+    repo lessons, and the final self-check — small enough to paste at the top
+    of any agent session. Alias for `quill explain --agent-brief`.
+    """
+    _emit_agent_brief()
 
 
 @app.command("check-approval")

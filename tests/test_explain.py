@@ -155,8 +155,19 @@ def test_text_render_numbers_issues_and_closes():
 def test_explain_dict_shape():
     d = explain_dict(_passport(out_of_scope=["b.py"]))
     assert d["verdict"] == "BLOCK"
+    assert d["can_merge"] is False
     assert d["remediations"][0]["cc_prompt"]
     assert d["closer"].startswith("Fix these 1")
+    assert d["inspect_first"] == ["b.py"]
+    assert "does not check whether the code is" in d["does_not_prove"]
+
+
+def test_explain_states_what_quill_does_not_prove():
+    text = render_text(_passport(out_of_scope=["b.py"]))
+    assert "What Quill does not prove" in text
+    assert "Reviewer should inspect first: b.py" in text
+    # PASS is still a single clean line, no disclaimer noise.
+    assert render_text(_passport(verdict="PASS")).strip().count("\n") == 0
 
 
 def test_html_render_is_self_contained_and_honest():

@@ -232,6 +232,34 @@ _LESSONS: dict[tuple[str, str], tuple[str, str]] = {
     ),
 }
 
+# Friendly one-line headline per lesson, and its level. Severity is the
+# lesson's role, NOT the verdict (the verdict stays deterministic):
+#   inform  - just mentioned in the agent brief
+#   warn    - worth flagging before it happens
+#   block   - Quill already blocks this deterministically today
+#   policy_candidate - a human should consider adding it to the signed perimeter
+_LESSON_META: dict[str, tuple[str, str]] = {
+    "no-ci-edits-without-ci-scope": (
+        "CI workflow touched during a non-CI task",
+        "policy_candidate",
+    ),
+    "no-migration-edits-without-db-scope": (
+        "Migration or schema touched during a non-database task",
+        "policy_candidate",
+    ),
+    "no-lockfile-updates-without-dependency-scope": (
+        "Lockfile changed during a non-dependency task",
+        "policy_candidate",
+    ),
+    "stay-inside-approved-scope": ("Files changed outside the approved task", "warn"),
+    "never-edit-forbidden-paths": ("A forbidden path was edited", "block"),
+    "never-edit-quill-trust-surfaces": ("Quill trust surface or gate workflow touched", "block"),
+    "no-realistic-credentials": ("Secret-like value added to the code", "block"),
+    "explain-sensitive-surface-edits": ("Sensitive surface touched without explanation", "warn"),
+    "no-opaque-redirects": ("Opaque change (symlink or submodule) added", "warn"),
+    "keep-changes-scannable": ("Change too large to fully scan", "inform"),
+}
+
 
 def suggest(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Aggregate events into repeated patterns with suggested lessons."""
@@ -251,18 +279,25 @@ def suggest(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     patterns = []
     for key, evs in buckets.items():
         lesson_id, text = _LESSONS[key]
+        headline, severity = _LESSON_META.get(lesson_id, (text, "warn"))
         patterns.append(
             {
                 "lesson_id": lesson_id,
+                "headline": headline,
+                "severity": severity,
+                "source_rule": key[0],
                 "rule_id": key[0],
                 "path_kind": key[1],
                 "count": len(evs),
                 "last_seen": max(e.get("created_at", "") for e in evs),
                 "lesson": text,
+                "promotion_required": True,
                 "promote_command": f"quill lessons promote {lesson_id}",
             }
         )
-    patterns.sort(key=lambda p: (-p["count"], p["lesson_id"]))
+    # Most-repeated first; within a count, more severe first.
+    _sev_rank = {"block": 0, "policy_candidate": 1, "warn": 2, "inform": 3}
+    patterns.sort(key=lambda p: (-p["count"], _sev_rank.get(p["severity"], 9), p["lesson_id"]))
     return patterns
 
 
@@ -286,10 +321,11 @@ def promote(lesson_id: str, root: Path) -> tuple[bool, str]:
     if lesson_id not in by_id:
         raise KeyError(lesson_id)
     text = by_id[lesson_id]
+    _, severity = _LESSON_META.get(lesson_id, (text, "warn"))
     promoted = load_promoted(root)
     if any(entry["id"] == lesson_id for entry in promoted):
         return False, text
-    promoted.append({"id": lesson_id, "text": text})
+    promoted.append({"id": lesson_id, "text": text, "severity": severity})
     path = lessons_store_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"promoted": promoted}, indent=2) + "\n")

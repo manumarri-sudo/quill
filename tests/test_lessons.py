@@ -136,6 +136,9 @@ def test_suggest_aggregates_repeats():
     assert top["count"] == 4
     assert "workflows" in top["lesson"]
     assert top["promote_command"].endswith("no-ci-edits-without-ci-scope")
+    assert top["headline"] == "CI workflow touched during a non-CI task"
+    assert top["severity"] == "policy_candidate"
+    assert top["source_rule"] == "SCOPE_OUT"
 
 
 def test_promote_is_human_gated_and_idempotent(tmp_path: Path):
@@ -143,7 +146,9 @@ def test_promote_is_human_gated_and_idempotent(tmp_path: Path):
     assert newly and "workflows" in text
     again, _ = promote("no-ci-edits-without-ci-scope", tmp_path)
     assert not again
-    assert len(load_promoted(tmp_path)) == 1
+    stored = load_promoted(tmp_path)
+    assert len(stored) == 1
+    assert stored[0]["severity"] == "policy_candidate"
     try:
         promote("not-a-lesson", tmp_path)
         raise AssertionError("unknown id must raise")

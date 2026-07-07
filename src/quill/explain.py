@@ -24,6 +24,16 @@ _REVIEW_INTRO = (
 )
 _BLOCK_INTRO = "⛔ This change can't be merged yet. Here's what's wrong and how to fix each one."
 
+# Honesty footer — Quill checks the boundary, not the code. Stating this in
+# every explanation keeps the tool from being mistaken for a correctness or
+# security review (integrity discipline: never claim more than we prove).
+DOES_NOT_PROVE = (
+    "What Quill does not prove: Quill does not check whether the code is "
+    "correct, secure, complete, well-tested, or free of a backdoor. It only "
+    "checks whether the change stayed inside the human-approved boundary and "
+    "the evidence rules (scope, forbidden paths, secrets, opaque changes)."
+)
+
 
 def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
     """Map passport evidence to remediation records, most severe first.
@@ -199,12 +209,16 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
 def explain_dict(passport: dict[str, Any]) -> dict[str, Any]:
     """The machine-readable form of `quill explain` (and of the passport block)."""
     remediations = build_remediations(passport)
+    verdict = passport.get("verdict", "")
     return {
-        "verdict": passport.get("verdict", ""),
+        "verdict": verdict,
+        "can_merge": verdict == "PASS",
         "task": passport.get("contract", {}).get("task", ""),
         "allowed_paths": list(passport.get("contract", {}).get("allowed_paths", [])),
         "remediations": remediations,
+        "inspect_first": [r["where"] for r in remediations if r["where"]],
         "closer": CLOSER.format(n=len(remediations)),
+        "does_not_prove": DOES_NOT_PROVE,
     }
 
 
@@ -233,5 +247,10 @@ def render_text(passport: dict[str, Any]) -> str:
             lines.append(f'     "{r["cc_prompt"]}"')
         lines.append("")
 
+    if d["inspect_first"]:
+        lines.append("Reviewer should inspect first: " + ", ".join(d["inspect_first"]))
+        lines.append("")
     lines.append(d["closer"])
+    lines.append("")
+    lines.append(DOES_NOT_PROVE)
     return "\n".join(lines) + "\n"

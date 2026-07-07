@@ -43,6 +43,8 @@ button{border:1px solid #d0d7de;background:#ffffff;border-radius:6px;
 padding:6px 12px;font-size:12px;cursor:pointer;color:#1f2328;}
 button:hover{background:#f3f4f6;}
 .closer{color:#656d76;font-size:14px;margin-top:24px;}
+.disclaimer{color:#8b949e;font-size:12px;line-height:1.5;margin-top:24px;
+padding-top:16px;border-top:1px solid #d0d7de;}
 """
 
 _COPY_JS = """
@@ -101,5 +103,6 @@ def render_html(passport: dict[str, Any]) -> str:
             parts.append("</div>")
         parts.append(f'<p class="closer">{html.escape(d["closer"])}</p>')
 
+    parts.append(f'<p class="disclaimer">{html.escape(d["does_not_prove"])}</p>')
     parts.append(f"</main><script>{_COPY_JS}</script></body></html>")
     return "".join(parts)
