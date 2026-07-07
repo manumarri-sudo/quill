@@ -872,7 +872,7 @@ def frameworks_cmd(
         bool, typer.Option("--json", help="machine-readable output for piping.")
     ] = False,
 ) -> None:
-    """One command: every compliance framework Quill produces evidence for.
+    """Show the compliance-framework crosswalk (`quill frameworks`): every control Quill produces evidence for.
 
     Prints each control, the evidence it produces, and how an auditor would
     sample it — the whole crosswalk, no audit log or setup required. To turn a
