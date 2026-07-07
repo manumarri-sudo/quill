@@ -61,7 +61,7 @@ def redact_path(path: str) -> str:
 
 def _task_hint(passport: dict[str, Any]) -> str:
     for scope in passport.get("contract", {}).get("allowed_paths", []):
-        for seg in scope.split("/"):
+        for seg in str(scope).split("/"):
             if seg and seg not in ("src", "**", "*", "tests", "lib"):
                 return seg.strip("*")
     return ""
@@ -271,9 +271,10 @@ def load_promoted(root: Path) -> list[dict[str, str]]:
     if not path.exists():
         return []
     try:
-        return json.loads(path.read_text()).get("promoted", [])
+        promoted = json.loads(path.read_text()).get("promoted", [])
     except (OSError, json.JSONDecodeError):
         return []
+    return [e for e in promoted if isinstance(e, dict) and "id" in e and "text" in e]
 
 
 def promote(lesson_id: str, root: Path) -> tuple[bool, str]:
