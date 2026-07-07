@@ -265,7 +265,7 @@ def test_passport_json_and_markdown(repo: Path) -> None:
     assert data["verdict"] == "BLOCK"
     assert data["exit_code"] == 1
     assert "outside.py" in data["evidence"]["out_of_scope"]
-    assert data["schema"] == "quill.change-passport/v1"
+    assert data["schema"] == "quill.change-passport/v1.1"
 
     md = passport_mod.render_markdown(result, generated_at="2026-06-17T00:00:00+00:00")
     assert "# Quill Change Passport" in md

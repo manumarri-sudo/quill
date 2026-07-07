@@ -393,6 +393,11 @@ class VerifyResult:
     # Submodule (gitlink) pointer moves with old/new commit IDs — opaque content
     # that scope/secret scanning cannot reach inside (submodule opacity evidence).
     submodule_changes: tuple[dict[str, str], ...] = ()
+    # Symlink (mode 120000) additions/changes with the recorded target: an
+    # in-scope link can redirect at a forbidden path while scanners see only
+    # the target string. Drives NEEDS_REVIEW, so the passport must carry it
+    # (evidence may never under-report what the verdict acted on).
+    symlink_changes: tuple[dict[str, str], ...] = ()
     # Scan-coverage dispositions (e.g. oversized-diff, too-many-files). Non-empty
     # means the scanners did not see the whole candidate; strict treats this as a
     # BLOCK, cooperative as NEEDS_REVIEW. Never a silent PASS.
@@ -1155,5 +1160,6 @@ def verify(
         strict=strict,
         inventory_paths=inventory_paths,
         submodule_changes=tuple(submodule_changes),
+        symlink_changes=tuple(symlink_changes),
         scan_dispositions=tuple(scan_dispositions),
     )

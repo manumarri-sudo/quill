@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from quill import attest
+from quill import attest, explain
 from quill.verify import Verdict, VerifyResult
 
 SIGNATURE_KEY = "signature"
@@ -32,10 +32,14 @@ _VERDICT_BADGE = {
 
 
 def build_passport(result: VerifyResult, *, generated_at: str | None = None) -> dict[str, Any]:
-    """Assemble the machine-readable passport from a VerifyResult."""
+    """Assemble the machine-readable passport from a VerifyResult.
+
+    Schema v1.1 adds the top-level `remediation` array (what to do about each
+    finding, see explain.py) — additive only, v1 readers keep working.
+    """
     c = result.contract
-    return {
-        "schema": "quill.change-passport/v1",
+    passport: dict[str, Any] = {
+        "schema": "quill.change-passport/v1.1",
         "generated_at": generated_at or datetime.now(UTC).isoformat(),
         "verdict": result.verdict.value,
         "exit_code": result.verdict.exit_code,
@@ -63,6 +67,7 @@ def build_passport(result: VerifyResult, *, generated_at: str | None = None) -> 
             ],
             "sensitive_surfaces": {k: list(v) for k, v in result.sensitive_surfaces.items() if v},
             "submodule_changes": [dict(c) for c in result.submodule_changes],
+            "symlink_changes": [dict(c) for c in result.symlink_changes],
             "scan_dispositions": list(result.scan_dispositions),
             "exceptions_applied": list(result.exceptions_applied),
         },
@@ -80,6 +85,8 @@ def build_passport(result: VerifyResult, *, generated_at: str | None = None) -> 
         },
         "audit": {"verification_run_mac": result.audit_mac},
     }
+    passport["remediation"] = explain.build_remediations(passport)
+    return passport
 
 
 def render_markdown(result: VerifyResult, *, generated_at: str | None = None) -> str:

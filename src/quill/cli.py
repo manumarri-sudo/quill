@@ -619,6 +619,78 @@ def verify_passport_cmd(
     )
 
 
+@app.command("explain")
+def explain_cmd(
+    passport_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--passport",
+            help="passport.json to explain (default: .quill/passport.json, then ./passport.json).",
+        ),
+    ] = None,
+    fmt: Annotated[
+        str,
+        typer.Option("--format", help="output format: text, json, or html."),
+    ] = "text",
+    out_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--out", help="write output here instead of stdout (html defaults to explain.html)."
+        ),
+    ] = None,
+) -> None:
+    """Explain a verdict in plain language, with a fix for every finding.
+
+    Deterministic rendering over the passport's own evidence (no model): each
+    finding becomes what's wrong in plain English, a concrete self-fix with a
+    literal shell command where one applies, and a paste-ready instruction for
+    your coding agent. `--format html` writes a page a non-technical reader
+    can act on with copy buttons.
+    """
+    from quill import explain as explain_mod
+
+    out = Console()  # stdout - this is the command's primary output
+    if fmt not in ("text", "json", "html"):
+        out.print(f"[red]unknown --format '{fmt}'[/red] — use text, json, or html")
+        raise typer.Exit(code=2)
+
+    candidates = (
+        [passport_file]
+        if passport_file is not None
+        else [Path(".quill/passport.json"), Path("passport.json")]
+    )
+    found = next((p for p in candidates if p is not None and p.exists()), None)
+    if found is None:
+        out.print(
+            "[red]no passport found[/red] — run `quill verify` first, or point at "
+            "one with --passport path/to/passport.json"
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        passport = json.loads(found.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        out.print(f"[red]cannot read passport at {found}[/red]: {e}")
+        raise typer.Exit(code=2) from e
+
+    if fmt == "json":
+        rendered = json.dumps(explain_mod.explain_dict(passport), indent=2)
+    elif fmt == "html":
+        from quill.explain_html import render_html
+
+        rendered = render_html(passport)
+        if out_file is None:
+            out_file = Path("explain.html")
+    else:
+        rendered = explain_mod.render_text(passport)
+
+    if out_file is not None:
+        out_file.write_text(rendered)
+        out.print(f"wrote {out_file}")
+    else:
+        print(rendered)
+
+
 @app.command("check-approval")
 def check_approval_cmd(
     pr: Annotated[int, typer.Option("--pr", help="pull request number.")],
