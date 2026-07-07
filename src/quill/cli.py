@@ -91,6 +91,11 @@ audit_app = typer.Typer(
     help="see what got blocked / allowed / asked.",
 )
 app.add_typer(audit_app, name="audit")
+lessons_app = typer.Typer(
+    invoke_without_command=True,
+    help="turn repeated agent mistakes into lessons future agents learn from.",
+)
+app.add_typer(lessons_app, name="lessons")
 decay_app = typer.Typer(
     no_args_is_help=True,
     help="track permissions that erode without reinforcement (Permission Decay framework).",
@@ -343,6 +348,16 @@ def verify_cmd(
         )
         signed = " [dim](signed)[/dim]" if gate_pem else ""
         console.print(f"[dim]passport: {md_path} · {json_path}[/dim]{signed}")
+
+    # Post-decision learning: record structured mistake events locally so
+    # `quill lessons` can aggregate repeats. Never influences the verdict,
+    # and a recording failure can never fail the gate open or closed.
+    try:
+        from quill import lessons as lessons_mod
+
+        lessons_mod.record_mistakes(passport_mod.build_passport(result), root)
+    except Exception:
+        pass
 
     out = Console()  # stdout
     if as_json:
@@ -689,6 +704,177 @@ def explain_cmd(
         out.print(f"wrote {out_file}")
     else:
         print(rendered)
+
+
+def _lessons_root() -> Path:
+    from quill import contract as contract_mod
+
+    try:
+        return contract_mod.repo_root()
+    except Exception:
+        return Path.cwd()
+
+
+@lessons_app.callback()
+def lessons_main(
+    ctx: typer.Context,
+    as_json: Annotated[
+        bool, typer.Option("--json", help="machine-readable output for piping.")
+    ] = False,
+) -> None:
+    """Show repeated agent mistakes in this repo and the lesson each suggests.
+
+    Quill turns every blocked AI PR into a lesson future agents can learn
+    from: `quill verify` records structured mistake events locally (never
+    code, diffs, or secret values), this command aggregates the repeats, and
+    `quill lessons promote <id>` + `quill teach` write the human-approved
+    lessons into agent instruction files.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    from quill import lessons as lessons_mod
+
+    root = _lessons_root()
+    patterns = lessons_mod.suggest(lessons_mod.load_events(root))
+    out = Console()
+    if as_json:
+        out.print_json(data={"patterns": patterns, "promoted": lessons_mod.load_promoted(root)})
+        return
+    if not patterns:
+        out.print(
+            "no recorded agent mistakes yet — they accumulate automatically "
+            "when `quill verify` returns BLOCK or NEEDS_REVIEW."
+        )
+        return
+    out.print("[bold]Repeated agent mistakes in this repo:[/bold]\n")
+    promoted_ids = {e["id"] for e in lessons_mod.load_promoted(root)}
+    for n, p in enumerate(patterns, start=1):
+        mark = " [green](promoted)[/green]" if p["lesson_id"] in promoted_ids else ""
+        out.print(
+            f"{n}. {p['rule_id']}"
+            + (f" · {p['path_kind']}" if p["path_kind"] not in ("", "*") else "")
+        )
+        out.print(f"   Seen: {p['count']} time(s) · last {p['last_seen'][:10]}{mark}")
+        out.print(f"   Suggested lesson: {p['lesson']}")
+        out.print(f"   Promote it: [cyan]{p['promote_command']}[/cyan]\n")
+
+
+@lessons_app.command("promote")
+def lessons_promote_cmd(
+    lesson_id: Annotated[str, typer.Argument(help="lesson id from `quill lessons`.")],
+) -> None:
+    """Promote a suggested lesson into the repo's lesson store (human-gated).
+
+    Idempotent. Run `quill teach` afterwards to write promoted lessons into
+    agent instruction files (CLAUDE.md, AGENTS.md, Cursor rules).
+    """
+    from quill import lessons as lessons_mod
+
+    root = _lessons_root()
+    out = Console()
+    try:
+        newly, text = lessons_mod.promote(lesson_id, root)
+    except KeyError:
+        out.print(f"[red]unknown lesson id '{lesson_id}'[/red] — run `quill lessons` for the list.")
+        raise typer.Exit(code=2) from None
+    verb = "promoted" if newly else "already promoted"
+    out.print(f"[green]✓[/green] {verb}: {lesson_id}")
+    out.print(f"  {text}")
+    out.print("  now run [cyan]quill teach[/cyan] to write it into agent instruction files.")
+
+
+@app.command("teach")
+def teach_cmd(
+    agents: Annotated[
+        str,
+        typer.Option("--agents", help="comma-separated targets: claude, codex, cursor."),
+    ] = "claude,codex,cursor",
+) -> None:
+    """Write promoted lessons into agent instruction files (managed block).
+
+    Updates CLAUDE.md (Claude Code), AGENTS.md (Codex and generic agents),
+    and .cursor/rules/quill-scope.mdc (plus .cursorrules when it already
+    exists). Only the quill-lessons block is touched; user content outside
+    it is preserved. Idempotent.
+    """
+    from quill import teach as teach_mod
+
+    root = _lessons_root()
+    wanted = [a.strip() for a in agents.split(",") if a.strip()]
+    unknown = [a for a in wanted if a not in teach_mod.AGENT_TARGETS]
+    out = Console()
+    if unknown:
+        out.print(
+            f"[red]unknown agent(s): {', '.join(unknown)}[/red] — supported: claude, codex, cursor"
+        )
+        raise typer.Exit(code=2)
+    for target, changed in teach_mod.teach(root, wanted):
+        out.print(f"  {'updated' if changed else 'unchanged'}: {target}")
+
+
+@app.command("fix-prompt")
+def fix_prompt_cmd(
+    passport_file: Annotated[
+        Path | None,
+        typer.Option("--passport", help="passport.json (default: .quill/passport.json)."),
+    ] = None,
+) -> None:
+    """Emit a compact fix prompt for the coding agent — not the full passport.
+
+    Includes the approved task, scope, top findings, and a self-check; never
+    secret values or trust internals. Paste it into Claude Code / Codex /
+    Cursor to fix a blocked PR without wasting context tokens.
+    """
+    from quill import teach as teach_mod
+
+    candidates = (
+        [passport_file]
+        if passport_file is not None
+        else [Path(".quill/passport.json"), Path("passport.json")]
+    )
+    found = next((p for p in candidates if p is not None and p.exists()), None)
+    out = Console()
+    if found is None:
+        out.print("[red]no passport found[/red] — run `quill verify` first, or pass --passport.")
+        raise typer.Exit(code=2)
+    try:
+        passport = json.loads(found.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        out.print(f"[red]cannot read passport at {found}[/red]: {e}")
+        raise typer.Exit(code=2) from e
+    print(teach_mod.fix_prompt(passport))
+
+
+@app.command("agent-brief")
+def agent_brief_cmd() -> None:
+    """Emit the compact brief an agent should read before starting work.
+
+    Approved task and scope, forbidden paths, human-review surfaces, promoted
+    repo lessons, and the final self-check — small enough to paste at the top
+    of any agent session.
+    """
+    from quill import contract as contract_mod
+    from quill import lessons as lessons_mod
+    from quill import perimeter as perimeter_mod
+    from quill import teach as teach_mod
+
+    root = _lessons_root()
+    out = Console()
+    try:
+        contract = contract_mod.load(root)
+    except Exception as e:
+        out.print(f"[red]no active contract[/red] — run `quill begin` first ({e}).")
+        raise typer.Exit(code=2) from e
+    perimeter = perimeter_mod.load(root)
+    print(
+        teach_mod.agent_brief(
+            task=contract.task,
+            allowed_paths=list(contract.allowed_paths),
+            forbidden_paths=list(perimeter.forbidden_paths) if perimeter else [],
+            review_surfaces=list(perimeter.review_surfaces) if perimeter else [],
+            promoted=lessons_mod.load_promoted(root),
+        )
+    )
 
 
 @app.command("check-approval")
