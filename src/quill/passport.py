@@ -90,10 +90,21 @@ def build_passport(result: VerifyResult, *, generated_at: str | None = None) -> 
 
 
 def render_markdown(result: VerifyResult, *, generated_at: str | None = None) -> str:
-    """Render the PR-ready markdown passport."""
+    """Render the PR-ready markdown passport.
+
+    Leads with an actionable block (what to do next, a compact coding-agent
+    fix prompt, and what Quill does not prove), reusing the same remediation
+    logic as `quill explain` so the PR surface is the action loop, not a raw
+    evidence dump. The evidence/trust/audit detail stays lower in the document.
+    """
+    from quill import explain, teach
+
     c = result.contract
     badge = _VERDICT_BADGE[result.verdict]
     ts = generated_at or datetime.now(UTC).isoformat()
+    passport_dict = build_passport(result, generated_at=ts)
+    d = explain.explain_dict(passport_dict)
+
     lines: list[str] = []
     lines.append("# Quill Change Passport")
     lines.append("")
@@ -102,6 +113,28 @@ def render_markdown(result: VerifyResult, *, generated_at: str | None = None) ->
     for r in result.reasons:
         lines.append(f"- {r}")
     lines.append("")
+
+    # Action block — only when there's something to act on (BLOCK / NEEDS_REVIEW).
+    if d["remediations"]:
+        lines.append("## What to do next")
+        lines.append("")
+        for n, rem in enumerate(d["remediations"], start=1):
+            where = f" (`{rem['where']}`)" if rem["where"] else ""
+            lines.append(f"{n}. {rem['plain']}{where}")
+            lines.append(f"   - Fix: {rem['self_fix']}")
+        lines.append("")
+        if d["inspect_first"]:
+            inspect = ", ".join(f"`{p}`" for p in d["inspect_first"])
+            lines.append(f"**Reviewer should inspect first:** {inspect}")
+            lines.append("")
+        lines.append("## Prompt to give Claude Code / Codex / Cursor")
+        lines.append("")
+        lines.append("```text")
+        lines.append(teach.fix_prompt(passport_dict))
+        lines.append("```")
+        lines.append("")
+        lines.append(f"> {d['does_not_prove']}")
+        lines.append("")
 
     lines.append("## Contract")
     lines.append("")

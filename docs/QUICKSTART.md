@@ -91,7 +91,38 @@ as above, so there is a diff to check.)
 Try the same with an out-of-scope file, or a line like `AWS_SECRET_ACCESS_KEY=...`,
 and you will see the scope and secret findings respectively.
 
-## 5. Ask what is still missing for a *real* boundary
+## 5. Explain the failure and fix it with your agent
+
+```bash
+quill explain
+quill explain --fix-prompt
+```
+
+`quill explain` turns the passport into plain English: per finding, what's wrong,
+the exact `git` command to undo it, and what Quill does *not* prove (it checks the
+boundary, not whether the code is correct). `--fix-prompt` emits a compact prompt
+you paste into Claude Code, Codex, Cursor, or another coding agent — it tells the
+agent exactly what to revert, split, or ask approval for, without dumping the full
+passport into context. (`--format html` writes a click-to-copy page for a
+non-technical reviewer.)
+
+## 6. Turn repeated failures into repo lessons
+
+```bash
+quill lessons
+quill lessons promote <lesson-id>
+quill teach --agents claude,codex,cursor
+quill agent-brief
+```
+
+`quill lessons` aggregates the mistakes recorded locally in `.quill/mistakes.jsonl`
+and suggests a short, reusable lesson for each repeated pattern. Promote the ones you
+agree with, then `quill teach` writes them into `CLAUDE.md`, `AGENTS.md`, or Cursor
+rules inside a managed block (your own content is preserved). Future agents read them
+before they start. **This is local by default — no code, diffs, prompts, or secret
+values ever leave your machine, and no lesson is applied without your promotion.**
+
+## 7. Ask what is still missing for a *real* boundary
 
 ```bash
 quill status
@@ -115,7 +146,7 @@ gh secret set QUILL_APPROVER_PUBKEYS < .quill/keys/approver.pub
 # status check REQUIRED in branch protection on main.
 ```
 
-## 6. Confirm your environment
+## 8. Confirm your environment
 
 ```bash
 quill doctor

@@ -13,6 +13,7 @@ human command), and never sends anything off-machine.
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -83,15 +84,24 @@ def events_from_passport(passport: dict[str, Any]) -> list[dict[str, Any]]:
         "approved_scope_shape": list(passport.get("contract", {}).get("allowed_paths", [])),
     }
 
+    head = passport.get("head_commit", "") or ""
+
     def mk(rule_id: str, finding_type: str, path: str, fix_action: str) -> dict[str, Any]:
+        kind = classify_path(path) if path else ""
+        redacted = redact_path(path) if path else ""
+        # Stable identity of this mistake so re-running verify on the same
+        # failing commit doesn't inflate lesson counts (path kept out so two
+        # different files of the same kind still both count).
+        fp = "|".join([base["contract_id"], head, rule_id, finding_type, redacted, kind])
         return {
             **base,
             "rule_id": rule_id,
             "finding_type": finding_type,
             "path": path,
-            "violating_path_kind": classify_path(path) if path else "",
-            "violating_path_redacted": redact_path(path) if path else "",
+            "violating_path_kind": kind,
+            "violating_path_redacted": redacted,
             "fix_action": fix_action,
+            "fingerprint": fp,
         }
 
     out: list[dict[str, Any]] = []
@@ -142,16 +152,34 @@ def lessons_store_path(root: Path) -> Path:
 
 
 def record_mistakes(passport: dict[str, Any], root: Path) -> int:
-    """Append this verdict's mistake events locally. Returns count written."""
+    """Append this verdict's mistake events locally, skipping ones already
+    recorded (same fingerprint). Returns the count actually written.
+
+    Re-running `quill verify` on the same failing commit is idempotent; a new
+    commit with the same pattern still records (its head_commit differs).
+    """
     events = events_from_passport(passport)
     if not events:
         return 0
+    seen = {e["fingerprint"] for e in load_events(root) if "fingerprint" in e}
+    fresh = [e for e in events if e.get("fingerprint") not in seen]
+    if not fresh:
+        return 0
     path = mistakes_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        for e in events:
-            f.write(json.dumps(e, separators=(",", ":")) + "\n")
-    return len(events)
+    # Swarm-safe append: many agents may run `quill verify` against the same
+    # repo concurrently. Serialize each record's bytes into ONE os.write to an
+    # O_APPEND fd, so writes from different processes never interleave a line.
+    # (The dedup read above is best-effort under a tight race — worst case a
+    # duplicate slips through and inflates one count by one; suggest() and the
+    # fingerprint make that harmless, and it never corrupts the file.)
+    blob = "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in fresh)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        os.write(fd, blob.encode("utf-8"))
+    finally:
+        os.close(fd)
+    return len(fresh)
 
 
 def load_events(root: Path) -> list[dict[str, Any]]:

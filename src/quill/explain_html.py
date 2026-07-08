@@ -42,6 +42,7 @@ Consolas,monospace;}
 button{border:1px solid #d0d7de;background:#ffffff;border-radius:6px;
 padding:6px 12px;font-size:12px;cursor:pointer;color:#1f2328;}
 button:hover{background:#f3f4f6;}
+.rollup{font-size:14px;font-weight:600;color:#1f2328;margin:12px 4px 0;}
 .closer{color:#656d76;font-size:14px;margin-top:24px;}
 .disclaimer{color:#8b949e;font-size:12px;line-height:1.5;margin-top:24px;
 padding-top:16px;border-top:1px solid #d0d7de;}
@@ -80,6 +81,8 @@ def render_html(passport: dict[str, Any]) -> str:
         f'<div class="banner" style="color:{color};background:{bg};'
         f'border-color:{color}">{html.escape(banner)}</div>',
     ]
+    if d.get("rollup"):
+        parts.append(f'<p class="rollup">{html.escape(d["rollup"])}</p>')
 
     task_bits = []
     if d["task"]:

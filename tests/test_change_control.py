@@ -271,7 +271,25 @@ def test_passport_json_and_markdown(repo: Path) -> None:
     assert "# Quill Change Passport" in md
     assert "BLOCK" in md
     assert "outside.py" in md
+    # Action block leads the document (P0-1): what to do, a paste-ready agent
+    # prompt, and the honesty footer — before the raw evidence detail.
+    assert "## What to do next" in md
+    assert "## Prompt to give Claude Code" in md
+    assert "What Quill does not prove" in md
+    assert md.index("## What to do next") < md.index("## Evidence")
 
     json_path, md_path = passport_mod.write_passport(result, out_dir=repo / ".quill")
     assert json_path.exists() and md_path.exists()
     assert json.loads(json_path.read_text())["verdict"] == "BLOCK"
+
+
+def test_passport_markdown_pass_stays_short(repo: Path) -> None:
+    contract, _ = contract_mod.begin("scoped", allowed_paths=["**"], root=repo)
+    (repo / "in_scope.py").write_text("print('ok')\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "ok")
+    result = verify_mod.verify(contract=contract, root=repo)
+    md = passport_mod.render_markdown(result, generated_at="2026-06-17T00:00:00+00:00")
+    # PASS has nothing to remediate, so no noisy action block.
+    assert "## What to do next" not in md
+    assert "## Prompt to give Claude Code" not in md

@@ -769,7 +769,10 @@ def lessons_main(
     promoted_ids = {e["id"] for e in lessons_mod.load_promoted(root)}
     for n, p in enumerate(patterns, start=1):
         mark = " [green](promoted)[/green]" if p["lesson_id"] in promoted_ids else ""
-        out.print(f"{n}. {p['headline']}  [dim]({p['severity']})[/dim]")
+        sev_icon = {"block": "⛔", "policy_candidate": "🔒", "warn": "⚠️", "inform": "ℹ️"}.get(
+            p["severity"], "•"
+        )
+        out.print(f"{n}. {sev_icon} {p['headline']}  [dim]({p['severity']})[/dim]")
         out.print(f"   Seen: {p['count']} time(s) · last {p['last_seen'][:10]}{mark}")
         out.print(f"   Suggested lesson: {p['lesson']}")
         out.print(f"   Promote it: [cyan]{p['promote_command']}[/cyan]\n")

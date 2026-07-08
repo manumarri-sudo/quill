@@ -187,13 +187,15 @@ jobs:
   change-control:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           path: _pr_checkout             # isolate candidate code from trusted runtime
           persist-credentials: false
-      - uses: manumarri-sudo/quill@v0
+      # Pin to the release commit SHA, not a mutable tag — `quill status`
+      # rejects a non-SHA pin. `quill init` writes the current pin for you.
+      - uses: manumarri-sudo/quill@RELEASE_SHA  # replace with the v0.3.0 release commit SHA
         with:
           head: ${{ github.event.pull_request.head.sha }}
           head-sha: ${{ github.event.pull_request.head.sha }}
@@ -222,6 +224,29 @@ verification **errors and the job fails closed** (exit 2), rather than passing
 silently — so deleting or omitting the contract cannot wave a change through.
 Initialize Change Control on the base branch (`quill begin --key`) before requiring
 the check.
+
+## After a BLOCK: explain, fix, and teach future agents
+
+A verdict is where most gates stop. Quill turns the block into the fix, and turns
+repeated blocks into repo lessons future agents read before they drift again — all
+local, no telemetry, deterministic (no model decides anything):
+
+```bash
+quill verify                                     # PASS · NEEDS_REVIEW · BLOCK + a passport
+quill explain                                    # the passport in plain English + a fix per finding
+quill explain --fix-prompt                       # a compact prompt to paste into your coding agent
+quill lessons                                    # repeated local mistakes, ranked, with a suggested lesson
+quill lessons promote no-ci-edits-without-ci-scope   # human-gated: accept a lesson
+quill teach --agents claude,codex,cursor         # write promoted lessons into CLAUDE.md / AGENTS.md / Cursor rules
+quill agent-brief                                # the compact pre-work brief to hand an agent before it starts
+```
+
+`quill explain` reads the passport and says, per finding, what's wrong in plain
+language, the exact `git` command to undo it, and a paste-ready instruction for the
+agent — plus *what Quill does not prove* (it checks the boundary, not code
+correctness). `--fix-prompt` and `--agent-brief` emit the compact agent surfaces
+without dumping the full passport into context. **Quill never uploads raw code,
+diffs, prompts, or secret values; lessons are local and human-promoted.**
 
 ## Trust spine: sign the boundary once, the agent can't forge it
 
@@ -356,6 +381,11 @@ quill && pip install -e .`.
 ```
 quill begin          capture the approved task into .quill/contract.json
 quill verify         compare the diff to the contract, emit PASS / NEEDS_REVIEW / BLOCK
+quill explain        turn the passport into plain-English remediation (--fix-prompt, --agent-brief, --format html)
+quill fix-prompt     compact paste-ready fix prompt for the coding agent
+quill lessons        aggregate repeated local mistakes; promote <id> to accept one
+quill teach          write promoted lessons into CLAUDE.md / AGENTS.md / Cursor rules
+quill agent-brief    compact pre-work brief to hand an agent before it starts
 quill onboard        first-run setup for the local gate (detect agents, install hook)
 quill audit          review what got blocked / allowed / asked; verify the chain
 quill approve <tok>  confirm a pending one-shot approval (Touch ID on macOS)

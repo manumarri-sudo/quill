@@ -12,9 +12,48 @@ surface); tests enforce this.
 
 from __future__ import annotations
 
+import shlex
 from typing import Any
 
-CLOSER = "Fix these {n} thing(s), commit again, and re-run the check."
+
+def _undo(path: str) -> str:
+    """A safe `git checkout` for a path: `--` ends option parsing (so a path
+    beginning with `-` isn't read as a flag) and shlex.quote handles spaces
+    and shell metacharacters."""
+    return f"git checkout -- {shlex.quote(path)}"
+
+
+CLOSER = "Fix these {n} thing(s), commit again, and re-run: quill verify"
+REVIEW_CLOSER = "Ask a reviewer to look at the {n} item(s) above, then re-run: quill verify"
+
+# Human-facing label per finding kind, for the one-line severity/volume rollup.
+_KIND_LABEL = {
+    "secret": "secret",
+    "gate_tamper": "gate-tamper edit",
+    "forbidden": "forbidden path",
+    "out_of_scope": "out-of-scope file",
+    "symlink": "symlink",
+    "submodule": "submodule move",
+    "sensitive": "sensitive surface",
+    "scan_incomplete": "unscannable change",
+}
+
+
+def _rollup(remediations: list[dict[str, str]]) -> str:
+    """One scannable line: how many issues, across how many files, by kind."""
+    n = len(remediations)
+    files = len({r["where"].split(":")[0] for r in remediations if r["where"]})
+    counts: dict[str, int] = {}
+    for r in remediations:
+        label = _KIND_LABEL.get(r["kind"], r["kind"])
+        counts[label] = counts.get(label, 0) + 1
+    breakdown = ", ".join(
+        f"{c} {label}{'s' if c > 1 and not label.endswith('s') else ''}"
+        for label, c in counts.items()
+    )
+    where = f" in {files} file{'s' if files != 1 else ''}" if files else ""
+    return f"{n} issue{'s' if n != 1 else ''}{where} ({breakdown})"
+
 
 PASS_LINE = "✅ You're good — this change is inside what was approved. Nothing to do."
 
@@ -81,7 +120,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                     "always blocked, no matter the task."
                 ),
                 "self_fix": (
-                    f"Undo it: git checkout {p} — these files must not change in a normal task."
+                    f"Undo it: {_undo(p)} — these files must not change in a normal task."
                 ),
                 "cc_prompt": (
                     f"Revert {p}; I should not modify Quill's own configuration, "
@@ -99,7 +138,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                     "This edits a protected area a human marked off-limits for automatic changes."
                 ),
                 "self_fix": (
-                    f"Undo it: git checkout {p} — or ask the project owner to approve this edit."
+                    f"Undo it: {_undo(p)} — or ask the project owner to approve this edit."
                 ),
                 "cc_prompt": (
                     f"Undo my changes to {p}; it's a protected area I wasn't allowed to touch."
@@ -115,7 +154,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                 "kind": "out_of_scope",
                 "where": p,
                 "plain": (f'This file has nothing to do with the approved task "{task}".'),
-                "self_fix": f"Undo it: git checkout {p}",
+                "self_fix": f"Undo it: {_undo(p)}",
                 "cc_prompt": (
                     f"Undo my changes to {p} — it was outside the task "
                     f"'{task}'. Keep only changes that belong to that task."
@@ -135,7 +174,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                     "off-limits, so a human has to confirm this one."
                 ),
                 "self_fix": (
-                    f"If the link isn't needed, undo it: git checkout {c['path']} "
+                    f"If the link isn't needed, undo it: {_undo(c['path'])} "
                     "— otherwise confirm the target is intended."
                 ),
                 "cc_prompt": (
@@ -156,7 +195,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                 ),
                 "self_fix": (
                     "Confirm the new version is intended, or undo the pointer "
-                    f"change: git checkout {c['path']}"
+                    f"change: {_undo(c['path'])}"
                 ),
                 "cc_prompt": (
                     f"Explain what changed in the submodule at {c['path']} and "
@@ -178,7 +217,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                     ),
                     "self_fix": (
                         "If the edit is part of the task, ask a reviewer to look; "
-                        f"if it isn't, undo it: git checkout {p}"
+                        f"if it isn't, undo it: {_undo(p)}"
                     ),
                     "cc_prompt": (
                         f"Explain why the task required changing {p} so a "
@@ -216,8 +255,11 @@ def explain_dict(passport: dict[str, Any]) -> dict[str, Any]:
         "task": passport.get("contract", {}).get("task", ""),
         "allowed_paths": list(passport.get("contract", {}).get("allowed_paths", [])),
         "remediations": remediations,
+        "rollup": _rollup(remediations) if remediations else "",
         "inspect_first": [r["where"] for r in remediations if r["where"]],
-        "closer": CLOSER.format(n=len(remediations)),
+        "closer": (REVIEW_CLOSER if verdict == "NEEDS_REVIEW" else CLOSER).format(
+            n=len(remediations)
+        ),
         "does_not_prove": DOES_NOT_PROVE,
     }
 
@@ -229,7 +271,10 @@ def render_text(passport: dict[str, Any]) -> str:
         return PASS_LINE + "\n"
 
     d = explain_dict(passport)
-    lines = [_BLOCK_INTRO if verdict == "BLOCK" else _REVIEW_INTRO, ""]
+    lines = [_BLOCK_INTRO if verdict == "BLOCK" else _REVIEW_INTRO]
+    if d["rollup"]:
+        lines.append(d["rollup"])
+    lines.append("")
     if d["task"]:
         lines.append(f'The approved task was: "{d["task"]}"')
     if d["allowed_paths"]:

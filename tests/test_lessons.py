@@ -122,6 +122,21 @@ def test_record_and_load_roundtrip(tmp_path: Path):
     assert events[0]["rule_id"] == "SCOPE_OUT"
 
 
+def test_record_is_idempotent_per_commit(tmp_path: Path):
+    # Same failing commit re-verified: no double counting.
+    p = dict(_passport(out_of_scope=[".github/workflows/a.yml"]))
+    p["head_commit"] = "deadbeef"
+    assert record_mistakes(p, tmp_path) == 1
+    assert record_mistakes(p, tmp_path) == 0
+    assert len(load_events(tmp_path)) == 1
+    # A new commit with the same pattern still records.
+    p2 = dict(p)
+    p2["head_commit"] = "cafef00d"
+    assert record_mistakes(p2, tmp_path) == 1
+    patterns = suggest(load_events(tmp_path))
+    assert patterns[0]["count"] == 2
+
+
 # --- suggestion / promotion --------------------------------------------------
 
 

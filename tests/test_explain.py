@@ -69,7 +69,7 @@ def test_forbidden_hit_gets_git_undo_command():
     (r,) = build_remediations(p)
     _assert_record(r)
     assert r["kind"] == "forbidden"
-    assert "git checkout src/auth/login.py" in r["self_fix"]
+    assert "git checkout -- src/auth/login.py" in r["self_fix"]
 
 
 def test_out_of_scope_references_the_task():
@@ -78,7 +78,15 @@ def test_out_of_scope_references_the_task():
     _assert_record(r)
     assert r["kind"] == "out_of_scope"
     assert "add coupons to checkout" in r["plain"] or "add coupons to checkout" in r["cc_prompt"]
-    assert "git checkout ops/prod.cfg" in r["self_fix"]
+    assert "git checkout -- ops/prod.cfg" in r["self_fix"]
+
+
+def test_self_fix_commands_are_shell_safe():
+    # Path with a leading dash and a space must not be shell-injectable or
+    # read as a git option — `--` plus shlex.quote handles both.
+    p = _passport(out_of_scope=["-rf weird name.py"])
+    (r,) = build_remediations(p)
+    assert "git checkout -- '-rf weird name.py'" in r["self_fix"]
 
 
 def test_gate_tamper_maps():
@@ -119,6 +127,8 @@ def test_sensitive_surface_framed_as_review_not_failure():
     assert r["kind"] == "sensitive"
     text = render_text(p)
     assert "not a failure" in text
+    # NEEDS_REVIEW closer asks for a reviewer, not "fix these".
+    assert "Ask a reviewer" in text
 
 
 def test_dedup_prefers_most_specific_reason():
@@ -149,7 +159,9 @@ def test_text_render_numbers_issues_and_closes():
     )
     text = render_text(p)
     assert "Issue 1" in text and "Issue 2" in text
-    assert "commit again, and re-run the check" in text
+    assert "re-run: quill verify" in text
+    # Scannable rollup line names the volume + kinds up top.
+    assert "2 issues" in text
 
 
 def test_explain_dict_shape():

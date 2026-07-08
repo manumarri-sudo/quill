@@ -15,16 +15,25 @@ why.
 
 ## Where Quill sits (the trust boundary)
 
-Quill runs in two places on the developer's machine:
+Quill currently runs in two relevant places:
 
-1. A **PreToolUse hook** in the coding agent (Claude Code, Cursor) that fires
-   before each built-in tool call (Bash, Edit, Write, NotebookEdit).
-2. An **MCP proxy** between the agent and the MCP servers it calls.
+1. The **CI Change Control gate** (`quill verify`), which runs in CI — outside
+   the agent's reach — and verifies a PR diff against a human-signed boundary.
+   This is the provable boundary and the product's headline surface; the rest
+   of this document's "hard boundary" honesty is about the *local* layer below.
+2. An optional **PreToolUse hook** in the coding agent (Claude Code, Cursor)
+   that fires before each built-in tool call (Bash, Edit, Write, NotebookEdit).
+   This is **defense-in-depth** on the developer's machine, not a hard boundary.
 
-Both are at the **application layer**. Quill sees the *tool calls the agent
-chooses to make through the framework*. It classifies them with a compiled
-regex/policy set (no LLM in the decision path) and returns allow / ask / deny,
-writing every decision to an HMAC-chained audit log.
+> Earlier previews also included an **MCP proxy** between the agent and the MCP
+> servers it calls. That proxy was **removed in the Change Control pivot** and
+> is **not** part of the current launch surface. Mentions of "the proxy"
+> elsewhere in older notes refer to that removed component.
+
+The local hook is at the **application layer**. Quill sees the *tool calls the
+agent chooses to make through the framework*. It classifies them with a
+compiled regex/policy set (no LLM in the decision path) and returns allow /
+ask / deny, writing every decision to an HMAC-chained audit log.
 
 What Quill does **not** see, by construction:
 
