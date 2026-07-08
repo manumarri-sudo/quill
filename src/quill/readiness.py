@@ -79,10 +79,11 @@ def _workflow_issue(text: str) -> str | None:
     if from_source or re.search(r"uses:\s*\./", text):
         return (
             "gate runs from the PR's own checkout (uses: ./ / install-from-source) — "
-            "a PR can modify its own judge. Pin to a published tag: uses: manumarri-sudo/quill@v0"
+            "a PR can modify its own judge. Pin to the release commit SHA: "
+            "uses: manumarri-sudo/quill@<40-hex-release-sha>"
         )
     if not re.search(r"uses:\s*[\w.-]+/quill@", text):
-        return "Quill referenced but not pinned to org/quill@<tag>"
+        return "Quill referenced but not pinned to org/quill@<40-hex-release-sha>"
     issues: list[str] = []
     has_prt = re.search(r"pull_request_target:", text)
     has_pr_only = re.search(r"pull_request:", text) and not has_prt
@@ -97,7 +98,7 @@ def _workflow_pinning(root: Path) -> Check:
     """Is the gate run from a pinned published tag (safe) or the PR's own code (unsafe)?
 
     Running the action from the PR's checkout (``uses: ./`` / ``install-from-source``)
-    lets a PR modify the gate that judges it. A pinned tag (``uses: org/quill@v0``)
+    lets a PR modify the gate that judges it. A SHA pin (``uses: org/quill@<sha>``)
     runs trusted code the PR can't alter. The SAME file that runs Quill must also use
     ``pull_request_target`` and a SHA pin — the trigger and pin have to co-occur, so an
     unrelated workflow can't supply them.
