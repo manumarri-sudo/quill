@@ -264,6 +264,58 @@ def explain_dict(passport: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Which finding kinds are hard violations (::error) vs. review flags (::warning).
+_ANNOTATION_LEVEL = {
+    "secret": "error",
+    "gate_tamper": "error",
+    "forbidden": "error",
+    "out_of_scope": "error",
+    "symlink": "warning",
+    "submodule": "warning",
+    "sensitive": "warning",
+    "scan_incomplete": "warning",
+}
+
+
+def _ann_escape_data(s: str) -> str:
+    """Escape a GitHub workflow-command message body (also neutralizes any
+    attacker-controlled `::` in a passport-derived path/message so it can't
+    inject a second command)."""
+    return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A").replace("::", "%3A%3A")
+
+
+def _ann_escape_prop(s: str) -> str:
+    """Escape a workflow-command property value (file=, line=). Adds comma and
+    colon on top of the message escaping."""
+    return _ann_escape_data(s).replace(",", "%2C").replace(":", "%3A")
+
+
+def render_github_annotations(passport: dict[str, Any]) -> list[str]:
+    """GitHub Actions annotation commands, one per finding, so each shows on the
+    exact file/line of the PR diff. Hard violations are ::error, review flags are
+    ::warning. All fields are escaped — a malicious path cannot inject a command."""
+    lines: list[str] = []
+    for r in build_remediations(passport):
+        level = _ANNOTATION_LEVEL.get(r["kind"], "warning")
+        where = r["where"]
+        # Only a trailing ":<digits>" is a line number; everything else is the
+        # path (so a path that itself contains ':' or newlines is kept whole and
+        # escaped, never truncated into an injectable fragment).
+        if ":" in where and where.rsplit(":", 1)[1].isdigit():
+            path, line = where.rsplit(":", 1)
+        else:
+            path, line = where, ""
+        props = []
+        if path:
+            props.append(f"file={_ann_escape_prop(path)}")
+        if line:
+            props.append(f"line={line}")
+        props.append(f"title={_ann_escape_prop('Quill: ' + r['kind'].replace('_', ' '))}")
+        prop_str = ("," + ",".join(props)) if props else ""
+        lines.append(f"::{level}{prop_str}::{_ann_escape_data(r['plain'])}")
+    return lines
+
+
 def render_text(passport: dict[str, Any]) -> str:
     """Human terminal rendering: numbered issues, friendly closer."""
     verdict = passport.get("verdict", "")

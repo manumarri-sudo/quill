@@ -222,6 +222,14 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" && -f "$PASSPORT_MD" ]]; then
   cat "$PASSPORT_MD" >>"$GITHUB_STEP_SUMMARY"
 fi
 
+# 6a. Inline annotations: drop each finding onto the exact file/line of the PR
+#     diff, so a reviewer sees "what's wrong" right where it happened without
+#     opening the summary. Rendered (and escaped) by Quill from the SAME passport
+#     we just validated; best-effort, never affects the verdict.
+if [[ "$VERDICT" != "PASS" ]]; then
+  quill explain --passport "$PASSPORT_JSON" --format github 2>/dev/null || true
+fi
+
 # NEEDS_REVIEW blocking: when enabled, NEEDS_REVIEW is treated as BLOCK for the
 # Status Check state and the job exit, so the job fails on any finding (not just
 # hard violations). The passport verdict itself is left unchanged — this only

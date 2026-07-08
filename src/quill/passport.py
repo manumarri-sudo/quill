@@ -148,6 +148,12 @@ def render_markdown(result: VerifyResult, *, generated_at: str | None = None) ->
     lines.append(f"- **Head commit:** `{_short(result.head_commit)}`")
     lines.append("")
 
+    # Collapse the raw evidence/trust detail so the PR summary stays scannable:
+    # the verdict + action block are what a reader needs first; the full
+    # inventory is one click away (GitHub renders <details> in step summaries).
+    lines.append("<details>")
+    lines.append("<summary>Full evidence (changed files, scope, secrets, trust)</summary>")
+    lines.append("")
     lines.append("## Evidence")
     lines.append("")
     changed = result.changed_paths
@@ -227,6 +233,8 @@ def render_markdown(result: VerifyResult, *, generated_at: str | None = None) ->
         lines.append(f"- **Strict mode:** {'on' if result.strict else 'off'}")
         lines.append("")
 
+    lines.append("</details>")
+    lines.append("")
     lines.append("---")
     mac = result.audit_mac or "(not chained)"
     lines.append(f"_Generated {ts} · verification.run audit mac: `{_short(mac, 16)}`_")

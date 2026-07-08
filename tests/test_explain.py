@@ -14,7 +14,12 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from quill.explain import build_remediations, explain_dict, render_text
+from quill.explain import (
+    build_remediations,
+    explain_dict,
+    render_github_annotations,
+    render_text,
+)
 from quill.explain_html import render_html
 
 JARGON = ("perimeter", "provenance", "MAC", "surface")
@@ -180,6 +185,36 @@ def test_explain_states_what_quill_does_not_prove():
     assert "Reviewer should inspect first: b.py" in text
     # PASS is still a single clean line, no disclaimer noise.
     assert render_text(_passport(verdict="PASS")).strip().count("\n") == 0
+
+
+def test_github_annotations_target_file_and_line():
+    p = _passport(
+        secret_findings=[{"path": "src/api/app.py", "line": 2, "pattern": "AWS Access Key ID"}],
+        out_of_scope=[".github/workflows/deploy.yml"],
+        sensitive_surfaces={"ci": ["ci/build.sh"]},
+    )
+    anns = render_github_annotations(p)
+    # secret → ::error with the exact line
+    assert any(
+        a.startswith("::error") and "file=src/api/app.py" in a and "line=2" in a for a in anns
+    )
+    # out-of-scope → ::error, file only
+    assert any(a.startswith("::error") and "file=.github/workflows/deploy.yml" in a for a in anns)
+    # sensitive surface → ::warning (review, not hard fail)
+    assert any(a.startswith("::warning") and "file=ci/build.sh" in a for a in anns)
+
+
+def test_github_annotations_escape_injection_paths():
+    # A malicious path must not be able to inject a second workflow command.
+    p = _passport(out_of_scope=["evil.py::error::pwned\nrm -rf /"])
+    (ann,) = render_github_annotations(p)
+    assert ann.count("::error") == 1  # the leading command only
+    assert "\n" not in ann
+    assert "%0A" in ann and "%3A%3A" in ann
+
+
+def test_pass_has_no_annotations():
+    assert render_github_annotations(_passport(verdict="PASS")) == []
 
 
 def test_html_render_is_self_contained_and_honest():

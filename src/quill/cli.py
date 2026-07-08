@@ -645,7 +645,9 @@ def explain_cmd(
     ] = None,
     fmt: Annotated[
         str,
-        typer.Option("--format", help="output format: text, json, or html."),
+        typer.Option(
+            "--format", help="output format: text, json, html, or github (CI annotations)."
+        ),
     ] = "text",
     as_fix_prompt: Annotated[
         bool,
@@ -684,8 +686,8 @@ def explain_cmd(
         _emit_agent_brief()
         return
 
-    if fmt not in ("text", "json", "html"):
-        out.print(f"[red]unknown --format '{fmt}'[/red] — use text, json, or html")
+    if fmt not in ("text", "json", "html", "github"):
+        out.print(f"[red]unknown --format '{fmt}'[/red] — use text, json, html, or github")
         raise typer.Exit(code=2)
 
     candidates = (
@@ -709,6 +711,12 @@ def explain_cmd(
 
     if fmt == "json":
         rendered = json.dumps(explain_mod.explain_dict(passport), indent=2)
+    elif fmt == "github":
+        # GitHub Actions annotation commands — one per finding, on the exact
+        # file/line of the PR diff. Emit raw (no rich markup) so Actions parses them.
+        for cmd in explain_mod.render_github_annotations(passport):
+            print(cmd)
+        return
     elif fmt == "html":
         from quill.explain_html import render_html
 
