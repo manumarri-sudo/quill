@@ -46,4 +46,17 @@ def test_gitattributes_cannot_hide_a_secret(repo: Path) -> None:
     _git(repo, "commit", "-qm", "secret hidden behind -diff")
     result = verify_mod.verify(contract=contract, root=repo)
     assert result.verdict is Verdict.BLOCK
+    # Assert on the DIFF-TEXT scanner channel specifically. `evaluation` is the
+    # output of policy.evaluate_diff over the `git diff --text` text, so it is the
+    # exact channel the H-2 --text flag protects: drop --text and git renders the
+    # `-diff` file as "Binary files ... differ", the added secret line never appears
+    # in the diff, and this channel goes empty. The independent blob-level scan
+    # would still populate the final `result.secret_findings`, so asserting only on
+    # the verdict / merged findings passes even with --text removed (which is why the
+    # earlier test was weak). Pinning the diff channel makes dropping --text a real,
+    # caught regression.
+    assert any(f.path == "src/secret.txt" for f in result.evaluation.secret_findings), (
+        result.evaluation.secret_findings
+    )
+    # And the merged, unwaived findings that drive the verdict still carry it.
     assert any(f.path == "src/secret.txt" for f in result.secret_findings), result.reasons

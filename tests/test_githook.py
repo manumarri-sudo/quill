@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -214,23 +215,41 @@ def test_install_hook_creates_executable(tmp_path):
     assert os.access(p, os.X_OK)
 
 
-def test_install_hook_bakes_absolute_quill_binary_path(tmp_path):
+def test_install_hook_bakes_absolute_quill_binary_path(tmp_path, monkeypatch):
     """Hook should `exec /abs/path/to/quill git-hook` not bare `exec quill`.
-    Otherwise commits from outside the venv silently no-op."""
-    (tmp_path / ".git").mkdir()
-    p, _ = install_hook(tmp_path)
+    Otherwise commits from outside the venv silently no-op.
+
+    We stage a resolvable `quill` as a sibling of `sys.executable` so
+    `_resolve_quill_binary()` deterministically finds an absolute path
+    (this is the venv layout it targets). The hook must then bake that
+    exact absolute path in, not the bare literal `quill`.
+    """
+    # Fake venv bin dir with an executable `quill` next to the interpreter.
+    fake_bin = tmp_path / "venv" / "bin"
+    fake_bin.mkdir(parents=True)
+    fake_python = fake_bin / "python"
+    fake_python.write_text("#!/bin/sh\n")
+    fake_python.chmod(0o755)
+    fake_quill = fake_bin / "quill"
+    fake_quill.write_text("#!/bin/sh\n")
+    fake_quill.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(fake_python))
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    p, _ = install_hook(repo)
     contents = p.read_text()
-    # Look for an absolute path before `git-hook`. Match `/...quill git-hook`.
+    # Look for the binary token before `git-hook`. Match `<binary> git-hook`.
     import re
 
     m = re.search(r"exec\s+(\S+)\s+git-hook", contents)
     assert m is not None, f"no exec line found:\n{contents}"
     binary = m.group(1)
-    # On a typical install we expect either an absolute path OR the literal
-    # "quill" if neither sys.executable's sibling nor PATH resolved. The
-    # absolute-path branch is the desired behavior; we accept both so tests
-    # don't fail on stripped CI environments.
-    assert binary.startswith("/") or binary == "quill"
+    # Resolution should have found our staged venv-sibling quill and baked
+    # its absolute path in. A bare literal `quill` (unresolved) is the
+    # regression this test exists to catch.
+    assert binary == str(fake_quill), f"expected absolute venv path, got {binary!r}"
+    assert binary.startswith("/")
 
 
 def test_install_hook_idempotent(tmp_path):

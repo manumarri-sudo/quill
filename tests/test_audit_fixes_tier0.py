@@ -19,6 +19,9 @@ that re-opens one shows up immediately. References to the audit reports:
 
 from __future__ import annotations
 
+import pytest
+from rich.console import Console
+
 from quill.policy import Risk, classify_command
 
 
@@ -107,24 +110,33 @@ def test_run_hook_fails_closed_on_malformed_input() -> None:
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
-def test_no_quill_skip_disable_auth_runtime_check() -> None:
+def test_no_quill_skip_disable_auth_runtime_check(monkeypatch) -> None:
     """The bypass env var must NOT gate disable-auth at runtime.
 
-    An env var the agent controls is not a security boundary. The string
-    can appear in comments documenting the removal, but it must never be
-    read by `os.environ.get` in the production helper. Tests inject by
-    monkeypatching `touchid`, not by setting this env var.
+    Behavioral, not structural: with QUILL_SKIP_DISABLE_AUTH set (which the
+    agent fully controls) and no live human available - Touch ID cannot
+    present, the TTY challenge fails, and --no-biometric was not passed -
+    `_require_disable_auth` must still REFUSE (raise typer.Exit). No matter
+    HOW the code might read the env var (os.environ, os.getenv, ...), the var
+    cannot open the gate. A grep-only test misses an `os.getenv` bypass; this
+    one exercises the code path so any read that returns early is caught.
     """
-    import pathlib
-    import re
+    import typer
 
-    src = (pathlib.Path(__file__).parent.parent / "src" / "quill" / "cli.py").read_text()
-    # Look for any environ-read of the var anywhere in the file.
-    pattern = re.compile(
-        r"(os\.environ\.get|environ\[).{0,40}QUILL_SKIP_DISABLE_AUTH",
-        re.DOTALL,
-    )
-    assert pattern.search(src) is None, (
-        "production code path must not read QUILL_SKIP_DISABLE_AUTH from the "
-        "environment - the agent owns its own env"
-    )
+    from quill import cli, touchid
+
+    # Force the "no live human" state: Touch ID can't present, and the TTY
+    # typed-phrase challenge fails (piped / headless / agent-redirected).
+    monkeypatch.setattr(touchid, "is_available", lambda: False)
+    monkeypatch.setattr(touchid, "can_present_ui", lambda: False)
+    monkeypatch.setattr(cli, "_human_tty_challenge", lambda *a, **k: False)
+    # Silence the loud audit emit so the test doesn't touch real logs.
+    monkeypatch.setattr(cli, "_emit_gate_event", lambda *a, **k: None)
+
+    # The agent sets the var it owns, hoping to skip the gate.
+    monkeypatch.setenv("QUILL_SKIP_DISABLE_AUTH", "1")
+
+    # no_biometric defaults to False, so Tier 3 must refuse regardless of env.
+    with pytest.raises(typer.Exit) as exc_info:
+        cli._require_disable_auth(Console(), action="turn the Quill gate OFF")
+    assert exc_info.value.exit_code == 1

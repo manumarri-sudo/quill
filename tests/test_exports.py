@@ -112,21 +112,38 @@ def test_kpis_compute_tdr_correctly() -> None:
 
 
 def test_redaction_strips_raw_arg_values() -> None:
-    """Customer's auditor sees what was attempted, never the secrets."""
+    """Customer's auditor sees what was attempted, never the secrets.
+
+    Two leak paths must both be plugged. The ``args_preview`` map is dropped
+    wholesale from the whitelist, but the free-text fields
+    (``what`` / ``why`` / ``reason`` / ``try_instead``) survive into the
+    export, so each must be run through the secret redactor and the operator's
+    home path scrubbed to ``~`` (otherwise a credential or username pasted
+    into ``what`` would land verbatim in the auditor's evidence pack).
+    """
+    secret = "ghp_" + "A" * 36  # GitHub classic PAT shape, matched by redact()
+    home_secret_path = str(Path.home()) + "/.ssh/id_rsa"
     events = [
         _evt(
             ev.TOOL_ATTEMPTED,
             tool_name="Bash",
             args_preview={"command": "rm -rf /home/me/.ssh/id_rsa"},
             arg_keys=["command"],
+            what=f"cat {home_secret_path} then push token {secret}",
         ),
     ]
     rep = aggregate(events, log_path=Path("/x"))
     md = render_markdown(rep)
     html = render_html(rep)
-    # Must NOT appear in either rendering.
-    assert "/home/me/.ssh/id_rsa" not in md
-    assert "/home/me/.ssh/id_rsa" not in html
+    for out in (md, html):
+        # The dropped args_preview map never surfaces.
+        assert "/home/me/.ssh/id_rsa" not in out
+        # The real secret riding in the whitelisted free-text field is gone,
+        # replaced by a redaction marker - proof the redactor actually ran.
+        assert secret not in out
+        assert "[REDACTED:" in out
+        # The home path is scrubbed to ~, so the operator username never leaks.
+        assert str(Path.home()) not in out
     # The TOOL NAME is fine to surface.
     assert "Bash" in md or "Bash" in html
 

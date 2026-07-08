@@ -59,13 +59,21 @@ def test_forget_session_wipes(tmp_dir):
 
 def test_session_id_path_traversal_resistance(tmp_dir):
     """A malformed session_id (containing slashes / dots) must not let
-    the file write escape the configured directory."""
+    the file write escape the configured directory. The resolved target
+    path must stay strictly inside the configured dir, so a `../` escape
+    that would land outside is rejected regardless of whether it ever
+    materializes as a direct child of tmp_dir."""
+    base = sa._dir().resolve()
+    for evil in ("../../../etc/passwd", "../escape", "/etc/passwd", "..", "a/../../b"):
+        target = sa._session_file(evil).resolve()
+        assert target.parent == base, f"{evil!r} escaped to {target}"
+        assert target.is_relative_to(base), f"{evil!r} escaped to {target}"
+
+    # And an actual write with an evil id must not create anything outside
+    # the configured directory tree.
     sa.remember("../../../etc/passwd", "Edit", {"x": 1})
-    # Should not have created files outside tmp_dir.
-    for f in tmp_dir.iterdir():
-        # Each file's name should be sanitized (no slash, no '..')
-        assert "/" not in f.name
-        assert ".." not in f.name
+    escapee = (tmp_dir / ".." / "etc" / "passwd").resolve()
+    assert not escapee.exists()
 
 
 def test_digest_is_stable_across_call_order(tmp_dir):

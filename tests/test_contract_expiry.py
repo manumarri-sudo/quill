@@ -60,10 +60,14 @@ def test_is_expired_unit() -> None:
     assert dataclasses.replace(base, expires_at="not-a-date").is_expired() is False
 
 
-def test_contract_id_changes_with_scope(repo: Path) -> None:
-    a, _ = contract_mod.begin("same task", allowed_paths=["src/**"], root=repo)
-    b, _ = contract_mod.begin("same task", allowed_paths=["src/**", "docs/**"], root=repo)
-    assert a.contract_id != b.contract_id
+def test_contract_id_changes_with_scope() -> None:
+    # Hold task, base_commit, and created_at IDENTICAL so scope is the ONLY
+    # varying input; the ids must still differ, proving scope is hashed into the
+    # id (and not that an unfixed clock made created_at differ between calls).
+    task, base, created = "same task", "abc123", "2020-01-01T00:00:00+00:00"
+    id_a = contract_mod._contract_id(task, base, created, ["src/**"])
+    id_b = contract_mod._contract_id(task, base, created, ["src/**", "docs/**"])
+    assert id_a != id_b
 
 
 def test_expired_contract_blocks_in_strict(repo: Path) -> None:

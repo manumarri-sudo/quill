@@ -100,8 +100,13 @@ def test_provider_name_extracts_upstream() -> None:
 
 
 def test_span_attributes_redact_raw_args() -> None:
-    """Args values must NEVER reach the span - same redaction stance as
-    the audit log. Only schema-shape strings (reason, by, etc.) flow."""
+    """Only the fixed allowlist of schema-shape payload fields may flow onto
+    the span. Raw arg values in NON-allowlisted fields (command, token, ...)
+    MUST NEVER reach the span - same redaction stance as the audit log. The
+    secrets here are scalar strings, so they would pass the isinstance filter
+    if the emit loop iterated over the whole payload; only the allowlist keeps
+    them out. Widening `for k in (...)` to `for k in payload:` must fail this."""
+    allowlist = {"reason", "by", "approve_token", "what", "why", "try_instead"}
     attrs = otel._span_attributes(
         event_type="tool.attempted",
         session_id="s",
@@ -109,13 +114,25 @@ def test_span_attributes_redact_raw_args() -> None:
         risk="low",
         payload={
             "tool_name": "Bash",
-            "args_preview": {"command": "rm -rf /etc/passwd"},  # MUST NOT appear
-            "arg_keys": ["command"],  # MUST NOT appear
+            "reason": "policy: denylisted binary",  # allowlisted -> flows
+            "command": "rm -rf /etc/passwd",  # scalar secret, NOT allowlisted
+            "token": "sk-live-SECRET-9f3a2b",  # scalar secret, NOT allowlisted
         },
     )
+    # Behavioral: no raw secret value reaches any attribute value.
     serialized = "|".join(f"{k}={v}" for k, v in attrs.items())
     assert "/etc/passwd" not in serialized
     assert "rm -rf" not in serialized
+    assert "sk-live-SECRET-9f3a2b" not in serialized
+    # Structural: the payload-derived attributes are EXACTLY the allowlisted
+    # schema fields present in the payload - nothing else leaks through.
+    payload_derived = {
+        k.removeprefix("quill.")
+        for k in attrs
+        if k.startswith("quill.") and k not in ("quill.risk", "quill.event_type")
+    }
+    assert payload_derived == {"reason"}
+    assert payload_derived <= allowlist
 
 
 def test_audit_emit_does_not_raise_when_otel_emit_throws() -> None:

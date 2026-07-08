@@ -6,6 +6,7 @@ Covers: append-only writes, chain integrity, tamper detection, file mode.
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -151,18 +152,42 @@ def test_audit_log_file_mode_is_0o600(tmp_path: Path) -> None:
 
 
 def test_force_fsync_on_high_risk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """High-risk entries must be force-fsynced; low-risk batch up.
+    """High-risk entries must be force-fsynced at emit time; low-risk batch up.
 
-    We can't observe fsync directly without ptrace; instead we verify that
-    the entry is durable by reopening the file and verifying the chain.
+    A single high-risk entry sits well below FSYNC_BATCH_SIZE, so the ONLY
+    reason it must hit the platter during emit() is the risk-based force. We
+    spy on os.fsync to observe the durability barrier the instant the event is
+    written, before any close() runs its batch flush. This kills the mutant
+    that drops the ``risk in ("high","critical")`` clause from the predicate:
+    without it a lone high-risk emit would defer to the batch and never fsync.
     """
     p = tmp_path / "audit.jsonl"
     key = b"k" * 32
-    with AuditLog(path=p, hmac_key=key) as log:
-        log.emit(event_type="a", session_id="s", risk="high", payload={})
-    # No explicit close+fsync between emit and read; chain must still verify.
+
+    fsync_fds: list[int] = []
+    real_fsync = os.fsync
+
+    def spy_fsync(fd: int) -> None:
+        fsync_fds.append(fd)
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", spy_fsync)
+
+    log = AuditLog(path=p, hmac_key=key)
+    try:
+        # A single low-risk emit must NOT fsync: it batches up.
+        log.emit(event_type="low", session_id="s", risk="low", payload={})
+        assert fsync_fds == [], "a lone low-risk emit must batch, not fsync"
+
+        # A single high-risk emit MUST fsync during emit(), before close().
+        log.emit(event_type="high", session_id="s", risk="high", payload={})
+        assert fsync_fds, "high-risk emit must force-fsync at emit time, before close"
+    finally:
+        log.close()
+
+    # And the durability barrier does not corrupt the chain.
     total, failures = verify_chain(p, key)
-    assert total == 1
+    assert total == 2
     assert failures == []
 
 

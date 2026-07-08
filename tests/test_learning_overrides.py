@@ -186,17 +186,38 @@ def test_critical_pattern_not_downshifted_by_override(
     """
     _isolate(monkeypatch, tmp_path)
     overrides_path = tmp_path / "overrides.toml"
-    # Try to write an override targeting the CRITICAL rm -rf pattern.
+
+    # Key the override to the EXACT pattern_id the CRITICAL DROP TABLE
+    # event produces - the same f"{tool}:{normalized_reason}" the hook
+    # computes on the downshift path. This is the load-bearing setup: a
+    # non-matching key (e.g. "Bash:rm -rf") could never downshift the
+    # event regardless of the guard, so it would let a broken guard pass
+    # unnoticed. By making the override a genuine content match, the ONLY
+    # thing standing between the override block and an allow verdict is
+    # the `permission == "ask" and classified_by == "default"` guard.
+    # A CRITICAL event is permission="deny"/classified_by="pattern", so
+    # the guard must keep the block from ever firing.
+    from quill.adapters.claude_code import decide, run_hook
+    from quill.audit import AuditLog
+    from quill.learn import _normalize_block_reason
+
+    critical = decide("Bash", {"command": "DROP TABLE users"})
+    assert critical.permission == "deny"
+    assert critical.classified_by == "pattern"
+    head = _normalize_block_reason(critical.reason) or critical.reason
+    critical_pattern_id = f"Bash:{head}"[:80]
     _write_override(
         overrides_path,
-        pattern_id="Bash:rm -rf",
+        pattern_id=critical_pattern_id,
         promoted_at=datetime.now(UTC),
         ttl_days=30,
         evidence="attempted bypass",
     )
+    # The override IS active and DOES key on this event's pattern_id, so
+    # only the guard prevents a downshift.
+    from quill.learning import load_active_overrides
 
-    from quill.adapters.claude_code import run_hook
-    from quill.audit import AuditLog
+    assert critical_pattern_id in load_active_overrides()
 
     log = tmp_path / "audit.jsonl"
     transcript = tmp_path / "t.jsonl"
@@ -216,10 +237,12 @@ def test_critical_pattern_not_downshifted_by_override(
             audit=audit,
         )
 
-    # Override exists but the CRITICAL classification was the ORIGINAL
-    # verdict; the override code only fires when permission == "ask"
-    # AND reason starts with "default risk for". CRITICAL events have
-    # neither property, so the override never fires for them.
+    # A matching, active override exists - yet the CRITICAL verdict must
+    # stand. The downshift guard fires only on permission=="ask" AND
+    # classified_by=="default"; a CRITICAL deny has neither, so the
+    # override block is never reached. Dropping the guard (`if True:`)
+    # would flip this exact event to an "operator-promoted override"
+    # allow, so this assertion kills that mutant.
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
     reason = out["hookSpecificOutput"]["permissionDecisionReason"]
     assert "operator-promoted override" not in reason

@@ -129,14 +129,21 @@ def test_psql_quoted_sql_is_psql_arg_not_classified_by_inner_sql() -> None:
 
 
 def test_delete_from_with_where_on_newline_not_critical() -> None:
-    """Audit found: `DELETE FROM users\\nWHERE id=1` tripped DELETE-without-WHERE
-    because the regex was not DOTALL. We keep this test to document the
-    expected behaviour: it's MEDIUM (uncategorised) at minimum, never
-    CRITICAL just because the WHERE is on the next line."""
-    classify_command("DELETE FROM users\nWHERE id=1")
-    # The pattern still doesn't use DOTALL - the audit fix is separate. The
-    # test pins that as long as quote-masking is in play, an INTENTIONAL
-    # heredoc form is recognised:
+    """The load-bearing behaviour is the dangerous case: a bare
+    `DELETE FROM <table>` with no WHERE wipes every row and must classify
+    CRITICAL. The safe/quoted case (`psql -c '... WHERE id=1'`) must NOT
+    trip CRITICAL just because the string contains DELETE FROM.
+
+    Deleting the "DELETE FROM without WHERE" pattern from the destructive-
+    command table must fail this test, so we assert the dangerous case
+    directly rather than only pinning the safe case."""
+    # Dangerous case: no WHERE clause -> full-table delete -> CRITICAL.
+    dangerous = classify_command("DELETE FROM users")
+    assert dangerous.risk is Risk.CRITICAL
+    assert dangerous.reason == "DELETE FROM without WHERE"
+
+    # Safe case: the SQL is a quoted argument to psql; quote-masking means
+    # the embedded WHERE'd statement must not be re-classified as CRITICAL.
     c2 = classify_command("psql -c 'DELETE FROM users WHERE id=1'")
     assert c2.risk is not Risk.CRITICAL
 
@@ -212,17 +219,19 @@ def test_unicode_tag_block_is_critical() -> None:
 def test_zero_width_chars_flagged_high_not_critical() -> None:
     """Zero-width chars (U+200B etc.) are also weaponised but are HIGH, not
     CRITICAL - they appear in some legitimate documents (formatting hacks)."""
+    zwsp = chr(0x200B)  # zero-width space
     tool = {
         "name": "lookup",
-        "description": "Look up​ a value silently.",
+        "description": f"Look up{zwsp} a value.",
     }
-    # Will fire both invisible_unicode (zero-width) AND injection_phrase
-    # ("silently"). Test that at minimum the invisible_unicode finding is
-    # present at HIGH.
+    # The ONLY signal here is the zero-width char - no injection phrase, no
+    # encoded blob - so the invisible_unicode finding is what must fire, and
+    # it must be HIGH (never CRITICAL, since U+200B is outside the tag block).
     r = scan(tool)
-    assert r.safe is not False or any(
-        f.category == "invisible_unicode" and f.severity == "high" for f in r.findings
-    )
+    assert not any(f.category == "injection_phrase" for f in r.findings)
+    assert any(f.category == "invisible_unicode" and f.severity == "high" for f in r.findings)
+    assert r.worst_severity == "high"
+    assert r.safe  # HIGH is surfaced as a warning, not blocked
 
 
 def test_tab_newline_cr_not_flagged() -> None:

@@ -458,26 +458,39 @@ def test_trust_scope_does_not_downshift_critical_commands(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CRITICAL events MUST still deny even inside a trusted dir.
-    Trust scope only downshifts the DEFAULT high-risk classification
-    for Edit/Write/MultiEdit/NotebookEdit. Pattern-matched commands
-    (vercel --prod, git push --force, etc.) and CRITICAL events fire
-    regardless of trust. This is the safety invariant.
+    """Trust scope only downshifts the DEFAULT high-risk classification
+    for Edit/Write/MultiEdit/NotebookEdit. Anything classified by another
+    source - a pattern-matched Bash CRITICAL (vercel --prod) OR a
+    non-default Edit/Write whose risk came from an explicit `[policy]`
+    override - is NOT eligible and must survive inside a trusted dir.
+    The `decision.classified_by == "default"` guard is the safety
+    invariant; this test exercises it directly.
     """
     trusted = tmp_path / "trusted_repo"
     trusted.mkdir()
     config = tmp_path / "config.toml"
-    config.write_text(f'[session]\nintent = "test"\nscope = []\n\n[trust]\npaths = ["{trusted}"]\n')
+    # `[policy] Edit = "high"` makes an Edit's HIGH risk come from the
+    # operator override, so classify_event stamps classified_by="pattern"
+    # (NOT "default") while permission stays "ask". That is exactly the
+    # non-default-but-ask shape the trust-scope guard must refuse to
+    # auto-allow, even though the tool is Edit and the cwd is trusted.
+    config.write_text(
+        f'[session]\nintent = "test"\nscope = []\n\n'
+        f'[trust]\npaths = ["{trusted}"]\n\n'
+        f'[policy]\nEdit = "high"\n'
+    )
     monkeypatch.setenv("QUILL_CONFIG", str(config))
     monkeypatch.setenv("QUILL_SESSIONS", str(tmp_path / "sessions.json"))
     monkeypatch.setenv("QUILL_TAINT_FILE", str(tmp_path / "taint.json"))
+    monkeypatch.setenv("QUILL_DECAY_FILE", str(tmp_path / "permissions.json"))
     monkeypatch.setenv("QUILL_NO_AUTO_WATCH", "1")
     log = tmp_path / "audit.jsonl"
     transcript = tmp_path / "t.jsonl"
     transcript.write_text("")
 
     with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
-        out = run_hook(
+        # Case 1: pattern-matched CRITICAL Bash command in a trusted dir.
+        vercel = run_hook(
             _payload(
                 tool_name="Bash",
                 session_id="s-vercel",
@@ -487,9 +500,29 @@ def test_trust_scope_does_not_downshift_critical_commands(
             ),
             audit=audit,
         )
-    # vercel --prod is classified critical/high by pattern; the trust
-    # scope must NOT auto-allow it.
-    assert out["hookSpecificOutput"]["permissionDecision"] != "allow"
+        # Case 2: an Edit classified NON-default (via [policy] override) in
+        # the SAME trusted dir. Its permission is "ask" and the tool is
+        # Edit, so it passes every trust-scope precondition EXCEPT the
+        # classified_by=="default" guard. If that guard is removed, this
+        # downshifts to "allow" - which is the regression we must catch.
+        override_edit = run_hook(
+            _payload(
+                tool_name="Edit",
+                session_id="s-override",
+                transcript=str(transcript),
+                cwd=str(trusted),
+                file_path=str(trusted / "app.py"),
+                old_string="a",
+                new_string="b",
+            ),
+            audit=audit,
+        )
+    # vercel --prod is classified critical by pattern; the trust scope
+    # must NOT auto-allow it.
+    assert vercel["hookSpecificOutput"]["permissionDecision"] != "allow"
+    # The override-classified Edit is non-default, so trust scope must
+    # leave it at "ask" rather than downshifting it to "allow".
+    assert override_edit["hookSpecificOutput"]["permissionDecision"] == "ask"
 
 
 def test_trust_scope_matches_subdirectories(

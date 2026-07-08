@@ -192,9 +192,10 @@ def test_repeated_denies_emit_tightening_suggestion(
 
     # The learner accumulated state for the pattern. Each iteration
     # records under the SAME pattern_id (we snapshot the original
-    # classifier reason before any token-consume flips it), so the
-    # pattern's fires count should equal the iteration count even
-    # when some iterations get token-flipped to allow.
+    # classifier reason before any token-consume flips it). The
+    # isolated store carries no approval tokens, so every iteration is
+    # a clean deny: fires, denies, and the consecutive-deny streak all
+    # land at exactly TIGHTEN_DENY_STREAK.
     stats = load_stats()
     bash_keys = [k for k in stats if k.startswith("Bash:")]
     assert bash_keys, f"expected a Bash:... pattern in stats, got {list(stats)}"
@@ -204,34 +205,32 @@ def test_repeated_denies_emit_tightening_suggestion(
         f"pattern_id, got {p.fires} (token-consumes should NOT split "
         f"into a separate pattern row)"
     )
-    # At least one of the iterations must be a deny; the others may
-    # have flipped to approve via consume - that's the realistic
-    # streak shape for a repeated-block, repeated-approve sequence.
-    assert p.denies >= 1
+    assert p.denies == TIGHTEN_DENY_STREAK
+    assert p.consecutive_denies == TIGHTEN_DENY_STREAK
 
-    # The intermediate denies built a consecutive streak; if the
-    # streak threshold was reached before a token-consume reset it,
-    # a tightening suggestion landed in suggestions.jsonl. We allow
-    # for either outcome in this assertion: if consecutive_denies
-    # ever reached TIGHTEN_DENY_STREAK, the suggestion exists.
+    # Boundary assertion (the point of this test): EXACTLY
+    # TIGHTEN_DENY_STREAK consecutive denies must fire the auto-tighten
+    # suggestion. detect_tightening triggers on
+    # `consecutive_denies >= TIGHTEN_DENY_STREAK`, so the suggestion is
+    # emitted on the final iteration when the streak first hits the
+    # threshold. An off-by-one at that boundary (`>` instead of `>=`)
+    # would need one MORE deny, leaving suggestions.jsonl without a
+    # tightening row and failing this assertion.
     sug_file = tmp_path / "suggestions.jsonl"
-    if p.consecutive_denies >= TIGHTEN_DENY_STREAK or any(
-        # token-consumes interleaved with denies might never let
-        # the streak reach 5 in this test's exact sequence. Verify
-        # by reading suggestions.jsonl directly.
-        True
-        for _ in [0]
-    ):
-        if sug_file.exists():
-            suggestions = [json.loads(line) for line in sug_file.read_text().splitlines()]
-            tightening = [s for s in suggestions if s.get("type") == "tightening_auto_applied"]
-            # If the streak ever reached the threshold, the suggestion
-            # is recorded. Otherwise the test only verifies recording.
-            if tightening:
-                assert (
-                    "denies" in tightening[0]["evidence"].lower()
-                    or "approval" in tightening[0]["evidence"].lower()
-                )
+    assert sug_file.exists(), (
+        "a suggestion must have been written once the deny streak "
+        f"reached exactly {TIGHTEN_DENY_STREAK}"
+    )
+    suggestions = [json.loads(line) for line in sug_file.read_text().splitlines()]
+    tightening = [s for s in suggestions if s.get("type") == "tightening_auto_applied"]
+    assert tightening, (
+        f"expected a tightening_auto_applied suggestion after exactly "
+        f"{TIGHTEN_DENY_STREAK} consecutive denies, got types "
+        f"{[s.get('type') for s in suggestions]}"
+    )
+    # The suggestion cites the deny streak that triggered it, at the
+    # exact boundary count (not one fewer, not one more).
+    assert f"{TIGHTEN_DENY_STREAK} consecutive denies" in tightening[0]["evidence"]
 
 
 # ---------------------------------------------------------------------------

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
+import typer
 
+from quill.cli import app
 from quill.integrate import (
     MARKER_BEGIN,
     MARKER_END,
@@ -15,6 +18,43 @@ from quill.integrate import (
     install,
     uninstall,
 )
+
+
+def _registered_commands(t: typer.Typer, prefix: str = "") -> set[str]:
+    """Every command path the Typer app actually exposes, e.g. ``saves`` and
+    ``audit show``. Group names alone (e.g. ``audit``) are NOT included, since
+    they are not runnable commands on their own."""
+    names: set[str] = set()
+    for cmd in t.registered_commands:
+        name = cmd.name or cmd.callback.__name__.replace("_", "-")
+        names.add((prefix + name).strip())
+    for grp in t.registered_groups:
+        assert grp.typer_instance is not None
+        names |= _registered_commands(grp.typer_instance, prefix=f"{prefix}{grp.name} ")
+    return names
+
+
+def _quill_commands_in_snippet(snippet: str) -> list[str]:
+    """Pull every ``quill <subcommand ...>`` reference out of a snippet's
+    inline code spans and resolve each to its registered command path
+    (1- or 2-token), so a fabricated command surfaces as its raw name."""
+    found: list[str] = []
+    for span in re.findall(r"`([^`]+)`", snippet):
+        tokens = span.split()
+        if not tokens or tokens[0] != "quill":
+            continue
+        # command tokens run until the first flag / placeholder / value arg
+        cmd: list[str] = []
+        for tok in tokens[1:]:
+            if re.fullmatch(r"[a-z][a-z0-9-]*", tok):
+                cmd.append(tok)
+            else:
+                break
+        if cmd:
+            # prefer the 2-token path (group + subcommand), else the bare command
+            found.append(" ".join(cmd[:2]) if len(cmd) >= 2 else cmd[0])
+    return found
+
 
 # ---------------------------------------------------------------------------
 # registry
@@ -203,23 +243,22 @@ def test_aider_snippet_includes_core_commands() -> None:
 
 
 def test_snippets_never_invent_unimplemented_commands() -> None:
-    """The snippets must only reference commands that actually exist in the
-    CLI today (or are clearly labeled as 'when shipped'). Avoid sending
-    users' agents off to run nonexistent commands."""
-    # Stable / shipping commands across all snippets
-    shipped = [
-        "quill saves",
-        "quill receipts list",
-        "quill receipts show",
-        "quill audit show",
-        "quill audit export",
-        "quill trifecta show",
-    ]
-    for _integ in all_integrations():
-        for _cmd in shipped:
-            # not every snippet must include every command, but every
-            # included command must be one of the shipped ones — checked
-            # by the per-agent tests above. This test just ensures the
-            # shipped list is non-empty.
-            pass
-    assert shipped  # smoke: shipping list is real
+    """Every ``quill <subcommand>`` a snippet tells the agent to run must be a
+    REAL command registered on the CLI. A fabricated command (e.g.
+    ``quill nuke-everything``) must fail this test rather than get shipped into
+    a user's agent rules file."""
+    registered = _registered_commands(app)
+    # sanity: introspection actually found the CLI's commands
+    assert {"saves", "audit show", "receipts list", "trifecta show"} <= registered
+
+    checked = 0
+    for integ in all_integrations():
+        referenced = _quill_commands_in_snippet(integ.snippet)
+        assert referenced, f"{integ.name} snippet references no quill commands"
+        for cmd in referenced:
+            checked += 1
+            assert cmd in registered, (
+                f"{integ.name} snippet references `quill {cmd}`, which is not a "
+                f"registered CLI command. Known commands: {sorted(registered)}"
+            )
+    assert checked  # we actually cross-checked at least one command
