@@ -1,8 +1,8 @@
-# Notari — Product & Tiers
+# Notari, Product & Tiers
 
 Notari is open-source change control for AI coding agents. The core security
-primitive — a human-signed boundary that deterministically gates agent-authored
-diffs — is free and open source **forever**. Paid tiers add the things a *team*
+primitive, a human-signed boundary that deterministically gates agent-authored
+diffs, is free and open source **forever**. Paid tiers add the things a *team*
 needs once the primitive works: shared policy, history, monitoring, and the
 governance/compliance surface that only makes sense across many repos and people.
 
@@ -12,7 +12,7 @@ free. You pay when you want to operate it as a team at scale.
 
 ---
 
-## Free / OSS (MIT) — shipped today
+## Free / OSS (MIT), shipped today
 
 Everything below exists in this repository and is covered by tests.
 
@@ -33,7 +33,7 @@ Everything below exists in this repository and is covered by tests.
 
 **Design guarantees (all backed by code + tests in this repo):**
 
-- No candidate-controlled Python module executes before verification — the Action
+- No candidate-controlled Python module executes before verification, the Action
   installs and runs in isolated mode (`python -I`, `PYTHONSAFEPATH=1`) and the PR
   is checked out into a data-only directory. (`tests/test_secure_workflow_isolation.py`)
 - Strict mode requires a signed perimeter **and** a signed, repo-bound contract; an
@@ -60,7 +60,7 @@ trust it won't be rug-pulled. Enforcement is never paywalled.
 
 ---
 
-## Pro Team — planned (hosted)
+## Pro Team, planned (hosted)
 
 > Status: **roadmap.** Design targets, not shipped features. The free gate works
 > without any of this.
@@ -70,7 +70,7 @@ Team operation of the same gate, without each repo being an island:
 - Hosted dashboard: posture across every repo in one view.
 - Centralized, versioned policy templates pushed to many repos.
 - **GitHub App check-source**: post the verdict as a Checks-API *check run* from a
-  known App identity, so branch protection can require *Notari specifically* — a bare
+  known App identity, so branch protection can require *Notari specifically*, a bare
   commit status can be spoofed by anyone with `statuses: write`.
 - Signed evidence retention (searchable passport history).
 - Slack / email alerts on BLOCK and on policy drift.
@@ -78,7 +78,7 @@ Team operation of the same gate, without each repo being an island:
 - Branch-protection verification (confirm the check is actually *required*).
 - Multi-repo inventory and posture rollups.
 
-## Business / Enterprise — planned
+## Business / Enterprise, planned
 
 > Status: **roadmap.**
 
@@ -102,5 +102,5 @@ The governance and compliance surface for regulated / large orgs:
    crossed from "trying it" to "depending on it."
 3. **The paid trigger:** "I can't see our posture across 30 repos," "I need the
    verdict to come from an identity a PR can't spoof," and "the auditor wants
-   evidence" — none of which a single-repo CLI can answer, and all of which are
+   evidence", none of which a single-repo CLI can answer, and all of which are
    about *scale and governance*, not about re-enabling security you already had.

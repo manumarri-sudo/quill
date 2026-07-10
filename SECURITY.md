@@ -4,8 +4,8 @@
 plus an optional local tool-dispatch gate installed as agent hooks (Claude Code,
 Cursor, git hooks). A buggy gate is worse than no gate, because it manufactures
 false confidence. This document describes what the project protects against, what
-it does not, and how to report a vulnerability. The calibrated threat model — what
-the gate stops well and exactly where it can be bypassed — lives in
+it does not, and how to report a vulnerability. The calibrated threat model, what
+the gate stops well and exactly where it can be bypassed, lives in
 [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md); read it alongside this file, and
 treat it as the source of truth wherever the two differ.
 
@@ -16,7 +16,7 @@ For the most sensitive reports, open a draft advisory before any public discussi
 
 We aim to respond within 48 hours and to ship a fix within 7 days for
 high-severity issues. Found a bypass? That is exactly the feedback this alpha
-exists for — a working bypass with a repro is a high-severity report, not an
+exists for, a working bypass with a repro is a high-severity report, not an
 embarrassment to soften.
 
 ## Threat model
@@ -34,7 +34,7 @@ In rough priority order:
    gate's verdict signature on a Change Passport.
 3. **Disable the local gate.** Get the gated agent to run `notari off`/`pause`,
    rewrite `~/.notari/` config/policy files, unset the hook, or re-point the
-   hook binary — from inside its own gated session.
+   hook binary, from inside its own gated session.
 4. **Forge or hide audit log entries.** Make a blocked or unapproved action look
    approved, or remove it from the log entirely.
 5. **Exfiltrate secrets.** Steal the HMAC signing key (`~/.notari/key`) or an

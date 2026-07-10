@@ -6,8 +6,8 @@ and open source, runs locally, and needs no account.
 ## What Notari does in one sentence
 
 Notari checks every AI-authored change against a **human-signed boundary** (the
-paths agents may and may never touch) and issues a **Change Passport** — a
-deterministic PASS / NEEDS_REVIEW / BLOCK verdict with the evidence behind it — so
+paths agents may and may never touch) and issues a **Change Passport**: a
+deterministic PASS / NEEDS_REVIEW / BLOCK verdict with the evidence behind it, so
 an autonomous coding agent cannot quietly edit your workflows, your migrations, or
 leak a secret without a human seeing it.
 
@@ -41,39 +41,52 @@ notari guard \
   --forbid ".notari/keys/**"
 ```
 
-Forbidden paths **BLOCK** unconditionally — even a signed contract cannot widen
+Forbidden paths **BLOCK** unconditionally, even a signed contract cannot widen
 past them. This is your outer perimeter. (`--key` is the approver private key
 `notari init` generated; it re-signs the perimeter so the change is trusted.)
 
-## 3. Sign a scoped task (about 1 minute)
+## 3. Commit the boundary, THEN sign a scoped task (about 1 minute)
+
+Order matters here, once: `notari begin` freezes the current HEAD as the
+contract's *base*, and `notari verify` later judges everything after that
+point. Any setup file still uncommitted when you run `begin` (the perimeter,
+the `.gitignore` entries the key commands wrote) rides inside the task's diff
+and muddies your first verdict, so land the boundary first (`begin` warns you
+if you forget):
 
 ```bash
+git add .notari .gitignore && git commit -m "notari: signed boundary"
+
 notari begin "add rate limiting to the API" \
   --scope "src/api/**" \
   --key .notari/keys/approver.pem \
   --expires-in 7
+
+git add .notari && git commit -m "notari: open task contract"
 ```
 
-Pass `--key` so the contract is **signed** — an unsigned contract cannot establish
+Pass `--key` so the contract is **signed**: an unsigned contract cannot establish
 provenance under `notari verify --strict` (the CI default), so the boundary wouldn't
 actually enforce. `--expires-in` takes a number of days; after it lapses,
 `notari verify --strict` BLOCKs so a stale approval can't authorize work forever. In
 CI the repo is bound automatically from `$GITHUB_REPOSITORY`; locally pass `--repo
-owner/name`.
+owner/name`. (The contract commit itself lands after the base by design; verify
+exempts it because its integrity is protected by the approver signature, which
+the agent cannot forge.)
 
-This writes a signed contract binding the work to a scope, an expiry, and — when
-`$GITHUB_REPOSITORY` or `--repo` is present — this repository, so the approval
-cannot be replayed elsewhere.
-
-Now commit the boundary you just set up, as its own commit, **before** any agent
-work. `notari begin` recorded this commit as the contract's *base*; `notari verify`
-later diffs everything after it, so the setup must land first:
+## 4. Watch a good change PASS
 
 ```bash
-git add .notari && git commit -m "notari: sign boundary + open contract"
+echo "rate_limit = 100" >> src/api/limits.py
+git add -A && git commit -m "in-scope change"
+notari verify
 ```
 
-## 4. Watch a bad change get blocked
+You get a green **PASS**: "diff is within the approved boundary: in scope, no
+secrets, nothing forbidden," signed by your approver key. That is the everyday
+happy path; now break it.
+
+## 5. Watch a bad change get blocked
 
 ```bash
 # An agent edits a workflow it was never scoped to touch, in a NEW commit
@@ -86,12 +99,12 @@ notari verify
 
 You get a **BLOCK** with a Change Passport that names the exact forbidden surface.
 (If instead you see a PASS with a warning that "the diff is empty," the bad change
-landed in the same commit as the contract base — make it a separate commit on top,
+landed in the same commit as the contract base, make it a separate commit on top,
 as above, so there is a diff to check.)
 Try the same with an out-of-scope file, or a line like `AWS_SECRET_ACCESS_KEY=...`,
 and you will see the scope and secret findings respectively.
 
-## 5. Explain the failure and fix it with your agent
+## 6. Explain the failure and fix it with your agent
 
 ```bash
 notari explain
@@ -101,12 +114,12 @@ notari explain --fix-prompt
 `notari explain` turns the passport into plain English: per finding, what's wrong,
 the exact `git` command to undo it, and what Notari does *not* prove (it checks the
 boundary, not whether the code is correct). `--fix-prompt` emits a compact prompt
-you paste into Claude Code, Codex, Cursor, or another coding agent — it tells the
+you paste into Claude Code, Codex, Cursor, or another coding agent, it tells the
 agent exactly what to revert, split, or ask approval for, without dumping the full
 passport into context. (`--format html` writes a click-to-copy page for a
 non-technical reviewer.)
 
-## 6. Turn repeated failures into repo lessons
+## 7. Turn repeated failures into repo lessons
 
 ```bash
 notari lessons
@@ -119,22 +132,22 @@ notari agent-brief
 and suggests a short, reusable lesson for each repeated pattern. Promote the ones you
 agree with, then `notari teach` writes them into `CLAUDE.md`, `AGENTS.md`, or Cursor
 rules inside a managed block (your own content is preserved). Future agents read them
-before they start. **This is local by default — no code, diffs, prompts, or secret
+before they start. **This is local by default, no code, diffs, prompts, or secret
 values ever leave your machine, and no lesson is applied without your promotion.**
 
-## 7. Ask what is still missing for a *real* boundary
+## 8. Ask what is still missing for a *real* boundary
 
 ```bash
 notari status
 ```
 
 Notari is honest here. A key sitting on the same laptop the agent runs on is **not**
-a boundary — the agent runs as you and can read it. `notari status` reports:
+a boundary, the agent runs as you and can read it. `notari status` reports:
 
-- 🔴 **unconfigured** — no signed perimeter yet
-- 🟡 **cooperative** — honest review automation, but the trust root is still
+- 🔴 **unconfigured**: no signed perimeter yet
+- 🟡 **cooperative**: honest review automation, but the trust root is still
   reachable by the agent (a local/committed key)
-- 🟢 **enforced** — the approver trust root is off-box (a CI secret or hardware
+- 🟢 **enforced**: the approver trust root is off-box (a CI secret or hardware
   key), the gate runs pinned trusted code, and a required status check gates merge
 
 To reach 🟢 you move three things off the machine (Notari prints the commands):
@@ -146,7 +159,7 @@ gh secret set NOTARI_APPROVER_PUBKEYS < .notari/keys/approver.pub
 # status check REQUIRED in branch protection on main.
 ```
 
-## 8. Confirm your environment
+## 9. Confirm your environment
 
 ```bash
 notari doctor

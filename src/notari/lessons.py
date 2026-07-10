@@ -54,7 +54,7 @@ def classify_path(path: str) -> str:
 
 
 def redact_path(path: str) -> str:
-    """Directory kept, basename dropped — safe for any future aggregation."""
+    """Directory kept, basename dropped, safe for any future aggregation."""
     if "/" not in path:
         return "<file>"
     return path.rsplit("/", 1)[0] + "/<file>"
@@ -170,7 +170,7 @@ def record_mistakes(passport: dict[str, Any], root: Path) -> int:
     # Swarm-safe append: many agents may run `notari verify` against the same
     # repo concurrently. Serialize each record's bytes into ONE os.write to an
     # O_APPEND fd, so writes from different processes never interleave a line.
-    # (The dedup read above is best-effort under a tight race — worst case a
+    # (The dedup read above is best-effort under a tight race, worst case a
     # duplicate slips through and inflates one count by one; suggest() and the
     # fingerprint make that harmless, and it never corrupts the file.)
     blob = "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in fresh)
@@ -245,7 +245,7 @@ _LESSONS: dict[tuple[str, str], tuple[str, str]] = {
     ("SENSITIVE_SURFACE", "*"): (
         "explain-sensitive-surface-edits",
         "When a task genuinely needs to touch CI, tests, lockfiles, or git "
-        "config, say so explicitly in the PR so a reviewer can approve fast — "
+        "config, say so explicitly in the PR so a reviewer can approve fast, "
         "otherwise leave those surfaces alone.",
     ),
     ("OPAQUE_CHANGE", "*"): (

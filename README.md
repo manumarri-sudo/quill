@@ -42,7 +42,7 @@ often misses on a large agent PR.
   <img src="https://raw.githubusercontent.com/manumarri-sudo/notari/main/docs/assets/notari-flow-light.svg" alt="How Notari works: a human signs the task boundary, the AI agent writes the diff, CI verifies the change against the signed boundary and issues a PASS, NEEDS_REVIEW, or BLOCK verdict, recorded in a signed Change Passport any reviewer can re-check." width="920">
 </picture>
 
-The full loop, live — an agent edits in and out of scope, Notari verifies each
+The full loop, live, an agent edits in and out of scope, Notari verifies each
 diff (PASS / NEEDS_REVIEW / BLOCK), and a repeated mistake becomes a lesson
 taught back to the agent (from
 [`examples/change_control_demo.sh`](https://github.com/manumarri-sudo/notari/blob/main/examples/change_control_demo.sh),
@@ -72,8 +72,8 @@ notari verify --strict        # PASS · NEEDS_REVIEW · BLOCK   (BLOCK fails the
 #    so a reviewer can re-check it with `notari verify-passport`.
 ```
 
-That full sequence — pinned external approver key, signed perimeter, signed
-contract, `--strict` — is the real adversarial boundary. Drop any of it (`notari
+That full sequence, pinned external approver key, signed perimeter, signed
+contract, `--strict`, is the real adversarial boundary. Drop any of it (`notari
 begin` / `notari verify` with no flags) and Notari still runs, but in *cooperative*
 mode: honest review automation for a non-adversarial agent, not a boundary
 against one trying to escape. Verdict signing is opt-in (it needs a gate key); it
@@ -83,7 +83,7 @@ the full deployment checklist.
 `notari verify` reads `git diff <base>..HEAD`, checks every changed file against the
 scope you approved, scans added lines for hardcoded secrets and sensitive surfaces
 (CI config, lockfiles, test deletions), evaluates any logged exceptions, and writes
-a **Change Passport** — `passport.json` + a PR-ready `passport.md` — that cites the
+a **Change Passport**: `passport.json` + a PR-ready `passport.md`, that cites the
 HMAC-chained audit entry for the run, so a reviewer can trace the verdict back to a
 tamper-evident record instead of trusting the markdown alone.
 
@@ -103,7 +103,7 @@ against what was actually approved before it shipped.
 Notari puts that check where it can be enforced and recorded: **in CI, on the pull
 request**, where the gate runs outside the agent's own process and cannot be quietly
 switched off by the thing it is reviewing. The verdict is a deterministic function of
-the diff, the contract, and the policy — there is no LLM in the decision path, so the
+the diff, the contract, and the policy, there is no LLM in the decision path, so the
 gate itself cannot be prompt-injected.
 
 ## What Notari is, and what it is not
@@ -116,7 +116,7 @@ Calibration matters more than marketing.
   can review. There is no model in the gate.
 - **The CI gate is the defensible boundary; the local gate is defense-in-depth.**
   Notari also ships an optional on-laptop runtime gate (below). That gate is a
-  deterministic speed bump and recorder at the tool-dispatch layer — it raises the
+  deterministic speed bump and recorder at the tool-dispatch layer, it raises the
   bar against careless agents and the common destructive/exfiltration shapes, but it
   is **not** a hard boundary against a determined adversary actively trying to escape
   it (write-then-run, flag reordering, inherited-env, ungated network egress are all
@@ -130,7 +130,7 @@ Calibration matters more than marketing.
 
 ## Change Control in detail
 
-### 1. `notari begin` — capture the contract
+### 1. `notari begin`, capture the contract
 
 ```bash
 notari begin "Add rate-limiting to the login endpoint" \
@@ -145,10 +145,10 @@ Writes `.notari/contract.json`: the approved task (text or a URL to a ticket), t
 the change starts from, and a `contract_id`. `--key` signs it so `verify --strict`
 can prove a human authored it (required in strict mode); `--expires-in` sets a lapse
 deadline; `--repo` binds the approval to one repository so a signed contract can't be
-replayed elsewhere. Commit the contract (and `.sig`) to the branch — it is the fixed
+replayed elsewhere. Commit the contract (and `.sig`) to the branch, it is the fixed
 record the diff is later measured against, and the Change Passport cites it.
 
-### 2. `notari verify` — gate the diff
+### 2. `notari verify`, gate the diff
 
 ```bash
 notari verify --strict        # enforced mode: requires the signed perimeter + contract
@@ -158,8 +158,8 @@ notari verify                 # local/cooperative: advisory, forgeable by the ag
 `verify` (`src/notari/verify.py`, on top of `policy.evaluate_diff`):
 
 1. builds the authoritative changed-path inventory from
-   `git diff --name-status -z --find-renames <base_commit>..<candidate>` — both
-   rename endpoints, binary and mode-only changes included — and parses the
+   `git diff --name-status -z --find-renames <base_commit>..<candidate>`, both
+   rename endpoints, binary and mode-only changes included, and parses the
    unified diff only to scan **added lines**,
 2. matches every changed path (both ends of a rename) against the contract scope,
 3. scans added lines for the 26 vendor-format secret patterns in
@@ -167,14 +167,14 @@ notari verify                 # local/cooperative: advisory, forgeable by the ag
 4. classifies sensitive surfaces (CI/workflow files, lockfiles, test deletions,
    git configuration like `.gitattributes` that controls diff visibility),
 5. applies any logged exceptions in `.notari/exceptions.json` (ignored entirely in
-   strict mode — an unsigned waiver file cannot weaken a strict verdict),
-6. composes a verdict — **PASS**, **NEEDS_REVIEW**, or **BLOCK** — and chains a
+   strict mode, an unsigned waiver file cannot weaken a strict verdict),
+6. composes a verdict, **PASS**, **NEEDS_REVIEW**, or **BLOCK**: and chains a
    `verification.run` event into the audit log.
 
 `BLOCK` exits non-zero (fails CI); `PASS` and `NEEDS_REVIEW` exit 0, so review is
 surfaced without hard-stopping the pipeline. The whole thing is deterministic: given
-the same inputs — the diff, the contract, the signed perimeter, the trusted approver
-keys, the strict flag, and any (signed) exceptions — it returns the same verdict,
+the same inputs, the diff, the contract, the signed perimeter, the trusted approver
+keys, the strict flag, and any (signed) exceptions, it returns the same verdict,
 explainable line by line. There is no model in the decision path; the only clock
 reference is contract-expiry enforcement (`--expires-in`), which is an explicit
 human-set deadline, not a heuristic.
@@ -191,7 +191,7 @@ rather than asking you to trust the document.
 ```yaml
 # .github/workflows/notari-change-control.yml
 on:
-  pull_request_target:          # NOT pull_request — see "Why pull_request_target" below
+  pull_request_target:          # NOT pull_request, see "Why pull_request_target" below
     branches: [main]
 jobs:
   change-control:
@@ -203,7 +203,7 @@ jobs:
           fetch-depth: 0
           path: _pr_checkout             # isolate candidate code from trusted runtime
           persist-credentials: false
-      # Pin to the release commit SHA, not a mutable tag — `notari status`
+      # Pin to the release commit SHA, not a mutable tag, `notari status`
       # rejects a non-SHA pin. `notari init` writes the current pin for you.
       - uses: manumarri-sudo/notari@c303209bc35e9bde95f11fad4c8beb10875ce117  # 0.3.1 release action
         with:
@@ -217,7 +217,7 @@ jobs:
 ```
 
 **Why `pull_request_target`:** the `pull_request` event runs the PR's version of the
-workflow, so an AI agent can modify the workflow to remove the Notari step entirely —
+workflow, so an AI agent can modify the workflow to remove the Notari step entirely,
 and the gate never fires. `pull_request_target` runs from the base branch (main),
 so only merged code controls the gate definition (the PR cannot edit the workflow
 that judges it). Strict mode **refuses to run** under
@@ -228,17 +228,17 @@ trusted imports during Notari installation. A full secure template is at
 
 The composite action ([`action.yml`](action.yml)) runs `notari verify --strict`,
 publishes a commit Status Check, and fails the job on `BLOCK`. The approver public
-key and gate signing key come from repo/org secrets a PR cannot read or edit — that is
+key and gate signing key come from repo/org secrets a PR cannot read or edit, that is
 what makes the trust root external. If a PR has no `.notari/contract.json`,
 verification **errors and the job fails closed** (exit 2), rather than passing
-silently — so deleting or omitting the contract cannot wave a change through.
+silently, so deleting or omitting the contract cannot wave a change through.
 Initialize Change Control on the base branch (`notari begin --key`) before requiring
 the check.
 
 ## After a BLOCK: explain, fix, and teach future agents
 
 A verdict is where most gates stop. Notari turns the block into the fix, and turns
-repeated blocks into repo lessons future agents read before they drift again — all
+repeated blocks into repo lessons future agents read before they drift again, all
 local, no telemetry, deterministic (no model decides anything):
 
 ```bash
@@ -253,7 +253,7 @@ notari agent-brief                                # the compact pre-work brief t
 
 `notari explain` reads the passport and says, per finding, what's wrong in plain
 language, the exact `git` command to undo it, and a paste-ready instruction for the
-agent — plus *what Notari does not prove* (it checks the boundary, not code
+agent, plus *what Notari does not prove* (it checks the boundary, not code
 correctness). `--fix-prompt` and `--agent-brief` emit the compact agent surfaces
 without dumping the full passport into context. **Notari never uploads raw code,
 diffs, prompts, or secret values; lessons are local and human-promoted.**
@@ -261,9 +261,9 @@ diffs, prompts, or secret values; lessons are local and human-promoted.**
 ## Trust spine: sign the boundary once, the agent can't forge it
 
 The point of running in CI is that the gate lives where the agent can't disable
-it — but that only matters if the agent also can't *fake its approval* or *edit
+it, but that only matters if the agent also can't *fake its approval* or *edit
 its own judge*. Notari closes both with Ed25519 (verification uses a public key,
-forging needs the private key — not the same secret, which is what the symmetric
+forging needs the private key, not the same secret, which is what the symmetric
 HMAC chain could never give you):
 
 <picture>
@@ -275,7 +275,7 @@ HMAC chain could never give you):
 notari keygen --out approver.pem          # human's key; keep the private half OFF the box
 notari guard --key approver.pem --forbid 'migrations/**' --forbid 'src/auth/**'
 #   ^ signs .notari/perimeter.json once. From now on EVERY agent's PR is checked
-#     against it automatically — you're paged only when one crosses the line.
+#     against it automatically, you're paged only when one crosses the line.
 ```
 
 - **A human signs the perimeter once; every PR is enforced with no per-change
@@ -287,7 +287,7 @@ notari guard --key approver.pem --forbid 'migrations/**' --forbid 'src/auth/**'
   the workflow that runs the gate is itself a BLOCK (gate-tamper detection), and
   tampering with a signed perimeter or contract invalidates the signature.
   The contract is protected by its Ed25519 signature, not the gate-tamper glob
-  set — in strict mode an unsigned or forged contract is a BLOCK because its
+  set, in strict mode an unsigned or forged contract is a BLOCK because its
   provenance check fails. The committed
   `.notari/approvers/*.pub` set is a *convenience*, not a boundary: in strict mode
   only the externally-pinned `NOTARI_APPROVER_PUBKEYS` are trusted, because an
@@ -298,7 +298,7 @@ notari guard --key approver.pem --forbid 'migrations/**' --forbid 'src/auth/**'
   anyone re-checks it with `notari verify-passport passport.json` and a flipped
   verdict or untrusted signer fails.
 - **Or use GitHub's own reviews.** `notari check-approval` requires a human who is
-  not the PR author to have approved the current head commit — an agent can't
+  not the PR author to have approved the current head commit, an agent can't
   approve its own PR, and the approval is dismissed when new code is pushed.
 
 **What this requires to be a real boundary (not optional):** the trust root must
@@ -313,14 +313,14 @@ fail-open, and binary/rename diff coverage, all closed with regression tests);
 without them it is honest review automation for a cooperative agent. This has
 **not yet had an external security audit**, so treat "closed" as "closed against
 what we currently test," and treat
-[docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) — which tracks the residual open
-items — as authoritative over this README.
+[docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md), which tracks the residual open
+items, as authoritative over this README.
 
 ## The local runtime gate (optional, defense-in-depth)
 
 Separately from CI, Notari can gate an agent's tool calls **as they happen** on your
 laptop, via Claude Code's `PreToolUse` hook. This is the supporting surface, scoped
-honestly as defense-in-depth — a deterministic speed bump and recorder, not a hard
+honestly as defense-in-depth, a deterministic speed bump and recorder, not a hard
 boundary.
 
 ```bash
@@ -368,7 +368,7 @@ notari audit verify
 
 That count is from ~45 days of real dogfooding on the maintainer's machine; your own
 log starts at one. The chain is locally tamper-evident (and optionally externally
-anchored) — see [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) for exactly what
+anchored), see [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) for exactly what
 that does and does not buy.
 
 ## Install
@@ -409,7 +409,7 @@ notari doctor         diagnose the install
 notari version        print the version
 ```
 
-Run `notari --help` for the full list (including `night`/`off` gate-weakening toggles —
+Run `notari --help` for the full list (including `night`/`off` gate-weakening toggles,
 read [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) before using them).
 
 ## What's shipping today vs. on the roadmap

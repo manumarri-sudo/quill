@@ -35,7 +35,7 @@ def build_passport(result: VerifyResult, *, generated_at: str | None = None) -> 
     """Assemble the machine-readable passport from a VerifyResult.
 
     Schema v1.1 adds the top-level `remediation` array (what to do about each
-    finding, see explain.py) — additive only, v1 readers keep working.
+    finding, see explain.py), additive only, v1 readers keep working.
     """
     c = result.contract
     passport: dict[str, Any] = {
@@ -116,7 +116,7 @@ def render_markdown(
         lines.append(f"- {r}")
     lines.append("")
 
-    # Action block — only when there's something to act on (BLOCK / NEEDS_REVIEW).
+    # Action block, only when there's something to act on (BLOCK / NEEDS_REVIEW).
     if d["remediations"]:
         lines.append("## What to do next")
         lines.append("")
@@ -146,7 +146,7 @@ def render_markdown(
         if signed:
             lines.append(
                 "The JSON passport is gate-signed and can be verified with "
-                "`notari verify-passport` — a reviewer can confirm this verdict "
+                "`notari verify-passport`, a reviewer can confirm this verdict "
                 "without trusting the repo it came from."
             )
         else:
@@ -191,22 +191,22 @@ def render_markdown(
     lines.append("")
     if result.out_of_scope:
         for p in result.out_of_scope:
-            lines.append(f"- ⛔ `{p}` — outside approved scope")
+            lines.append(f"- ⛔ `{p}`, outside approved scope")
     else:
-        lines.append("_None — every change is within the approved scope._")
+        lines.append("_None, every change is within the approved scope._")
     lines.append("")
 
     if result.forbidden_hits:
         lines.append(f"### Forbidden perimeter surfaces ({len(result.forbidden_hits)})")
         lines.append("")
         for p in result.forbidden_hits:
-            lines.append(f"- ⛔ `{p}` — the signed perimeter forbids changes here")
+            lines.append(f"- ⛔ `{p}`, the signed perimeter forbids changes here")
         lines.append("")
 
     if result.gate_tamper_hits:
         lines.append(f"### Gate-tamper edits ({len(result.gate_tamper_hits)})")
         lines.append("")
-        lines.append("_This PR edits Notari's own trust surfaces — always a BLOCK:_")
+        lines.append("_This PR edits Notari's own trust surfaces, always a BLOCK:_")
         for p in result.gate_tamper_hits:
             lines.append(f"- ⛔ `{p}`")
         lines.append("")
@@ -216,7 +216,7 @@ def render_markdown(
     lines.append("")
     if secrets:
         for f in secrets:
-            lines.append(f"- ⛔ `{f.path}:{f.line}` — {f.pattern_name}")
+            lines.append(f"- ⛔ `{f.path}:{f.line}`, {f.pattern_name}")
     else:
         lines.append("_No secrets detected on added lines._")
     lines.append("")
@@ -239,7 +239,7 @@ def render_markdown(
         for e in result.exceptions_applied:
             reason = e.get("reason", "(no reason given)")
             target = e.get("path") or e.get("category") or "*"
-            lines.append(f"- `{e.get('type', '?')}` on `{target}` — {reason}")
+            lines.append(f"- `{e.get('type', '?')}` on `{target}`, {reason}")
         lines.append("")
 
     if result.perimeter_id:
@@ -327,5 +327,5 @@ def write_passport(
 
 def _short(sha: str | None, n: int = 12) -> str:
     if not sha:
-        return "—"
+        return "-"
     return sha[:n]

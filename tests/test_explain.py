@@ -88,7 +88,7 @@ def test_out_of_scope_references_the_task():
 
 def test_self_fix_commands_are_shell_safe():
     # Path with a leading dash and a space must not be shell-injectable or
-    # read as a git option — `--` plus shlex.quote handles both.
+    # read as a git option, `--` plus shlex.quote handles both.
     p = _passport(out_of_scope=["-rf weird name.py"])
     (r,) = build_remediations(p)
     assert "git checkout -- '-rf weird name.py'" in r["self_fix"]

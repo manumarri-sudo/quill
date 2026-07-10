@@ -4,7 +4,7 @@ The surface a non-technical reader actually looks at: a verdict banner, the
 approved task, then one card per finding with the plain-English reason, the
 self-fix (copy button on the command), and the paste-ready agent prompt
 (copy button). Honest by design: it is a fix-it view, never a certification,
-so no "compliant" badges — the strongest thing it says is the verdict.
+so no "compliant" badges, the strongest thing it says is the verdict.
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ from typing import Any
 from notari.explain import PASS_LINE, explain_dict
 
 _VERDICT_STYLE = {
-    "PASS": ("#1a7f37", "#dafbe1", "✅ PASS — inside what was approved"),
-    "NEEDS_REVIEW": ("#9a6700", "#fff8c5", "⚠️ NEEDS REVIEW — a human has to look first"),
-    "BLOCK": ("#cf222e", "#ffebe9", "⛔ BLOCK — can't merge until these are fixed"),
+    "PASS": ("#1a7f37", "#dafbe1", "✅ PASS, inside what was approved"),
+    "NEEDS_REVIEW": ("#9a6700", "#fff8c5", "⚠️ NEEDS REVIEW, a human has to look first"),
+    "BLOCK": ("#cf222e", "#ffebe9", "⛔ BLOCK, can't merge until these are fixed"),
 }
 
 _CSS = """
@@ -76,7 +76,7 @@ def render_html(passport: dict[str, Any]) -> str:
     parts = [
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>",
         "<meta name='viewport' content='width=device-width,initial-scale=1'>",
-        "<title>Notari — what to fix</title>",
+        "<title>Notari, what to fix</title>",
         f"<style>{_CSS}</style></head><body><main>",
         f'<div class="banner" style="color:{color};background:{bg};'
         f'border-color:{color}">{html.escape(banner)}</div>',

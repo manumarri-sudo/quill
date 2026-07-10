@@ -3,7 +3,7 @@ name: release
 # Auto-publishes to PyPI when a GitHub release is published. Uses PyPI
 # Trusted Publishing (OIDC) so no API token lives in repo secrets.
 # manumarri-sudo/notari is registered as the trusted publisher for the
-# `notari` project (workflow `release.yml`, environment `pypi`) — registered
+# `notari` project (workflow `release.yml`, environment `pypi`), registered
 # 2026-07-09, first publish 0.3.0. One name everywhere: dist, package, CLI
 # binary, and config dir are all `notari`. See:
 #   https://docs.pypi.org/trusted-publishers/
@@ -57,7 +57,7 @@ jobs:
 
       - name: Publish to PyPI via Trusted Publishing
         # TP is registered (first publish 0.3.0, 2026-07-09), so a publish
-        # failure now fails the release loudly — no continue-on-error, and
+        # failure now fails the release loudly, no continue-on-error, and
         # `skip-existing: true` keeps re-runs idempotent.
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1
         with:

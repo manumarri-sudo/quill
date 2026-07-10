@@ -1,4 +1,4 @@
-"""Tests for `notari insights` — per-pattern analysis + recommendations."""
+"""Tests for `notari insights`, per-pattern analysis + recommendations."""
 
 from __future__ import annotations
 
@@ -160,7 +160,7 @@ def test_trifecta_sessions_flagged_for_review(tmp_path: Path) -> None:
     )
     flagged_ids = {rs.session_id for rs in insights.reviewable_sessions}
     assert "ses_trifecta" in flagged_ids
-    # ses_normal is NOT flagged for trifecta (no trifecta keyword) — only flagged
+    # ses_normal is NOT flagged for trifecta (no trifecta keyword), only flagged
     # if it had a critical block at 2-4am, which our test data didn't
     trifecta_session = next(
         rs for rs in insights.reviewable_sessions if rs.session_id == "ses_trifecta"

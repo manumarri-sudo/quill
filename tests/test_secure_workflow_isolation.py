@@ -122,7 +122,7 @@ def test_wrapper_exports_safepath() -> None:
 
 def test_wrapper_inline_python_is_isolated() -> None:
     """The wrapper runs with cwd inside the candidate checkout, so every inline
-    python call must use isolated mode (-I, Python 3.4+) — not rely solely on
+    python call must use isolated mode (-I, Python 3.4+), not rely solely on
     PYTHONSAFEPATH (3.11+). (R10 MEDIUM-2)"""
     wrapper = (_REPO / "scripts" / "notari-passport.sh").read_text()
     bad = [

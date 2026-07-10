@@ -24,7 +24,7 @@ Suggestion classes:
 The audit log is the source of truth; everything in this module is a
 pure derivation over it. No state of its own.
 
-KPIs (`notari kpis`) — three signals that genuinely measure whether
+KPIs (`notari kpis`), three signals that genuinely measure whether
 the gate is healthy and useful, NOT how quiet it is:
 
   1. Noise ratio = asks / max(real_blocks, 1)

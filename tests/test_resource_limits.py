@@ -1,5 +1,5 @@
 """Resource ceilings: an enormous diff or too many changed files must not exhaust
-the runner, and — more importantly — an INCOMPLETE scan must never be reported as
+the runner, and, more importantly, an INCOMPLETE scan must never be reported as
 a clean PASS. When coverage is incomplete, strict fails closed (BLOCK) and
 cooperative surfaces it (NEEDS_REVIEW), with a disposition recorded as evidence."""
 
@@ -65,7 +65,7 @@ def test_git_diff_not_truncated_under_ceiling(tmp_path: Path) -> None:
 def test_capture_timeout_bounds_a_process_that_stalls_mid_read(tmp_path: Path) -> None:
     """Regression (R10 review): the deadline must be enforced on each read, not just
     between full chunks. A process that emits a few bytes and then stalls forever
-    must still time out — a blocking BufferedReader.read(65536) would hang here."""
+    must still time out, a blocking BufferedReader.read(65536) would hang here."""
     start = time.monotonic()
     with pytest.raises(VerifyError, match="timed out"):
         # Emits 2 bytes (far under one 64 KiB read) then sleeps well past the ceiling.

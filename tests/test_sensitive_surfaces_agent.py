@@ -1,5 +1,5 @@
 """Anti-manipulation: agent-instruction files and Notari's learning state are
-sensitive surfaces. Editing them must never silently PASS — it surfaces for
+sensitive surfaces. Editing them must never silently PASS, it surfaces for
 review (>= NEEDS_REVIEW) regardless of the perimeter's configured review list,
 because those files are exactly what an agent would poison to game future runs.
 And the learning state, whatever its content, must never change a verdict.
@@ -67,7 +67,7 @@ def test_agent_instruction_edit_is_at_least_needs_review(tmp_path: Path, path: s
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "poison")
     result = verify_mod.verify(contract=_contract(base, "poison", allowed=("**",)), root=repo)
-    # scope is "**", so this is not out-of-scope — the ONLY thing that can stop a
+    # scope is "**", so this is not out-of-scope, the ONLY thing that can stop a
     # silent PASS is the sensitive-surface classification.
     assert result.verdict is not Verdict.PASS, result.reasons
     assert "agent_instructions" in result.sensitive_surfaces
@@ -90,7 +90,7 @@ def test_learning_state_edit_surfaces_for_review(tmp_path: Path, path: str) -> N
 
 def test_agent_instructions_always_review_even_under_narrow_perimeter() -> None:
     # A perimeter that only reviews ci must still not let an agent-instruction
-    # edit pass — the surface is intrinsically always-review.
+    # edit pass, the surface is intrinsically always-review.
     ev = policy.evaluate_diff(
         "diff --git a/CLAUDE.md b/CLAUDE.md\n"
         "--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -0,0 +1 @@\n+poisoned\n",
@@ -104,12 +104,12 @@ def test_agent_instructions_needs_review_under_perimeter_that_omits_them(tmp_pat
     classification: even a signed perimeter whose review_surfaces excludes
     'agent_instructions' must still yield >= NEEDS_REVIEW on a CLAUDE.md edit.
     (The earlier test only checked classify_diff, so removing the _ALWAYS_REVIEW
-    clause in verify.py slipped past it — mutation audit 2026-07.)"""
+    clause in verify.py slipped past it, mutation audit 2026-07.)"""
     from notari import perimeter as perimeter_mod
 
     repo = _repo(tmp_path)
     base = _git(repo, "rev-parse", "HEAD")
-    # A perimeter that reviews ONLY ci — deliberately omits agent_instructions,
+    # A perimeter that reviews ONLY ci, deliberately omits agent_instructions,
     # passed straight into verify() so review_categories = {"ci"}. The ONLY thing
     # that can still surface CLAUDE.md for review is the _ALWAYS_REVIEW override.
     per = perimeter_mod.Perimeter(

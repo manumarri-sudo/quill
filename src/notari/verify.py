@@ -134,7 +134,7 @@ def _git_capture(args: list[str], root: Path, *, timeout: int, max_bytes: int) -
 
     The wall-clock ``timeout`` is enforced on every read via ``select`` on the raw
     pipe fds, so it bounds a git process that hangs *between* bytes as well as one
-    that streams forever — a blocking ``BufferedReader.read(n)`` would only re-check
+    that streams forever, a blocking ``BufferedReader.read(n)`` would only re-check
     the deadline after a full chunk arrived, and a stalled git never delivers one.
     stdout and stderr are drained together so neither pipe buffer can wedge the
     other. POSIX-only (Actions runners are Linux); ``select`` on pipe fds is the
@@ -390,7 +390,7 @@ class VerifyResult:
     # uses THIS, not the weaker textual parser, so evidence can't under-report a
     # change the enforcement layer acted on (security review M-1).
     inventory_paths: tuple[str, ...] = ()
-    # Submodule (gitlink) pointer moves with old/new commit IDs — opaque content
+    # Submodule (gitlink) pointer moves with old/new commit IDs, opaque content
     # that scope/secret scanning cannot reach inside (submodule opacity evidence).
     submodule_changes: tuple[dict[str, str], ...] = ()
     # Symlink (mode 120000) additions/changes with the recorded target: an
@@ -473,7 +473,7 @@ def _read_candidate_blob(root: Path, candidate_sha: str, path: str) -> str | Non
     except FileNotFoundError:
         return None
     except subprocess.CalledProcessError as e:
-        _log.warning("blob read failed for %s:%s — %s", candidate_sha[:12], path, e)
+        _log.warning("blob read failed for %s:%s, %s", candidate_sha[:12], path, e)
         return None
     return _decode_blob(proc.stdout)
 
@@ -640,7 +640,7 @@ def verify(
 
     # Defense-in-depth (base ancestry): a human-signed contract whose base_commit
     # equals HEAD (or otherwise sits off the candidate's history) yields an EMPTY
-    # diff, so every policy check trivially passes — a false-positive PASS. Even
+    # diff, so every policy check trivially passes, a false-positive PASS. Even
     # though the contract is signed, a human can make this mistake, so verify the
     # base is actually an ancestor of the candidate, and reject the degenerate
     # base == candidate case outright. We only run this when base is a real commit
@@ -673,7 +673,7 @@ def verify(
             # Shallow clone or unreachable merge base: can't prove non-ancestry.
             # Warn (cooperative) but never crash or block on inconclusive data.
             _log.warning(
-                "base ancestry check inconclusive for %s..%s — %s",
+                "base ancestry check inconclusive for %s..%s, %s",
                 base[:12],
                 candidate_sha[:12],
                 exc,
@@ -742,7 +742,7 @@ def verify(
             raw_changed.add(p)
             if not p.startswith(".notari/"):
                 policed_changed.add(p)
-    # Detect submodule (gitlink) changes: mode 160000 entries are opaque — the
+    # Detect submodule (gitlink) changes: mode 160000 entries are opaque, the
     # candidate scanner can't read their content (they're commit objects, not
     # blobs), so secret scanning and scope enforcement don't reach inside them.
     # We record the OLD/NEW commit IDs the pointer moved between so a reviewer
@@ -831,7 +831,7 @@ def verify(
     # Empty-diff staleness signal: if the base IS a valid ancestor but the diff
     # is empty while the contract claims a non-trivial scope (anything narrower
     # than the catch-all ["**"]), the contract probably describes work that was
-    # never produced — a stale base or an accidental no-op. Surface it as a
+    # never produced, a stale base or an accidental no-op. Surface it as a
     # warning so a reviewer notices the PASS isn't backed by any change. A ["**"]
     # scope is intentionally broad and an empty diff under it is unremarkable.
     nontrivial_scope = tuple(contract.allowed_paths) not in ((), ("**",))
@@ -852,9 +852,9 @@ def verify(
     # Blob-level secret scan: read each touched file from the CANDIDATE COMMIT
     # (not the worktree) and run secret patterns over the decoded content. This
     # catches secrets that the diff-based scanner misses:
-    #   - 100% renames (no added lines in the diff) — H-4
-    #   - UTF-16/UTF-16BE files (diff --text garbles NUL bytes) — round-6 H-1
-    #   - worktree != candidate divergence — round-6 H-2
+    #   - 100% renames (no added lines in the diff), H-4
+    #   - UTF-16/UTF-16BE files (diff --text garbles NUL bytes), round-6 H-1
+    #   - worktree != candidate divergence, round-6 H-2
     # Covers A (added), M (modified), R (renamed), C (copied). D (deleted) is
     # skipped since the file no longer exists in the candidate.
     from notari import secrets as _secrets
@@ -949,6 +949,7 @@ def verify(
     )
 
     forbidden_hits: tuple[str, ...] = ()
+    _boundary_exempted: tuple[str, ...] = ()
     provenance: ProvenanceResult | None = None
     perimeter_id: str | None = None
     review_categories: set[str] | None = None  # None = report every surface (legacy)
@@ -962,6 +963,29 @@ def verify(
         provenance = provenance_mod.verify_artifact(
             perimeter.to_dict(), perimeter_mod.signature_path(root), root, env, strict=strict
         )
+        # First-run local loop (0.3.2): `begin` captures its base before the
+        # boundary commit lands, so on the documented quickstart the perimeter's
+        # own files ride inside base..head and tripped gate-tamper, making the
+        # happy path BLOCK. This exemption is a cooperative-mode UX fix, NOT a
+        # security property: cooperative trusts working-tree approver pubkeys,
+        # so the signature guard is agent-satisfiable there and cooperative is
+        # advisory by definition (docs/SECURITY-MODEL.md). The degradation is
+        # therefore SURFACED as a warning reason below, never silent, matching
+        # the codebase invariant that every downgrade leaves a trace. Strict
+        # keeps the out-of-band rule unchanged: a PR that (re)introduces even a
+        # validly-signed perimeter still BLOCKs there, because replaying an
+        # old, broader signed perimeter must never widen scope in CI.
+        if not strict and provenance.status.is_trustworthy:
+            _boundary_files = {".notari/perimeter.json", ".notari/perimeter.sig"}
+            _boundary_exempted = tuple(
+                p for p in (*gate_tamper, *forbidden_hits) if p in _boundary_files
+            )
+            gate_tamper = tuple(p for p in gate_tamper if p not in _boundary_files)
+            # The perimeter bakes GATE_TAMPER_GLOBS into its own forbidden list
+            # at signing time, so the same two files also surface as forbidden
+            # hits; the exemption must cover both surfaces or the first-run
+            # verdict stays BLOCK.
+            forbidden_hits = tuple(p for p in forbidden_hits if p not in _boundary_files)
         # Enforce the signed perimeter's allow-list (security re-review): the
         # standing perimeter is the OUTER bound. A path is in effective scope only
         # if it is allowed by BOTH the contract and the perimeter, so a contract
@@ -998,6 +1022,14 @@ def verify(
             f"{len(gate_tamper)} edit(s) to Notari's own trust surfaces "
             "(workflow / approver keys / perimeter)"
         )
+    if _boundary_exempted:
+        names = ", ".join(sorted(set(_boundary_exempted)))
+        reasons.append(
+            f"warning: perimeter files changed inside this diff ({names}); "
+            "signature valid, exempted in cooperative mode only. Verify judged "
+            "against the diff's own perimeter; commit the boundary before "
+            "`begin` to avoid this."
+        )
 
     if submodule_paths:
         detail = "; ".join(
@@ -1005,7 +1037,7 @@ def verify(
             for c in submodule_changes
         )
         reasons.append(
-            f"{len(submodule_paths)} submodule pointer(s) changed — nested content is opaque "
+            f"{len(submodule_paths)} submodule pointer(s) changed, nested content is opaque "
             f"to scope/secret scanning [{detail}]"
         )
 
@@ -1014,7 +1046,7 @@ def verify(
             f"{c['path']} → {c['target'] or '(unreadable)'}" for c in symlink_changes
         )
         reasons.append(
-            f"{len(symlink_paths)} symlink(s) added/changed — a link can redirect an "
+            f"{len(symlink_paths)} symlink(s) added/changed, a link can redirect an "
             f"in-scope path at a forbidden target; scope/secret scanning sees only the "
             f"link text [{detail}]"
         )
@@ -1027,7 +1059,7 @@ def verify(
     if scan_incomplete:
         for d in scan_dispositions:
             reasons.append(
-                f"incomplete scan coverage — {d}"
+                f"incomplete scan coverage, {d}"
                 + ("" if strict else " (not enforced; cooperative mode)")
             )
 

@@ -48,7 +48,7 @@ def test_submodule_pointer_move_is_needs_review(tmp_path: Path) -> None:
         version=1,
         task="bump vendor",
         task_source="text",
-        allowed_paths=("**",),  # in scope on purpose — opacity must still be flagged
+        allowed_paths=("**",),  # in scope on purpose, opacity must still be flagged
         base_commit=base,
         created_at="2026-01-01T00:00:00Z",
         contract_id="submod-test",
@@ -81,7 +81,7 @@ def test_added_submodule_is_flagged_with_new_commit(tmp_path: Path) -> None:
 
     assert result.verdict is Verdict.NEEDS_REVIEW
     change = next(c for c in result.submodule_changes if c["path"] == "vendor/new")
-    assert change["old_commit"] == ""  # newly added — no prior commit
+    assert change["old_commit"] == ""  # newly added, no prior commit
     assert change["new_commit"] == _NEW
 
 

@@ -105,7 +105,7 @@ def test_rule_id_mapping_per_finding_type():
 def test_secret_event_carries_pattern_name_never_value():
     # The finding is fed a RAW secret under several plausible keys, so that a
     # code change which copies ANY finding field into the event (not just the
-    # ones we thought of) is caught — the earlier version only checked a value
+    # ones we thought of) is caught, the earlier version only checked a value
     # the finding never carried, so it passed vacuously (mutation audit 2026-07).
     p = _passport(
         secret_findings=[

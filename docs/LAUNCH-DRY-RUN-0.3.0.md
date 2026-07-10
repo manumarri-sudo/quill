@@ -1,4 +1,4 @@
-# Launch dry-run — Notari 0.3.0
+# Launch dry-run, Notari 0.3.0
 
 Real command results from a pre-alpha release dry-run, run against the **built
 and clean-installed wheel** (not the source tree), on 2026-07-08. This exists so
@@ -30,13 +30,13 @@ notari 0.3.0
 
 Contract: `notari begin "add rate limiting to the API" --scope 'src/api/**'`.
 
-### PASS — in-scope change only
+### PASS, in-scope change only
 ```
 verify exit 0
-✅ You're good — this change is inside what was approved. Nothing to do.
+✅ You're good, this change is inside what was approved. Nothing to do.
 ```
 
-### BLOCK — out-of-scope workflow edit + a secret
+### BLOCK, out-of-scope workflow edit + a secret
 ```
 verify exit 1
 ⛔ This change can't be merged yet. Here's what's wrong and how to fix each one.
@@ -47,13 +47,13 @@ verify exit 1
    Fix it yourself: Delete line 2 of src/api/app.py …
 ```
 `notari explain --fix-prompt` emitted the compact, secret-free agent prompt
-("Fix ONLY the findings below — do not weaken, bypass, or edit Notari's
+("Fix ONLY the findings below, do not weaken, bypass, or edit Notari's
 configuration …").
 
-### NEEDS_REVIEW — in-scope symlink (opaque redirect)
+### NEEDS_REVIEW, in-scope symlink (opaque redirect)
 ```
 verify exit 0
-⚠️  This change needs a human to look at it before it merges — that's a checkpoint, not a failure.
+⚠️  This change needs a human to look at it before it merges, that's a checkpoint, not a failure.
 1 issue in 1 file (1 symlink)
 ```
 
@@ -94,11 +94,11 @@ Repo lessons from prior findings:
 - `_NOTARI_ACTION_PIN` (`src/notari/cli.py`) and `docs/secure-workflow.yml` reference the
   same 40-hex release-action commit SHA; `notari status` rejects a non-SHA pin.
 - The README workflow snippet shows `@RELEASE_SHA` with instructions to replace it
-  with the release commit SHA — no mutable-tag pin ships in the docs.
+  with the release commit SHA, no mutable-tag pin ships in the docs.
 
 > At final tag time: land a pin-bump commit that points both pins at the
 > release-action commit (the newest commit containing the final `action.yml`),
 > then place the `v0`/`v0.3.0` tags on that pin-bump commit. The pin sits one
 > commit below the tag because a commit cannot reference its own SHA; the two
-> commits carry an identical `action.yml`. Re-run §3–§4 once against the
+> commits carry an identical `action.yml`. Re-run §3-§4 once against the
 > tagged artifact.

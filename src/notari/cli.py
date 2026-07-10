@@ -250,7 +250,49 @@ def begin_cmd(
     scope_str = ", ".join(contract.allowed_paths) or "(no path restriction)"
     out.print(f"  scope: {scope_str}")
     out.print(f"  base commit: {contract.base_commit or '(no commits yet)'}")
+    # First-run ordering guard (0.3.2): the contract just froze base=HEAD, so
+    # any setup file still uncommitted (perimeter, .gitignore from keygen/guard)
+    # will land INSIDE the task diff and muddy the verdict with self-flags.
+    # Tell the user now, with the exact command, instead of letting the first
+    # verify surprise them.
+    _dirty_setup = _uncommitted_setup_files(contract_mod.repo_root())
+    if _dirty_setup:
+        out.print(
+            f"  [yellow]heads-up:[/yellow] uncommitted setup file(s) "
+            f"[bold]{', '.join(_dirty_setup)}[/bold] will ride inside this task's diff.\n"
+            f"  Commit them first, then re-run begin:\n"
+            f"    [bold]git add {' '.join(_dirty_setup)} && git commit -m 'notari setup' "
+            f"&& notari begin ...[/bold]"
+        )
     out.print("  next: let the agent work, then run [bold]notari verify[/bold]")
+
+
+def _uncommitted_setup_files(root: Path) -> list[str]:
+    """Setup surfaces (perimeter, .gitignore) that are modified or untracked.
+
+    Only files whose presence inside the task diff would self-flag the first
+    verify; the contract itself is excluded because it is signature-exempt.
+    """
+    import subprocess
+
+    candidates = (".notari/perimeter.json", ".notari/perimeter.sig", ".gitignore")
+    try:
+        res = subprocess.run(
+            ["git", "status", "--porcelain", "--", *candidates],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    dirty: list[str] = []
+    for line in res.stdout.splitlines():
+        p = line[3:].strip().strip('"')
+        if p in candidates:
+            dirty.append(p)
+    return dirty
 
 
 @app.command("verify")
@@ -328,7 +370,7 @@ def verify_cmd(
     # rather than letting an authoritative-looking PASS imply a boundary it isn't.
     if not strict:
         console.print(
-            "[yellow]⚠ cooperative mode:[/yellow] this verdict is advisory — the "
+            "[yellow]⚠ cooperative mode:[/yellow] this verdict is advisory, the "
             "contract/perimeter are not checked as human-signed, so the agent that "
             "wrote the diff could also forge them. For an enforced boundary run "
             "[bold]notari verify --strict[/bold] with approver keys pinned off-box "
@@ -409,6 +451,46 @@ def keygen_cmd(
     console.print(f"[green]✓[/green] private key (0600) → {out}")
     console.print(f"[green]✓[/green] public key → {pub_path}")
     console.print(f"  key id: [bold]{kid}[/bold]")
+    # First-run trap (0.3.2): a private key written inside a git repo gets
+    # swept up by `git add -A`, and the secret scanner then (correctly) BLOCKs
+    # the first verify. `notari init` already gitignores its keys dir; give the
+    # manual path the same protection. Root-relative so it works from any
+    # subdirectory; keys written OUTSIDE the repo need no entry. Best-effort:
+    # a gitignore I/O failure must never crash keygen after the keys exist.
+    try:
+        from notari.contract import repo_root as _repo_root
+
+        root = _repo_root()
+        if (root / ".git").exists():
+            gi = root / ".gitignore"
+            wanted: list[str] = []
+            for key_file in (out, pub_path):
+                try:
+                    rel = key_file.resolve().relative_to(root)
+                except ValueError:
+                    continue  # outside the repo: nothing to ignore
+                wanted.append("/" + rel.as_posix())  # root-anchored pattern
+            existing = gi.read_text() if gi.exists() else ""
+            lines = existing.splitlines()
+            missing = [w for w in wanted if w not in lines]
+            if missing:
+                with gi.open("a") as f:
+                    if existing and not existing.endswith("\n"):
+                        f.write("\n")
+                    f.write(
+                        "# notari: keys stay out of the repo (private = secret; the .pub's\n"
+                        "# content belongs in NOTARI_APPROVER_PUBKEYS or .notari/approvers/)\n"
+                    )
+                    f.writelines(f"{m}\n" for m in missing)
+                console.print(
+                    f"[green]✓[/green] gitignored [bold]{', '.join(missing)}[/bold] "
+                    "(keys never commit; put the .pub's CONTENT in NOTARI_APPROVER_PUBKEYS)"
+                )
+    except OSError as e:
+        console.print(
+            f"[yellow]could not update .gitignore ({e}); add the key files to it "
+            "yourself so they are never committed.[/yellow]"
+        )
 
 
 @app.command("guard")
@@ -467,7 +549,7 @@ def guard_cmd(
     out.print(f"  allowed: {', '.join(per.allowed_paths) or '(anywhere not forbidden)'}")
     out.print(f"  forbidden: {', '.join(per.forbidden_paths)}")
     out.print(
-        "  next: publish the matching public key so the gate can verify it — either\n"
+        "  next: publish the matching public key so the gate can verify it, either\n"
         "    commit it to [bold].notari/approvers/<name>.pub[/bold], or set it as the\n"
         "    [bold]NOTARI_APPROVER_PUBKEYS[/bold] CI secret (stronger: a PR can't edit it)."
     )
@@ -557,13 +639,13 @@ def verify_passport_cmd(
     signer = passport_mod.verify_passport(passport, gate_keys)
     out = Console()
     if signer is None:
-        out.print("[red]✗ passport signature INVALID[/red] — untrusted signer or tampered content")
+        out.print("[red]✗ passport signature INVALID[/red], untrusted signer or tampered content")
         raise typer.Exit(code=1)
 
     # Authenticity established; now validity. Each check fails closed (exit 1).
     if head_sha is not None and passport.get("head_commit") != head_sha:
         out.print(
-            f"[red]✗ candidate mismatch[/red] — passport describes "
+            f"[red]✗ candidate mismatch[/red], passport describes "
             f"{passport.get('head_commit')!r}, expected {head_sha!r}"
         )
         raise typer.Exit(code=1)
@@ -589,7 +671,7 @@ def verify_passport_cmd(
             raise typer.Exit(code=1) from None
         if (datetime.now(UTC) - gen).total_seconds() > max_age_days * 86400:
             out.print(
-                f"[red]✗ passport too old[/red] — generated {generated_at}, max age {max_age_days}d"
+                f"[red]✗ passport too old[/red], generated {generated_at}, max age {max_age_days}d"
             )
             raise typer.Exit(code=1)
 
@@ -607,7 +689,7 @@ def verify_passport_cmd(
         passport_mac = (passport.get("audit") or {}).get("verification_run_mac", "")
         fp_mac = fp.get("mac", "")
         if not passport_mac:
-            out.print("[red]✗ passport has no audit MAC — cannot verify status fingerprint[/red]")
+            out.print("[red]✗ passport has no audit MAC, cannot verify status fingerprint[/red]")
             raise typer.Exit(code=1)
         if not fp_mac or len(fp_mac) < 12:
             out.print(
@@ -616,14 +698,14 @@ def verify_passport_cmd(
             raise typer.Exit(code=1)
         if passport_mac != fp_mac:
             out.print(
-                f"[red]✗ status fingerprint mismatch[/red] — passport MAC "
+                f"[red]✗ status fingerprint mismatch[/red], passport MAC "
                 f"{passport_mac[:12]}… ≠ fingerprint MAC {fp_mac[:12]}…"
             )
             raise typer.Exit(code=1)
         fp_sha = fp.get("sha", "")
         if head_sha is not None and fp_sha and fp_sha != head_sha:
             out.print(
-                f"[red]✗ status fingerprint SHA mismatch[/red] — "
+                f"[red]✗ status fingerprint SHA mismatch[/red], "
                 f"fingerprint sha={fp_sha[:12]}… ≠ --head-sha {head_sha[:12]}…"
             )
             raise typer.Exit(code=1)
@@ -687,7 +769,7 @@ def explain_cmd(
         return
 
     if fmt not in ("text", "json", "html", "github"):
-        out.print(f"[red]unknown --format '{fmt}'[/red] — use text, json, html, or github")
+        out.print(f"[red]unknown --format '{fmt}'[/red], use text, json, html, or github")
         raise typer.Exit(code=2)
 
     candidates = (
@@ -698,7 +780,7 @@ def explain_cmd(
     found = next((p for p in candidates if p is not None and p.exists()), None)
     if found is None:
         out.print(
-            "[red]no passport found[/red] — run `notari verify` first, or point at "
+            "[red]no passport found[/red], run `notari verify` first, or point at "
             "one with --passport path/to/passport.json"
         )
         raise typer.Exit(code=2)
@@ -712,7 +794,7 @@ def explain_cmd(
     if fmt == "json":
         rendered = json.dumps(explain_mod.explain_dict(passport), indent=2)
     elif fmt == "github":
-        # GitHub Actions annotation commands — one per finding, on the exact
+        # GitHub Actions annotation commands, one per finding, on the exact
         # file/line of the PR diff. Emit raw (no rich markup) so Actions parses them.
         for cmd in explain_mod.render_github_annotations(passport):
             print(cmd)
@@ -769,7 +851,7 @@ def lessons_main(
         return
     if not patterns:
         out.print(
-            "no recorded agent mistakes yet — they accumulate automatically "
+            "no recorded agent mistakes yet, they accumulate automatically "
             "when `notari verify` returns BLOCK or NEEDS_REVIEW."
         )
         return
@@ -802,9 +884,7 @@ def lessons_promote_cmd(
     try:
         newly, text = lessons_mod.promote(lesson_id, root)
     except KeyError:
-        out.print(
-            f"[red]unknown lesson id '{lesson_id}'[/red] — run `notari lessons` for the list."
-        )
+        out.print(f"[red]unknown lesson id '{lesson_id}'[/red], run `notari lessons` for the list.")
         raise typer.Exit(code=2) from None
     verb = "promoted" if newly else "already promoted"
     out.print(f"[green]✓[/green] {verb}: {lesson_id}")
@@ -834,7 +914,7 @@ def teach_cmd(
     out = Console()
     if unknown:
         out.print(
-            f"[red]unknown agent(s): {', '.join(unknown)}[/red] — supported: claude, codex, cursor"
+            f"[red]unknown agent(s): {', '.join(unknown)}[/red], supported: claude, codex, cursor"
         )
         raise typer.Exit(code=2)
     for target, changed in teach_mod.teach(root, wanted):
@@ -853,7 +933,7 @@ def _emit_fix_prompt(passport_file: Path | None) -> None:
     found = next((p for p in candidates if p is not None and p.exists()), None)
     out = Console()
     if found is None:
-        out.print("[red]no passport found[/red] — run `notari verify` first, or pass --passport.")
+        out.print("[red]no passport found[/red], run `notari verify` first, or pass --passport.")
         raise typer.Exit(code=2)
     try:
         passport = json.loads(found.read_text())
@@ -875,7 +955,7 @@ def _emit_agent_brief() -> None:
     try:
         contract = contract_mod.load(root)
     except Exception as e:
-        out.print(f"[red]no active contract[/red] — run `notari begin` first ({e}).")
+        out.print(f"[red]no active contract[/red], run `notari begin` first ({e}).")
         raise typer.Exit(code=2) from e
     perimeter = perimeter_mod.load(root)
     print(
@@ -896,7 +976,7 @@ def fix_prompt_cmd(
         typer.Option("--passport", help="passport.json (default: .notari/passport.json)."),
     ] = None,
 ) -> None:
-    """Emit a compact fix prompt for the coding agent — not the full passport.
+    """Emit a compact fix prompt for the coding agent, not the full passport.
 
     Includes the approved task, scope, top findings, and a self-check; never
     secret values or trust internals. Paste it into Claude Code / Codex /
@@ -911,7 +991,7 @@ def agent_brief_cmd() -> None:
     """Emit the compact brief an agent should read before starting work.
 
     Approved task and scope, forbidden paths, human-review surfaces, promoted
-    repo lessons, and the final self-check — small enough to paste at the top
+    repo lessons, and the final self-check, small enough to paste at the top
     of any agent session. Alias for `notari explain --agent-brief`.
     """
     _emit_agent_brief()
@@ -986,7 +1066,7 @@ name: notari-change-control
 #
 # WHY pull_request_target: the 'pull_request' event runs the PR's version of
 # the workflow, so an agent can remove this step entirely. pull_request_target
-# runs from the base branch — immune to PR modifications.
+# runs from the base branch, immune to PR modifications.
 #
 # WHY path: _pr_checkout + checkout-path: the PR is checked out into a DATA-ONLY
 # subdirectory. No trusted Python process uses it as cwd or sys.path, so a
@@ -1009,7 +1089,7 @@ jobs:
           fetch-depth: 0
           path: _pr_checkout
           persist-credentials: false
-      - uses: {_NOTARI_ACTION_PIN}  # v0 — SHA-pinned; bump on release
+      - uses: {_NOTARI_ACTION_PIN}  # v0, SHA-pinned; bump on release
         with:
           strict: "true"
           head: ${{{{ github.event.pull_request.head.sha }}}}
@@ -1109,7 +1189,7 @@ def init_cmd(
     out.print(f"[green]✓[/green] keys in [bold]{keys_dir}[/bold] (gitignored) · workflow written")
     out.print("\n[bold]To make this a real boundary, do these 3 things OFF this machine[/bold]")
     out.print(
-        "[dim](a key on this laptop is readable by the agent — these move trust off-box):[/dim]"
+        "[dim](a key on this laptop is readable by the agent, these move trust off-box):[/dim]"
     )
     out.print("  1. Set CI secrets, then delete the local private keys:")
     out.print(f"     [dim]gh secret set NOTARI_GATE_KEY < {keys_dir / 'gate.pem'}[/dim]")
@@ -1177,7 +1257,7 @@ def frameworks_cmd(
     """Show the compliance-framework crosswalk (`notari frameworks`): every control Notari produces evidence for.
 
     Prints each control, the evidence it produces, and how an auditor would
-    sample it — the whole crosswalk, no audit log or setup required. To turn a
+    sample it, the whole crosswalk, no audit log or setup required. To turn a
     real audit log into a shareable PDF/HTML pack, use `notari audit export --pack`.
     """
 
@@ -1443,7 +1523,7 @@ def integrate_cmd(
 
     if agent == "list":
         installed = {i.name for i in detect_installed()}
-        out.print("[bold]notari integrate — supported agents[/bold]\n")
+        out.print("[bold]notari integrate, supported agents[/bold]\n")
         for entry in all_integrations():
             mark = "[green]found[/green]" if entry.name in installed else "[dim]not found[/dim]"
             out.print(f"  {entry.name:14}  {entry.label:18}  {mark}")

@@ -10,7 +10,7 @@ Where `notari saves` shows aggregate counts ("Notari caught 32 rm -rf attempts")
   * Sessions worth reviewing (trifecta closes, chain repairs)
 
 Same streaming + window logic as `saves`; reuses the canonicalization map.
-Output is designed to be actionable — every row ends with a concrete next
+Output is designed to be actionable, every row ends with a concrete next
 step the user can take (`notari audit show ...`, `notari trust add ...`,
 `notari insights demote <pattern>`).
 

@@ -149,13 +149,13 @@ def _detect_bypass_mode(hook_payload: Mapping[str, Any] | None = None) -> bool:
       1. Hook payload field if Anthropic ships one (permission_mode, bypass_mode,
          dangerously_skip_permissions). Forward-compatible, no value as of June 2026
          since Claude Code doesn't expose this in the PreToolUse payload yet.
-      2. Environment variable NOTARI_BYPASS_MODE=1 — operator-set escape hatch.
-      3. CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1 — convention some users set.
+      2. Environment variable NOTARI_BYPASS_MODE=1, operator-set escape hatch.
+      3. CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1, convention some users set.
       4. Default: False (no bypass).
 
     When bypass mode is active, classify_event downgrades high-risk verdicts to
     silent log (medium with `verdict.allowed`) so the user who explicitly asked
-    NOT to be interrupted is not interrupted. Critical class still gates — the
+    NOT to be interrupted is not interrupted. Critical class still gates, the
     bright line never softens. Audit log grows fully in both modes.
     """
     import os

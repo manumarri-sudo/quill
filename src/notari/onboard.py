@@ -240,7 +240,7 @@ def _print_detected(console: Console, detected: list[DetectedAgent]) -> None:
     table.add_column("notes", overflow="fold")
     for a in detected:
         status = "[green]found[/green]" if a.detected else "[dim]not found[/dim]"
-        table.add_row(a.label, status, a.notes or "—")
+        table.add_row(a.label, status, a.notes or "-")
     console.print(table)
 
 

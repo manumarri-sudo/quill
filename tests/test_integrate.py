@@ -1,4 +1,4 @@
-"""Tests for `notari integrate` — teaching coding agents to query Notari."""
+"""Tests for `notari integrate`, teaching coding agents to query Notari."""
 
 from __future__ import annotations
 

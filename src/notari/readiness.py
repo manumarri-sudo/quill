@@ -1,16 +1,16 @@
 """Readiness: tell the human, in one glance, whether the gate is a *real* boundary.
 
 The trap this guards against is the one that matters most: a key sitting in a
-file on the same laptop the agent runs on is NOT off the agent's reach — the
+file on the same laptop the agent runs on is NOT off the agent's reach, the
 agent runs as you and can read it. So readiness never reports "secure" just
 because a key file exists. A control only counts as an enforced boundary when
 its trust root lives where the agent cannot go:
 
-  * the CI runner (a different machine) — secrets the laptop agent can't read, or
-  * a hardware key (YubiKey / HSM / Secure Enclave) — un-exportable even to root.
+  * the CI runner (a different machine), secrets the laptop agent can't read, or
+  * a hardware key (YubiKey / HSM / Secure Enclave), un-exportable even to root.
 
-This module computes a posture — ``enforced`` / ``cooperative`` / ``unconfigured``
-— from what it can actually observe, and says exactly what's missing. It is the
+This module computes a posture, ``enforced`` / ``cooperative`` / ``unconfigured``
+- from what it can actually observe, and says exactly what's missing. It is the
 "do the thinking for them" surface: run it and you know if you can stop worrying.
 """
 
@@ -78,7 +78,7 @@ def _workflow_issue(text: str) -> str | None:
     )
     if from_source or re.search(r"uses:\s*\./", text):
         return (
-            "gate runs from the PR's own checkout (uses: ./ / install-from-source) — "
+            "gate runs from the PR's own checkout (uses: ./ / install-from-source), "
             "a PR can modify its own judge. Pin to the release commit SHA: "
             "uses: manumarri-sudo/notari@<40-hex-release-sha>"
         )
@@ -88,7 +88,7 @@ def _workflow_issue(text: str) -> str | None:
     has_prt = re.search(r"pull_request_target:", text)
     has_pr_only = re.search(r"pull_request:", text) and not has_prt
     if has_pr_only:
-        issues.append("uses pull_request (not pull_request_target) — the PR controls the workflow")
+        issues.append("uses pull_request (not pull_request_target), the PR controls the workflow")
     if not re.search(r"uses:\s*[\w.-]+/notari@[0-9a-f]{40}", text):
         issues.append("Notari action is not SHA-pinned (use a 40-hex commit SHA, not a tag)")
     return "workflow has issues: " + "; ".join(issues) if issues else None
@@ -100,7 +100,7 @@ def _workflow_pinning(root: Path) -> Check:
     Running the action from the PR's checkout (``uses: ./`` / ``install-from-source``)
     lets a PR modify the gate that judges it. A SHA pin (``uses: org/notari@<sha>``)
     runs trusted code the PR can't alter. The SAME file that runs Notari must also use
-    ``pull_request_target`` and a SHA pin — the trigger and pin have to co-occur, so an
+    ``pull_request_target`` and a SHA pin, the trigger and pin have to co-occur, so an
     unrelated workflow can't supply them.
     """
     wf_dir = root / ".github" / "workflows"
@@ -109,7 +109,7 @@ def _workflow_pinning(root: Path) -> Check:
             "gate workflow",
             False,
             Level.BLOCKER,
-            "no .github/workflows — the gate isn't wired into CI (run `notari init`)",
+            "no .github/workflows, the gate isn't wired into CI (run `notari init`)",
         )
     notari_files = _notari_workflow_files(root)
     if not notari_files:
@@ -222,7 +222,7 @@ def assess(root: Path | None = None, env: dict[str, str] | None = None) -> Readi
             )
         )
 
-    # 3. Gate signing key for the passport — present as a CI secret (off-box)?
+    # 3. Gate signing key for the passport, present as a CI secret (off-box)?
     gate_env = bool(env.get("NOTARI_GATE_KEY", "").strip())
     checks.append(
         Check(
@@ -231,7 +231,7 @@ def assess(root: Path | None = None, env: dict[str, str] | None = None) -> Readi
             Level.HARDENING,
             "NOTARI_GATE_KEY present (passports are signed)"
             if gate_env
-            else "NOTARI_GATE_KEY not set — passports won't be gate-signed; "
+            else "NOTARI_GATE_KEY not set, passports won't be gate-signed; "
             "set it as a CI secret so verdicts are independently verifiable",
         )
     )

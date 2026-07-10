@@ -3,7 +3,7 @@
 Turns passport.json findings into three-part remediation records a
 non-technical reader can act on: what's wrong in plain English, a concrete
 self-fix (with a literal shell command where one applies), and a paste-ready
-instruction for the coding agent. Pure rendering over existing evidence —
+instruction for the coding agent. Pure rendering over existing evidence -
 no model anywhere, same as the verdict itself.
 
 The `plain` field must never use gate jargon (perimeter, provenance, MAC,
@@ -55,15 +55,15 @@ def _rollup(remediations: list[dict[str, str]]) -> str:
     return f"{n} issue{'s' if n != 1 else ''}{where} ({breakdown})"
 
 
-PASS_LINE = "✅ You're good — this change is inside what was approved. Nothing to do."
+PASS_LINE = "✅ You're good, this change is inside what was approved. Nothing to do."
 
 _REVIEW_INTRO = (
-    "⚠️  This change needs a human to look at it before it merges — that's a "
+    "⚠️  This change needs a human to look at it before it merges, that's a "
     "checkpoint, not a failure. Here's what to look at and why."
 )
 _BLOCK_INTRO = "⛔ This change can't be merged yet. Here's what's wrong and how to fix each one."
 
-# Honesty footer — Notari checks the boundary, not the code. Stating this in
+# Honesty footer, Notari checks the boundary, not the code. Stating this in
 # every explanation keeps the tool from being mistaken for a correctness or
 # security review (integrity discipline: never claim more than we prove).
 DOES_NOT_PROVE = (
@@ -95,7 +95,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                 "where": f"{s['path']}:{s['line']}",
                 "plain": (
                     f"A password or key ({s['pattern']}) is written directly in the "
-                    "code — anyone who sees the file can steal it."
+                    "code, anyone who sees the file can steal it."
                 ),
                 "self_fix": (
                     f"Delete line {s['line']} of {s['path']} and load the value from "
@@ -116,12 +116,10 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                 "kind": "gate_tamper",
                 "where": p,
                 "plain": (
-                    "This change edits Notari's own safety settings — that is "
+                    "This change edits Notari's own safety settings, that is "
                     "always blocked, no matter the task."
                 ),
-                "self_fix": (
-                    f"Undo it: {_undo(p)} — these files must not change in a normal task."
-                ),
+                "self_fix": (f"Undo it: {_undo(p)}, these files must not change in a normal task."),
                 "cc_prompt": (
                     f"Revert {p}; I should not modify Notari's own configuration, "
                     "keys, or workflow files."
@@ -138,7 +136,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                     "This edits a protected area a human marked off-limits for automatic changes."
                 ),
                 "self_fix": (
-                    f"Undo it: {_undo(p)} — or ask the project owner to approve this edit."
+                    f"Undo it: {_undo(p)}, or ask the project owner to approve this edit."
                 ),
                 "cc_prompt": (
                     f"Undo my changes to {p}; it's a protected area I wasn't allowed to touch."
@@ -156,7 +154,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                 "plain": (f'This file has nothing to do with the approved task "{task}".'),
                 "self_fix": f"Undo it: {_undo(p)}",
                 "cc_prompt": (
-                    f"Undo my changes to {p} — it was outside the task "
+                    f"Undo my changes to {p}, it was outside the task "
                     f"'{task}'. Keep only changes that belong to that task."
                 ),
             }
@@ -175,7 +173,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                 ),
                 "self_fix": (
                     f"If the link isn't needed, undo it: {_undo(c['path'])} "
-                    "— otherwise confirm the target is intended."
+                    "- otherwise confirm the target is intended."
                 ),
                 "cc_prompt": (
                     f"Explain why {c['path']} is a symlink to {target} and replace "
@@ -212,7 +210,7 @@ def build_remediations(passport: dict[str, Any]) -> list[dict[str, str]]:
                     "where": p,
                     "plain": (
                         f"This touches a sensitive area ({name}) that always gets "
-                        "a human look before merging — it may be fine, it just "
+                        "a human look before merging, it may be fine, it just "
                         "can't be auto-approved."
                     ),
                     "self_fix": (
@@ -293,7 +291,7 @@ def _ann_escape_prop(s: str) -> str:
 def render_github_annotations(passport: dict[str, Any]) -> list[str]:
     """GitHub Actions annotation commands, one per finding, so each shows on the
     exact file/line of the PR diff. Hard violations are ::error, review flags are
-    ::warning. All fields are escaped — a malicious path cannot inject a command."""
+    ::warning. All fields are escaped, a malicious path cannot inject a command."""
     lines: list[str] = []
     for r in build_remediations(passport):
         level = _ANNOTATION_LEVEL.get(r["kind"], "warning")

@@ -3,7 +3,7 @@ compact fix-prompt / agent-brief surfaces.
 
 Managed-block contract: everything between the notari-lessons markers belongs
 to Notari; everything outside is the user's and is never touched. Updates are
-idempotent — re-running with the same lessons is a byte-for-byte no-op.
+idempotent, re-running with the same lessons is a byte-for-byte no-op.
 
 Token discipline: agents get compressed briefs and fix prompts, never the
 full passport (that stays for humans and auditors).
@@ -112,7 +112,7 @@ def fix_prompt(passport: dict[str, Any], *, max_findings: int = 5) -> str:
     recs = build_remediations(passport)
     lines = [
         f"Notari {'blocked' if verdict == 'BLOCK' else 'flagged'} this PR. "
-        f"Fix ONLY the findings below — do not weaken, bypass, or edit Notari's "
+        f"Fix ONLY the findings below, do not weaken, bypass, or edit Notari's "
         f"configuration, keys, or workflows to get past the gate.",
         "",
         f"Approved task: {task}",

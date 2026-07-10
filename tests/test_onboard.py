@@ -189,7 +189,7 @@ def test_run_aborts_in_non_tty(capsys, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# install dispatch — verify the adapter installer fn signatures match
+# install dispatch, verify the adapter installer fn signatures match
 # ---------------------------------------------------------------------------
 
 

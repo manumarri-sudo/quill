@@ -1,4 +1,4 @@
-"""Tests for `notari saves` — the rigorous, audit-log-grounded value report.
+"""Tests for `notari saves`, the rigorous, audit-log-grounded value report.
 
 Every metric path is exercised against a synthetic audit-log fixture. The
 fixtures live in the test (not in tmp files) so the assertions can pin

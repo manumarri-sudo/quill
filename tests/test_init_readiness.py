@@ -46,7 +46,7 @@ def test_readiness_rejects_pull_request_trigger(tmp_path: Path) -> None:
 
 
 def test_readiness_rejects_mutable_tag(tmp_path: Path) -> None:
-    """A tag (even @v0) is mutable — whoever controls it can swap the gate code."""
+    """A tag (even @v0) is mutable, whoever controls it can swap the gate code."""
     _write_wf(
         tmp_path,
         "on:\n  pull_request_target:\n    branches: [main]\n"

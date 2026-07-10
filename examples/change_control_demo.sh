@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Notari Change Control — drop it in front of an agent that knows NOTHING about it.
+# Notari Change Control, drop it in front of an agent that knows NOTHING about it.
 #
 # A human does setup ONCE (sign the perimeter). After that the "agent" only ever
-# writes files and commits — it never runs a notari command — and Notari judges
+# writes files and commits, it never runs a notari command, and Notari judges
 # each diff. Run it and watch the verdicts:
 #
 #   NOTARI=/path/to/.venv/bin/notari ./examples/change_control_demo.sh
@@ -29,7 +29,7 @@ echo "# MyApp"                            > README.md
 git add -A && git commit -qm "app: initial state"
 
 line "HUMAN setup, done ONCE (the agent never sees this)"
-"$Q" keygen --out "$W/approver.pem" >/dev/null   # human key — keep the private half off the box
+"$Q" keygen --out "$W/approver.pem" >/dev/null   # human key, keep the private half off the box
 "$Q" keygen --out "$W/gate.pem"     >/dev/null   # CI key that signs the verdict
 mkdir -p .notari/approvers && cp "$W/approver.pem.pub" .notari/approvers/human.pub
 # Agents may work in src/** but NEVER touch auth, migrations, or CI; secrets always blocked.
@@ -46,7 +46,7 @@ MAIN="$(git rev-parse HEAD)"
 # The three things that make strict mode a real boundary, exactly as a CI setup
 # would provide them (see docs/SECURITY-MODEL.md "Deployment checklist"):
 #   1. the gate signing key,
-#   2. the approver PUBLIC key as the EXTERNAL trust root — strict mode ignores
+#   2. the approver PUBLIC key as the EXTERNAL trust root, strict mode ignores
 #      the committed .notari/approvers/*.pub on purpose (an agent could plant one),
 #      so without this every verdict fails closed with "provenance not established",
 #   3. the repo identity the contract is bound to (here via --repo above +
@@ -80,7 +80,7 @@ agent_pr "edit-migration"   bash -c 'echo "DROP TABLE users;" >> migrations/001_
 agent_pr "disable-the-gate" bash -c 'printf "  steps: [evil]\n" >> .github/workflows/ci.yml'
 agent_pr "scope-escape"     bash -c 'mkdir -p ops && echo x > ops/prod.cfg'
 # In-scope symlink pointing OUT of scope: the diff shows only an in-scope path
-# whose "content" is the target string, so it can't be blocked on scope alone —
+# whose "content" is the target string, so it can't be blocked on scope alone -
 # it surfaces as NEEDS_REVIEW with the target recorded for the reviewer.
 agent_pr "in-scope-symlink" bash -c 'ln -s ../auth/login.py src/checkout/alias.py'
 

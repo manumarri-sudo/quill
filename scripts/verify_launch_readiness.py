@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Deterministic launch-readiness harness for Notari's anti-manipulation pass.
 
-Inspects files and exercises real behavior — no LLM, no trust of commit
+Inspects files and exercises real behavior, no LLM, no trust of commit
 messages, generated scorecards, or local lesson counts. Emits a machine-readable
 report and exits non-zero unless every required check passes.
 
     python scripts/verify_launch_readiness.py --json > launch-readiness.json
 
-This does NOT run ruff / mypy / pytest / build — those are declared in
+This does NOT run ruff / mypy / pytest / build, those are declared in
 `commands_required` and must be run and green separately (CI does this). This
 script checks the properties those commands cannot: docs coherence, that
 advisory surfaces are not described as enforcement, that the passport and fix

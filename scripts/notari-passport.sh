@@ -36,7 +36,7 @@ set -euo pipefail
 # Prevent candidate-controlled Python modules (pip.py, json.py, etc.) in the
 # checkout from shadowing trusted imports. This wrapper runs with cwd inside the
 # candidate checkout, so the inline `python3 -I -c` calls below use isolated mode
-# (available since Python 3.4) to drop cwd from sys.path — this does NOT depend on
+# (available since Python 3.4) to drop cwd from sys.path, this does NOT depend on
 # the interpreter version. PYTHONSAFEPATH (Python 3.11+) is exported too as
 # defense-in-depth, but -I is the load-bearing control on older runners.
 export PYTHONSAFEPATH=1
@@ -82,7 +82,7 @@ if [[ -n "$STRICT_FLAG" && "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
     echo "::error::strict mode requires pull_request_target (not pull_request). The pull_request event runs the PR's workflow, so a PR can remove Notari entirely. See docs/SECURITY-MODEL.md for the secure template. Set NOTARI_ALLOW_PULL_REQUEST_TRIGGER=true to override (NOT recommended)."
     exit 2
   else
-    echo "::warning::running under pull_request with NOTARI_ALLOW_PULL_REQUEST_TRIGGER=true — the caller workflow is candidate-controlled. A PR can remove this step."
+    echo "::warning::running under pull_request with NOTARI_ALLOW_PULL_REQUEST_TRIGGER=true, the caller workflow is candidate-controlled. A PR can remove this step."
   fi
 fi
 
@@ -164,7 +164,7 @@ elif [[ -n "$STRICT_FLAG" ]]; then
   # wants report-grade evidence must opt out EXPLICITLY and visibly (security
   # review M-4 + "strict must not expose silent degrade switches").
   if [[ "${NOTARI_ALLOW_UNSIGNED_EVIDENCE:-false}" == "true" ]]; then
-    echo "::warning::strict mode with NOTARI_ALLOW_UNSIGNED_EVIDENCE=true — the passport is UNSIGNED and cannot be independently re-verified."
+    echo "::warning::strict mode with NOTARI_ALLOW_UNSIGNED_EVIDENCE=true, the passport is UNSIGNED and cannot be independently re-verified."
   else
     echo "::error::strict mode requires a gate-signed passport. Set gate-key + gate-pubkeys, or set NOTARI_ALLOW_UNSIGNED_EVIDENCE=true to accept report-grade unsigned evidence."
     exit 2
@@ -193,7 +193,7 @@ fi
 # A real Notari status carries it in the description; a spoofed "success" posted
 # by an attacker-injected workflow cannot reproduce a MAC it never computed, so
 # fake checks are detectable post-hoc (defense-in-depth against status-check
-# spoofing — an evil PR workflow can still POST to the context, but it can't
+# spoofing, an evil PR workflow can still POST to the context, but it can't
 # forge the fingerprint). Sanitize to hex-only so it can't carry an injection.
 MAC="$(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("audit",{}).get("verification_run_mac",""))' "$PASSPORT_JSON")"
 SAFE_MAC="$(printf '%s' "$MAC" | tr -cd '0-9a-fA-F')"
@@ -232,7 +232,7 @@ fi
 
 # NEEDS_REVIEW blocking: when enabled, NEEDS_REVIEW is treated as BLOCK for the
 # Status Check state and the job exit, so the job fails on any finding (not just
-# hard violations). The passport verdict itself is left unchanged — this only
+# hard violations). The passport verdict itself is left unchanged, this only
 # affects how the wrapper reports/gates.
 BLOCK_FOR_EXIT="false"
 [[ "$VERDICT" == "BLOCK" ]] && BLOCK_FOR_EXIT="true"

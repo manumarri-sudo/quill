@@ -100,7 +100,7 @@ def test_default_edit_normal_mode_still_high():
 
 
 def test_secret_in_write_still_blocks_under_bypass():
-    """Secret detection bypasses everything — even bypass mode.
+    """Secret detection bypasses everything, even bypass mode.
     The secret-leak attack class is the GitHub-PAT-leak failure mode and
     must always block."""
     risk, reason, _ = classify_event(

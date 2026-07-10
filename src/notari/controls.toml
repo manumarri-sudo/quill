@@ -343,7 +343,7 @@ description = """ATLAS Tool Misuse technique class. Notari's deterministic regex
 notari_event_types = ["verdict.blocked", "verdict.ask"]
 
 # ============================================================================
-# Change Control (the CI/CD PR gate) — the headline surface.
+# Change Control (the CI/CD PR gate), the headline surface.
 # These map the verification.run + contract.created events that `notari verify`
 # and `notari begin` emit, which the earlier crosswalk (local-gate only) missed.
 # Every row carries auditor_sampling: how a reviewer would test the evidence.
@@ -369,7 +369,7 @@ auditor_sampling = """Sample verification.run events with verdict=BLOCK; confirm
 standard = "EU AI Act Art. 14"
 code = "ART-14-CHANGE-OVERSIGHT"
 title = "Human oversight over what the agent is permitted to change"
-description = """A human records the approved task and scope (contract.created) and signs the standing perimeter; the agent's diffs are measured against that human-approved boundary, so a person — not the model — defines what may change."""
+description = """A human records the approved task and scope (contract.created) and signs the standing perimeter; the agent's diffs are measured against that human-approved boundary, so a person, not the model, defines what may change."""
 notari_event_types = ["contract.created", "verification.run"]
 auditor_sampling = """Confirm a signed perimeter exists and is signed by a trusted approver key held off the build machine; sample contract.created events and tie each to a named approver. Verify (notari status) reports an enforced boundary, not cooperative mode."""
 
@@ -417,7 +417,7 @@ auditor_sampling = """Confirm an off-box anchor (published tree head / Status Ch
 standard = "FTC Act Section 5"
 code = "FTC-5-SUBSTANTIATION"
 title = "Substantiation of claims about automated/AI conduct"
-description = """Section 5 reaches unfair or deceptive practices; the FTC has acted on unsubstantiated AI claims. Notari's verifiable record of what each agent was permitted to do and what each change touched provides contemporaneous evidence to substantiate representations about AI behavior — evidence, not a compliance certification."""
+description = """Section 5 reaches unfair or deceptive practices; the FTC has acted on unsubstantiated AI claims. Notari's verifiable record of what each agent was permitted to do and what each change touched provides contemporaneous evidence to substantiate representations about AI behavior; evidence, not a compliance certification."""
 notari_event_types = ["verification.run", "verdict.blocked", "verdict.allowed"]
 auditor_sampling = """For a representation made about the agent (e.g. "agents cannot deploy to prod"), locate the perimeter rule and the verification.run BLOCKs that enforce it; confirm the evidence supports the claim as stated."""
 

@@ -4,7 +4,7 @@ name: notari-change-control
 # (.notari/contract.json) and publish a Change Passport as a Status Check.
 #
 # ⚠ DOGFOOD CONFIGURATION: This workflow uses `uses: ./` and `install-from-source`
-# because this repo IS the Notari source — we verify with HEAD's own code. A
+# because this repo IS the Notari source, we verify with HEAD's own code. A
 # CONSUMER of Notari should NEVER do this; pin the release commit SHA instead
 # (docs/secure-workflow.yml carries the current pin):
 #

@@ -1,4 +1,4 @@
-"""Tests for the readiness assessment — especially the trap that a local key
+"""Tests for the readiness assessment, especially the trap that a local key
 file is NOT a boundary."""
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def test_unconfigured_when_no_perimeter(tmp_path: Path) -> None:
 
 
 def test_cooperative_when_key_is_local_only(tmp_path: Path) -> None:
-    """A committed/local approver key with no CI-secret pin is NOT a boundary —
+    """A committed/local approver key with no CI-secret pin is NOT a boundary -
     the agent on the box can read it. Must be COOPERATIVE, not ENFORCED."""
     _sign_perimeter(tmp_path)
     _pinned_workflow(tmp_path)
@@ -63,7 +63,7 @@ def test_unpinned_workflow_is_a_blocker(tmp_path: Path) -> None:
     pub_pem = _sign_perimeter(tmp_path)
     wf = tmp_path / ".github" / "workflows"
     wf.mkdir(parents=True, exist_ok=True)
-    # runs the PR's own checkout — a PR could modify its own judge
+    # runs the PR's own checkout, a PR could modify its own judge
     (wf / "notari.yml").write_text(
         'jobs:\n  cc:\n    steps:\n      - uses: ./\n        with:\n          install-from-source: "true"\n'
     )

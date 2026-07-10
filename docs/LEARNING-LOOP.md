@@ -73,7 +73,7 @@ The loop is safe when many agents work in the same repo at once:
 - **Duplicates can't inflate counts across re-runs.** Every event carries a
   fingerprint (`contract_id + head_commit + rule_id + finding_type + path_kind`),
   and re-recording the same failing commit is a no-op. A different commit with
-  the same pattern still counts, which is what you want — that's the signal that
+  the same pattern still counts, which is what you want, that's the signal that
   a *pattern* is recurring across the swarm, not noise from one flaky re-run.
   (Under a tight simultaneous race the best-effort dedup may let one duplicate
   through; the fingerprint keeps that harmless and the file never corrupts.)
@@ -89,9 +89,9 @@ The loop is safe when many agents work in the same repo at once:
 ## What it is not
 
 - Not model training or fine-tuning.
-- Not telemetry — nothing leaves your machine by default.
+- Not telemetry, nothing leaves your machine by default.
 - Not a global lesson network. Any future cross-repo sharing would be opt-in,
-  redacted, aggregated, signed, inspectable, and reversible — never raw code,
+  redacted, aggregated, signed, inspectable, and reversible, never raw code,
   diffs, prompts, or secret values.
 - Not a code reviewer. Notari checks whether a change was *authorized*, not
   whether it's *good*.

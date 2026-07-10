@@ -110,7 +110,7 @@ def verify_inclusion(leaf_data: bytes, m: int, n: int, proof: list[bytes], root:
 
 
 # --------------------------------------------------------------------------- #
-# Signed tree head — the 32 bytes you anchor off-box                          #
+# Signed tree head, the 32 bytes you anchor off-box                          #
 # --------------------------------------------------------------------------- #
 
 
@@ -190,7 +190,7 @@ class MerkleLog:
         return SignedTreeHead(size=size, root_hex=root_hex, signature=sig)
 
     def prefix_root(self, size: int) -> bytes:
-        """Root over the first `size` leaves — used to re-derive an anchored head."""
+        """Root over the first `size` leaves, used to re-derive an anchored head."""
         return merkle_root(self._leaves[:size])
 
 
@@ -232,14 +232,14 @@ def check_against_anchor(
     if len(log) < anchored.size:
         return TamperCheck(
             False,
-            f"log has {len(log)} leaves but {anchored.size} were anchored — "
+            f"log has {len(log)} leaves but {anchored.size} were anchored, "
             "trailing entries were deleted",
         )
     if log.prefix_root(anchored.size).hex() != anchored.root_hex:
         return TamperCheck(
             False,
             "the first "
-            f"{anchored.size} leaves no longer match the anchored root — history was rewritten",
+            f"{anchored.size} leaves no longer match the anchored root, history was rewritten",
         )
     return TamperCheck(
         True, f"intact: {anchored.size} anchored leaves verified against the signed root"

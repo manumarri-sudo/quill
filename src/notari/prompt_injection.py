@@ -100,7 +100,7 @@ _PATTERNS: Final[tuple[InjectionPattern, ...]] = (
         source="Liu et al. 2023 Open-Prompt-Injection §3.1 Ignore Attack",
     ),
     # ---- Role-token spoofing ----
-    # Source: AWS Prescriptive Guidance — Common attacks; ChatML format
+    # Source: AWS Prescriptive Guidance, Common attacks; ChatML format
     # used by GPT-3.5/4 turbo; Llama-2 / Llama-3 INST format; Anthropic
     # Human/Assistant turn markers. Detecting these in user content is
     # the canonical role-spoof defense.
@@ -171,7 +171,7 @@ _PATTERNS: Final[tuple[InjectionPattern, ...]] = (
         source="Composite of Securiti LLM01 Prompt Injection (2024) + Maxim AI 2026 Defense Guide",
     ),
     # ---- Instruction Override (assertive new-role) ----
-    # Source: AWS Prescriptive Guidance — Common attacks. Also documented
+    # Source: AWS Prescriptive Guidance, Common attacks. Also documented
     # widely in the Anthropic / OpenAI security blogs.
     InjectionPattern(
         name="assertive-new-role",
@@ -180,20 +180,20 @@ _PATTERNS: Final[tuple[InjectionPattern, ...]] = (
             r"\bfrom\s+now\s+on,?\s+you\s+(are|will\s+be|must|should|need\s+to)\b",
             re.IGNORECASE,
         ),
-        source="AWS Prescriptive Guidance — Common prompt-injection attacks (2024)",
+        source="AWS Prescriptive Guidance, Common prompt-injection attacks (2024)",
     ),
     InjectionPattern(
         name="you-are-now-impersonation",
         category="instruction_override",
         regex=re.compile(
             # "You are now SudoGPT" / "you are now a different model" / etc.
-            # Match the imperative "you are now <something>" — anything-but-
+            # Match the imperative "you are now <something>", anything-but-
             # whitespace at the end means we catch role names with mixed case
             # like "SudoGPT" without anchoring on capitalization.
             r"\byou\s+are\s+now\s+(a\s+|an\s+|the\s+)?\S{2,40}",
             re.IGNORECASE,
         ),
-        source="AWS Prescriptive Guidance — Common prompt-injection attacks (2024)",
+        source="AWS Prescriptive Guidance, Common prompt-injection attacks (2024)",
     ),
     InjectionPattern(
         name="dan-jailbreak-marker",
@@ -202,7 +202,7 @@ _PATTERNS: Final[tuple[InjectionPattern, ...]] = (
             r"\b(DAN|Do\s+Anything\s+Now|Developer\s+Mode|jailbreak\s+mode|unrestricted\s+mode)\b",
             re.IGNORECASE,
         ),
-        source="Shen et al. 2023 (USENIX) — DAN jailbreak family; widely cited",
+        source="Shen et al. 2023 (USENIX), DAN jailbreak family; widely cited",
     ),
     # ---- Data Exfiltration markers ----
     # Source: Willison "Lethal Trifecta" + Open-Prompt-Injection §
@@ -242,7 +242,7 @@ _PATTERNS: Final[tuple[InjectionPattern, ...]] = (
             r"https?://[^\s\"'`]{5,}\?[^\s\"'`]*(secret|token|key|password|env)",
             re.IGNORECASE,
         ),
-        source="Maxim AI 2026 Prompt-Injection Defense Guide — exfil via rendered link",
+        source="Maxim AI 2026 Prompt-Injection Defense Guide, exfil via rendered link",
     ),
 )
 

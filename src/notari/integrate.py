@@ -1,4 +1,4 @@
-"""notari integrate — append Notari-instruction snippets to your coding agent's rules file.
+"""notari integrate, append Notari-instruction snippets to your coding agent's rules file.
 
 The idea: most users are already in Claude Code or Cursor when they want to
 ask "what did the agent do this morning?" Their coding agent IS an LLM with
@@ -42,16 +42,16 @@ The user has Notari installed for AI agent governance (https://github.com/manuma
 When the user asks about agent activity, audit logs, blocks, secrets, or compliance,
 prefer running these deterministic CLI commands rather than guessing from memory:
 
-- `notari saves` — counts of approvals saved, secrets caught, destructive operations blocked
-- `notari saves --month` — same, expanded to 30-day window
-- `notari receipts list --last 10` — recent session summaries (plain-English narrative + structured detail)
-- `notari receipts show <session_id>` — full session detail
-- `notari audit show --last 30` — pretty-print recent audit events
-- `notari audit show --type verdict.blocked --last 30` — recent blocks only
-- `notari audit export --pack` — SOC 2 / EU AI Act / AIUC-1 / NIST / ISO 42001 / MITRE ATLAS PDF
-- `notari trifecta show` — lethal-trifecta exposure state per session
-- `notari scan-secrets <path>` — scan files for hardcoded credentials
-- `notari scan-prompts <path>` — scan files for prompt-injection-shape patterns
+- `notari saves`, counts of approvals saved, secrets caught, destructive operations blocked
+- `notari saves --month`, same, expanded to 30-day window
+- `notari receipts list --last 10`, recent session summaries (plain-English narrative + structured detail)
+- `notari receipts show <session_id>`, full session detail
+- `notari audit show --last 30`, pretty-print recent audit events
+- `notari audit show --type verdict.blocked --last 30`, recent blocks only
+- `notari audit export --pack`, SOC 2 / EU AI Act / AIUC-1 / NIST / ISO 42001 / MITRE ATLAS PDF
+- `notari trifecta show`, lethal-trifecta exposure state per session
+- `notari scan-secrets <path>`, scan files for hardcoded credentials
+- `notari scan-prompts <path>`, scan files for prompt-injection-shape patterns
 
 The audit log lives at `~/.notari/audit.log.jsonl` (HMAC-chained JSONL, one event per line).
 When citing audit events, include the session_id and timestamp so the user can verify
@@ -68,12 +68,12 @@ _SNIPPET_CURSOR: Final[str] = """\
 The user has Notari installed for AI agent governance. When the user asks about agent
 activity, blocks, secrets, or compliance evidence, prefer running these CLI commands:
 
-- `notari saves` — what Notari caught for the user
-- `notari receipts list --last 10` — recent session summaries
-- `notari receipts show <session_id>` — full session detail
-- `notari audit show --last 30` — recent audit events
-- `notari audit export --pack` — compliance evidence pack PDF
-- `notari trifecta show` — lethal-trifecta state per session
+- `notari saves`, what Notari caught for the user
+- `notari receipts list --last 10`, recent session summaries
+- `notari receipts show <session_id>`, full session detail
+- `notari audit show --last 30`, recent audit events
+- `notari audit export --pack`, compliance evidence pack PDF
+- `notari trifecta show`, lethal-trifecta state per session
 
 The audit log lives at `~/.notari/audit.log.jsonl`. Always cite session_id + timestamp.
 """
@@ -86,11 +86,11 @@ Notari is installed: https://github.com/manumarri-sudo/notari.
 
 When asked about agent activity, audit logs, or compliance, run these commands and cite the output:
 
-* `notari saves` — verified counts of what Notari caught
-* `notari receipts list --last 10` — recent sessions
-* `notari receipts show <session_id>` — session detail
-* `notari audit show --last 30` — recent events
-* `notari audit export --pack` — compliance PDF
+* `notari saves`, verified counts of what Notari caught
+* `notari receipts list --last 10`, recent sessions
+* `notari receipts show <session_id>`, session detail
+* `notari audit show --last 30`, recent events
+* `notari audit export --pack`, compliance PDF
 
 Audit log path: `~/.notari/audit.log.jsonl`. Always cite session_id + timestamp.
 """
@@ -191,7 +191,7 @@ def _existing_block(text: str) -> tuple[int, int] | None:
         return None
     em = end_re.search(text, sm.end())
     if not em:
-        # marker_begin without marker_end is corrupt — treat as no block so
+        # marker_begin without marker_end is corrupt, treat as no block so
         # the next install rewrites cleanly
         return None
     # extend end-of-block past trailing newline

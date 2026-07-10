@@ -17,8 +17,8 @@ why.
 
 Notari currently runs in two relevant places:
 
-1. The **CI Change Control gate** (`notari verify`), which runs in CI — outside
-   the agent's reach — and verifies a PR diff against a human-signed boundary.
+1. The **CI Change Control gate** (`notari verify`), which runs in CI, outside
+   the agent's reach, and verifies a PR diff against a human-signed boundary.
    This is the provable boundary and the product's headline surface; the rest
    of this document's "hard boundary" honesty is about the *local* layer below.
 2. An optional **PreToolUse hook** in the coding agent (Claude Code, Cursor)
@@ -176,7 +176,7 @@ A launch-gate for any README or marketing copy. If a claim is not at least
 | Blocks the irreversible class | **Supported** | rm -rf / DROP TABLE / force-push / npm publish / .env reads etc. are default-critical via inspectable regex. |
 | Prevents prompt injection | **Partial / reframe** | It cannot be prompt-injected (no LLM) and refuses some injection *consequences* (lethal-trifecta deny); it does not *prevent* injection. Say "refuses the consequence, not detects the cause." |
 | Secure by default | **Partial** | The local hook fails closed, but `off`/`--no-biometric` exist and the app layer is bypassable (limits 1-4). Say "defense-in-depth by default." The provable boundary is the CI gate (next row), not the local hook. |
-| CI gate runs outside the agent | **Supported, deployment-gated** | `notari verify` runs in CI where the agent can't disable it, enforces a **human-signed perimeter** (Ed25519: forging needs the approver's private key, which lives off the box), BLOCKs any edit to its own trust surfaces (perimeter, approver keys, workflow), and emits a **gate-signed passport** anyone re-verifies with `notari verify-passport`. The agent cannot forge approval (no private key), bootstrap trust (editing `.notari/approvers/**` is a gate-tamper BLOCK), or forge the verdict (asymmetric). This is a real boundary **iff** the trust root is deployed off the PR's reach — see the deployment checklist below. Absent that (no signed perimeter, keys committed in-repo, action run from the PR's own checkout), it degrades to honest review automation for a cooperative agent, and `--strict` BLOCKs rather than pretending. |
+| CI gate runs outside the agent | **Supported, deployment-gated** | `notari verify` runs in CI where the agent can't disable it, enforces a **human-signed perimeter** (Ed25519: forging needs the approver's private key, which lives off the box), BLOCKs any edit to its own trust surfaces (perimeter, approver keys, workflow), and emits a **gate-signed passport** anyone re-verifies with `notari verify-passport`. The agent cannot forge approval (no private key), bootstrap trust (editing `.notari/approvers/**` is a gate-tamper BLOCK), or forge the verdict (asymmetric). This is a real boundary **iff** the trust root is deployed off the PR's reach, see the deployment checklist below. Absent that (no signed perimeter, keys committed in-repo, action run from the PR's own checkout), it degrades to honest review automation for a cooperative agent, and `--strict` BLOCKs rather than pretending. |
 
 ### Deployment checklist (what makes the CI gate a real boundary)
 
@@ -184,17 +184,17 @@ All four are required; any one missing drops it back to cooperative-only:
 
 1. **Keys off the build machine.** The approver/gate **private** keys never live
    in the repo. Publish the approver **public** key as `NOTARI_APPROVER_PUBKEYS`
-   (INLINE PEM, not a path inside the checkout — strict mode rejects an in-repo
-   key path) and the gate signing key as `NOTARI_GATE_KEY` — repo/org **secrets** a
+   (INLINE PEM, not a path inside the checkout, strict mode rejects an in-repo
+   key path) and the gate signing key as `NOTARI_GATE_KEY`, repo/org **secrets** a
    PR cannot read or edit. (A committed `.notari/approvers/*.pub` set is a
    convenience layer used only in cooperative mode; strict ignores it entirely.)
 2. **Pin the Action to the release commit SHA**
-   (`uses: manumarri-sudo/notari@<40-hex release SHA>` — `notari init` writes the
+   (`uses: manumarri-sudo/notari@<40-hex release SHA>`, `notari init` writes the
    current pin, and `notari status` rejects a mutable-tag pin), not the PR's own
    checkout (`uses: ./` + `install-from-source`), so a PR can't ship a modified
    gate that judges itself.
 3. **Make the Status Check required** in branch protection, with admin-bypass and
-   force-push disabled — otherwise a `BLOCK` is merely advisory.
+   force-push disabled, otherwise a `BLOCK` is merely advisory.
 4. **Sign the contract** with the approver key (`notari begin --key`). The contract
    supplies the base commit and allowed scope, so an unsigned one is forgeable by
    the agent (it could move the base to hide commits, or widen scope). In strict
@@ -228,14 +228,14 @@ regression test:
   surfaces; `evaluate_diff` checks both ends of a rename
   (`tests/test_diff_binary_rename.py`).
 
-A third pass — an adversarial red-team of `verify --strict`, plus differential
-fuzzing of the diff parser against real git — drove two more to closure:
+A third pass, an adversarial red-team of `verify --strict`, plus differential
+fuzzing of the diff parser against real git, drove two more to closure:
 
 - **Case-fold / homoglyph escape of the forbid + gate-tamper surfaces (closed).**
   On a case-insensitive filesystem (macOS/Windows runners, many deploy targets)
   `src/Auth/login.py` IS `src/auth/login.py`, but matching was case-sensitive, so
   a capital-letter variant escaped a forbid of `src/auth/**` while the wildcard
-  scope `src/**` still covered it — `verify --strict` returned PASS on an auth
+  scope `src/**` still covered it, `verify --strict` returned PASS on an auth
   backdoor, and a `.github/Workflows/ci.yml` variant escaped gate-tamper. The
   deny side now folds case + NFKC compatibility forms and maps common homoglyphs
   to ASCII (`deny_hit`), while the allow side stays strict so a variant that
@@ -349,7 +349,7 @@ A round-8 hardening pass added:
 - **Base-commit ancestry check (R8-H1, closed).** `verify()` now checks that
   `base_commit` is a git ancestor of the candidate via `git merge-base
   --is-ancestor`. A base that equals the candidate (empty diff, every check
-  trivially passes) is the canonical false-positive PASS — strict mode blocks it
+  trivially passes) is the canonical false-positive PASS, strict mode blocks it
   outright. A base that is not an ancestor (stale or forged) also blocks in
   strict. Shallow clones where the merge base is unreachable produce a warning,
   not a block, to avoid false negatives.
@@ -369,7 +369,7 @@ A round-8 hardening pass added:
   the contract scopes specific paths (not `["**"]`), a warning surfaces that the
   contract may be stale or the work was never committed.
 
-Genuinely still open — do not rely on the CI gate against a determined adversary
+Genuinely still open, do not rely on the CI gate against a determined adversary
 until these land:
 
 - **Caller workflow impersonation (round-6 C-1: MITIGATED).** The GitHub Action
@@ -378,12 +378,12 @@ until these land:
   **Mitigation (shipped):** strict mode now **refuses to run** under the
   `pull_request` event (exit 2) unless explicitly opted out with
   `NOTARI_ALLOW_PULL_REQUEST_TRIGGER=true`. The secure setup uses
-  `pull_request_target`, which runs the workflow from the base branch — immune
+  `pull_request_target`, which runs the workflow from the base branch, immune
   to PR modifications. A secure workflow template is shipped at
   `docs/secure-workflow.yml`. The opt-out exists only for the dogfood repo
   (which uses `install-from-source` and intentionally runs from the PR branch).
   **Residual risk:** `pull_request_target` + `actions/checkout@v4` with
-  `ref: PR-head` checks out untrusted code, but Notari does not execute it — it
+  `ref: PR-head` checks out untrusted code, but Notari does not execute it, it
   only reads the git tree for `git diff`. The remaining escalation paths are:
   1. A GitHub App as the status check source (strongest, eliminates even the
      `statuses: write` fake-check vector).
@@ -395,7 +395,7 @@ until these land:
   single repo, expiry is the time-bound.
 - **NEEDS_REVIEW blocking (MITIGATED).** The `block-on-review` input (env
   `NOTARI_BLOCK_ON_REVIEW=true`) promotes NEEDS_REVIEW to a blocking state: the
-  Status Check reports `failure` and the job exits 1 — the same as BLOCK. The
+  Status Check reports `failure` and the job exits 1, the same as BLOCK. The
   passport verdict itself stays `NEEDS_REVIEW` for the audit trail; only the gate
   behavior changes. Operators that need a hard stop on sensitive surfaces set this
   rather than wiring up a separate approval gate. Without it, NEEDS_REVIEW still
@@ -455,7 +455,7 @@ The fixes for the limits above are architectural, not pattern additions:
   CI, where `notari verify` gates the diff in a process the agent cannot reach.
   A kernel-layer local control (eBPF / Landlock / Endpoint Security) remains a
   possible future addition for the local-gate surface, but it is not what makes
-  Notari a boundary today — the CI gate is.
+  Notari a boundary today, the CI gate is.
 - **Network-egress proxy** for limits 3 and 4: catch unauthorized outbound
   connections regardless of the language or script that opened them.
 - **Config-file integrity monitoring** for limit 2: detect changes to the
@@ -484,7 +484,7 @@ How the shipped Action enforces this:
 - **Isolated interpreter.** Notari is **installed** with `python -I` (isolated: the
   current directory and user site are off `sys.path`). At **verify** time the
   wrapper `cd`s into the candidate checkout so `git` finds the repo, which makes
-  cwd candidate-controlled — so every trusted Python process it starts is isolated:
+  cwd candidate-controlled, so every trusted Python process it starts is isolated:
   the installed `notari` console script does not place cwd on `sys.path`, and the
   wrapper's inline `python3 -I` reads use isolated mode (available since Python 3.4,
   so this does **not** depend on the interpreter version), with `PYTHONSAFEPATH=1`
@@ -504,14 +504,14 @@ How the shipped Action enforces this:
 
 - **Strict repo binding, closed both ways.** Strict BLOCKs when the contract is
   bound to a different repo, when the contract has no binding but the environment
-  identifies the repo, **and** — the newly closed hole — when *both* the contract
+  identifies the repo, **and**: the newly closed hole, when *both* the contract
   binding and the current repo identity are absent, so a signed contract can never
   be replayed against an arbitrary repo.
 - **Resource ceilings + scan dispositions.** `NOTARI_MAX_DIFF_BYTES`,
   `NOTARI_MAX_FILES`, and `NOTARI_GIT_TIMEOUT` bound what the gate reads; a capped
   streaming git reader keeps memory bounded on a candidate-crafted giant diff.
   Incomplete scan coverage is recorded as a disposition and **BLOCKs in strict /
-  NEEDS_REVIEW in cooperative — never a silent PASS.**
+  NEEDS_REVIEW in cooperative, never a silent PASS.**
 - **Submodule opacity evidence.** A gitlink (mode `160000`) pointer move is
   NEEDS_REVIEW and the passport records the old/new nested commit IDs, so a
   reviewer can audit exactly which opaque commit was pulled in.

@@ -272,7 +272,7 @@ def test_passport_json_and_markdown(repo: Path) -> None:
     assert "BLOCK" in md
     assert "outside.py" in md
     # Action block leads the document (P0-1): what to do, a paste-ready agent
-    # prompt, and the honesty footer — before the raw evidence detail.
+    # prompt, and the honesty footer, before the raw evidence detail.
     assert "## What to do next" in md
     assert "## Prompt to give Claude Code" in md
     assert "What Notari does not prove" in md

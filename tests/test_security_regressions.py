@@ -90,7 +90,7 @@ class TestH1BaseCommitOptionInjection:
 
 class TestH2StrictRequiresRepo:
     """In strict mode, when the environment identifies a repo (GITHUB_REPOSITORY),
-    a contract without a repo binding must BLOCK — prevents cross-repo replay.
+    a contract without a repo binding must BLOCK, prevents cross-repo replay.
 
     In strict mode, unsigned contracts BLOCK on provenance first (M-1 early exit),
     so repo-binding tests use cooperative mode to isolate the repo check."""
@@ -458,7 +458,7 @@ class TestVersionSync:
 
 class TestBaseCommitAncestry:
     """A contract whose base_commit equals HEAD produces an empty diff, so every
-    policy check trivially passes — a false-positive PASS. Strict mode blocks a
+    policy check trivially passes, a false-positive PASS. Strict mode blocks a
     base that isn't an ancestor of the candidate; the empty-diff case (base ==
     head) is the canonical instance."""
 
