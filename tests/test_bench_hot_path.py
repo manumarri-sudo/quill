@@ -28,9 +28,9 @@ import pytest
 # `-m bench` (see pyproject [tool.pytest.ini_options].markers).
 pytest.importorskip("pytest_benchmark")
 
-from nota.adapters.claude_code import decide, run_hook
-from nota.audit import AuditLog
-from nota.policy import Risk, classify, classify_command
+from notari.adapters.claude_code import decide, run_hook
+from notari.audit import AuditLog
+from notari.policy import Risk, classify, classify_command
 
 pytestmark = pytest.mark.bench
 

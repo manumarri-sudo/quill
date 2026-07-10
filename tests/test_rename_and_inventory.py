@@ -22,10 +22,10 @@ from pathlib import Path
 
 import pytest
 
-from nota import contract as contract_mod
-from nota import perimeter as perimeter_mod
-from nota import verify as verify_mod
-from nota.verify import Verdict
+from notari import contract as contract_mod
+from notari import perimeter as perimeter_mod
+from notari import verify as verify_mod
+from notari.verify import Verdict
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -84,7 +84,7 @@ def test_rename_out_of_action_yml_is_blocked(repo: Path) -> None:
 
 
 def test_rename_out_of_approver_dir_is_blocked(repo: Path) -> None:
-    appr = repo / ".nota" / "approvers"
+    appr = repo / ".notari" / "approvers"
     appr.mkdir(parents=True)
     (appr / "human.pub").write_text("-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----\n")
     (repo / "src").mkdir()
@@ -94,11 +94,11 @@ def test_rename_out_of_approver_dir_is_blocked(repo: Path) -> None:
     contract, _ = contract_mod.begin("task", allowed_paths=[], root=repo)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "contract")
-    _git(repo, "mv", ".nota/approvers/human.pub", "src/human.pub")
+    _git(repo, "mv", ".notari/approvers/human.pub", "src/human.pub")
     _git(repo, "commit", "-qm", "exfiltrate the approver key out of the protected dir")
     result = verify_mod.verify(contract=contract, root=repo)
     assert result.verdict is Verdict.BLOCK
-    assert ".nota/approvers/human.pub" in result.gate_tamper_hits
+    assert ".notari/approvers/human.pub" in result.gate_tamper_hits
 
 
 def test_rename_out_of_perimeter_is_blocked(repo: Path) -> None:
@@ -113,11 +113,11 @@ def test_rename_out_of_perimeter_is_blocked(repo: Path) -> None:
     contract, _ = contract_mod.begin("task", allowed_paths=[], root=repo)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "contract")
-    _git(repo, "mv", ".nota/perimeter.json", "src/perimeter.json")
+    _git(repo, "mv", ".notari/perimeter.json", "src/perimeter.json")
     _git(repo, "commit", "-qm", "move the signed perimeter out")
     result = verify_mod.verify(contract=contract, root=repo, perimeter=perim)
     assert result.verdict is Verdict.BLOCK
-    assert ".nota/perimeter.json" in result.gate_tamper_hits
+    assert ".notari/perimeter.json" in result.gate_tamper_hits
 
 
 def test_rename_out_of_custom_forbidden_path_is_blocked(repo: Path) -> None:
@@ -178,7 +178,7 @@ def test_passport_evidence_uses_authoritative_inventory(repo: Path) -> None:
     """The passport's changed-file list must come from the name-status inventory,
     not the textual parser, so a mode-only change can't make it say 'no changes'
     while enforcement blocks (review M-1)."""
-    from nota import passport as passport_mod
+    from notari import passport as passport_mod
 
     (repo / "src").mkdir()
     (repo / "src" / "app.py").write_text("x\n")

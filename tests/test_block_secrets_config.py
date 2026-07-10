@@ -13,10 +13,10 @@ from pathlib import Path
 
 import pytest
 
-from nota import contract as contract_mod
-from nota import perimeter as perimeter_mod
-from nota import verify as verify_mod
-from nota.verify import Verdict
+from notari import contract as contract_mod
+from notari import perimeter as perimeter_mod
+from notari import verify as verify_mod
+from notari.verify import Verdict
 
 # Built at runtime so this source file never contains the contiguous key shape.
 _SECRET_VALUE = "AKIA" + "IOSFODNN7" + "EXAMPLE"

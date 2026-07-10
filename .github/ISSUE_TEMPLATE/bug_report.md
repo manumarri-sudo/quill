@@ -1,13 +1,13 @@
 ---
 name: Bug report
-about: Something Nota should do but doesn't, or shouldn't do but does
+about: Something Notari should do but doesn't, or shouldn't do but does
 title: "bug: "
 labels: ["bug"]
 ---
 
 <!--
 Before filing: please confirm the bug reproduces on the latest released
-version. `nota version` to check.
+version. `notari version` to check.
 -->
 
 ## What happened
@@ -17,7 +17,7 @@ that triggered it.
 
 ## What you expected
 
-A description of what Nota should have done instead.
+A description of what Notari should have done instead.
 
 ## Steps to reproduce
 
@@ -28,21 +28,21 @@ A description of what Nota should have done instead.
 ## Environment
 
 - OS: <!-- macOS / Linux / Windows + version -->
-- Nota version: <!-- output of `nota version` -->
+- Notari version: <!-- output of `notari version` -->
 - Python version: <!-- output of `python --version` -->
 - Coding agent: <!-- Claude Code / Cursor / Cline / etc. and version -->
 
 ## Relevant audit log entries
 
-If the bug involves a gate decision, paste the relevant `~/.nota/audit.log.jsonl`
-lines. Strip any sensitive args before pasting; Nota's redaction normally
+If the bug involves a gate decision, paste the relevant `~/.notari/audit.log.jsonl`
+lines. Strip any sensitive args before pasting; Notari's redaction normally
 keeps these out but verify.
 
 ```json
 
 ```
 
-## `nota doctor` output
+## `notari doctor` output
 
 ```
 

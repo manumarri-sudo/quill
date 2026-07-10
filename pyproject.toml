@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "notari"
 version = "0.3.0"
-description = "Nota Change Control: a CI/CD pull-request gate that verifies AI-written diffs against the human-approved task, scopes the change, and issues a tamper-evident Change Passport."
+description = "Notari Change Control: a CI/CD pull-request gate that verifies AI-written diffs against the human-approved task, scopes the change, and issues a tamper-evident Change Passport."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -52,7 +52,7 @@ dependencies = [
     # binding ships in the BASE install on macOS rather than an opt-in extra -
     # the platform marker makes it a no-op on Linux/Windows. Keeping it optional
     # silently degraded every Mac install to "Touch ID unavailable", which after
-    # the self-disable hardening meant `nota off` refused outright. (audit #1/#2)
+    # the self-disable hardening meant `notari off` refused outright. (audit #1/#2)
     "pyobjc-framework-LocalAuthentication>=12.0,<13; sys_platform == 'darwin'",
 ]
 
@@ -61,7 +61,7 @@ keyring = ["keyring>=25.7.0"]
 postgres = ["asyncpg>=0.31.0"]
 # Touch-ID-gated approvals on macOS. Optional because the binding is
 # Apple-platform-only; on Linux/Windows the typed-token flow remains
-# the only option. Nota auto-detects availability at runtime.
+# the only option. Notari auto-detects availability at runtime.
 touchid = [
     "pyobjc-framework-LocalAuthentication>=12.0,<13; sys_platform == 'darwin'",
 ]
@@ -73,7 +73,7 @@ otel = [
     "opentelemetry-sdk>=1.27,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
 ]
-# Cross-platform PDF rendering for `nota audit export --pack` when no
+# Cross-platform PDF rendering for `notari audit export --pack` when no
 # system browser (Chrome / Brave / Edge / Chromium) is available.
 # Optional because weasyprint pulls in pango / cairo / harfbuzz at runtime
 # on Linux; the browser path is preferred when present (faster, fewer deps).
@@ -93,21 +93,17 @@ dev = [
 ]
 
 [project.scripts]
-nota = "nota.cli:app"
-# Mirror entry point so `uvx notari start` resolves: uvx runs the executable
-# named after the package, and the dist name is `notari`. Installed users still
-# get the canonical `nota` binary; both point at the same CLI.
-notari = "nota.cli:app"
+notari = "notari.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/manumarri-sudo/nota"
-Documentation = "https://github.com/manumarri-sudo/nota#readme"
-Source = "https://github.com/manumarri-sudo/nota"
-Changelog = "https://github.com/manumarri-sudo/nota/blob/main/CHANGELOG.md"
-Issues = "https://github.com/manumarri-sudo/nota/issues"
+Homepage = "https://github.com/manumarri-sudo/notari"
+Documentation = "https://github.com/manumarri-sudo/notari#readme"
+Source = "https://github.com/manumarri-sudo/notari"
+Changelog = "https://github.com/manumarri-sudo/notari/blob/main/CHANGELOG.md"
+Issues = "https://github.com/manumarri-sudo/notari/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nota"]
+packages = ["src/notari"]
 
 [tool.ruff]
 line-length = 100
@@ -177,7 +173,7 @@ warn_return_any = true
 # whose boundaries (arbitrary hook JSON, MCP tool args) are correctly typed
 # `Any`. Forbidding explicit Any there produced ~180 false-positive errors that
 # buried the real ones and forced CI to `|| true`. (audit 2026-06-12, #47)
-files = ["src/nota"]
+files = ["src/notari"]
 python_version = "3.11"
 
 # LocalAuthentication is the Apple Touch ID / Secure Enclave framework, vendored
@@ -195,8 +191,15 @@ ignore_missing_imports = true
 module = ["opentelemetry.*"]
 ignore_missing_imports = true
 
+# weasyprint is the optional [pdf] extra and ships no py.typed marker. Same
+# story as above: CI (no weasyprint) sees import-not-found, a dev box with the
+# extra sees import-untyped, so no single inline ignore code is clean in both.
+[[tool.mypy.overrides]]
+module = ["weasyprint"]
+ignore_missing_imports = true
+
 [tool.pyright]
-include = ["src/nota"]
+include = ["src/notari"]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"
 
@@ -207,7 +210,7 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "-ra",
-    "--cov=nota",
+    "--cov=notari",
     "--cov-report=term-missing",
     # Threshold covers the kernel (audit/policy/decay/telemetry/config/proxy/
     # adapters/errors). Presentation layer (cli/tui/watch/tree/doctor/journal/
@@ -221,19 +224,19 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src/nota"]
+source = ["src/notari"]
 branch = true
 omit = [
-    "src/nota/_version.py",
+    "src/notari/_version.py",
     # Presentation layer: needs integration / TUI tests, not unit tests.
-    "src/nota/cli.py",
-    "src/nota/tui.py",
-    "src/nota/watch.py",
-    "src/nota/tree.py",
-    "src/nota/doctor.py",
-    "src/nota/journal.py",
-    "src/nota/session.py",
-    "src/nota/prompt.py",
+    "src/notari/cli.py",
+    "src/notari/tui.py",
+    "src/notari/watch.py",
+    "src/notari/tree.py",
+    "src/notari/doctor.py",
+    "src/notari/journal.py",
+    "src/notari/session.py",
+    "src/notari/prompt.py",
 ]
 
 [tool.coverage.report]

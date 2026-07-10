@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from nota.audit import AuditLog, read_head, seal_head, verify_chain
-from nota.errors import AuditError
+from notari.audit import AuditLog, read_head, seal_head, verify_chain
+from notari.errors import AuditError
 
 
 def test_emits_signed_event(tmp_path: Path) -> None:

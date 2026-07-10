@@ -1,6 +1,6 @@
-# Nota — Product & Tiers
+# Notari — Product & Tiers
 
-Nota is open-source change control for AI coding agents. The core security
+Notari is open-source change control for AI coding agents. The core security
 primitive — a human-signed boundary that deterministically gates agent-authored
 diffs — is free and open source **forever**. Paid tiers add the things a *team*
 needs once the primitive works: shared policy, history, monitoring, and the
@@ -18,18 +18,18 @@ Everything below exists in this repository and is covered by tests.
 
 | Capability | Command / surface |
 |---|---|
-| Signed perimeter (paths agents may / may never touch) | `nota init`, `nota guard` |
-| Signed, scoped, expiring, repo-bound task contracts | `nota begin` |
-| Deterministic verdict (PASS / NEEDS_REVIEW / BLOCK) | `nota verify` |
-| Change Passport (JSON + Markdown evidence) | `nota verify`, passport artifact |
-| Gate-signed passports + independent re-verification | `nota verify-passport` |
-| Honest posture (🔴/🟡/🟢, exact next steps) | `nota status` |
-| Environment / key / workflow / chain diagnostics | `nota doctor` |
-| Secure GitHub Action + `pull_request_target` template | `action.yml`, `nota init` |
-| Tamper-evident local audit log (hash-chained) | `nota audit …` |
-| Secret scanning on added lines (incl. UTF-16, `-diff`) | inside `nota verify` |
-| Submodule / gitlink opacity evidence | inside `nota verify` |
-| Resource ceilings + scan dispositions (no silent PASS) | inside `nota verify` |
+| Signed perimeter (paths agents may / may never touch) | `notari init`, `notari guard` |
+| Signed, scoped, expiring, repo-bound task contracts | `notari begin` |
+| Deterministic verdict (PASS / NEEDS_REVIEW / BLOCK) | `notari verify` |
+| Change Passport (JSON + Markdown evidence) | `notari verify`, passport artifact |
+| Gate-signed passports + independent re-verification | `notari verify-passport` |
+| Honest posture (🔴/🟡/🟢, exact next steps) | `notari status` |
+| Environment / key / workflow / chain diagnostics | `notari doctor` |
+| Secure GitHub Action + `pull_request_target` template | `action.yml`, `notari init` |
+| Tamper-evident local audit log (hash-chained) | `notari audit …` |
+| Secret scanning on added lines (incl. UTF-16, `-diff`) | inside `notari verify` |
+| Submodule / gitlink opacity evidence | inside `notari verify` |
+| Resource ceilings + scan dispositions (no silent PASS) | inside `notari verify` |
 
 **Design guarantees (all backed by code + tests in this repo):**
 
@@ -70,7 +70,7 @@ Team operation of the same gate, without each repo being an island:
 - Hosted dashboard: posture across every repo in one view.
 - Centralized, versioned policy templates pushed to many repos.
 - **GitHub App check-source**: post the verdict as a Checks-API *check run* from a
-  known App identity, so branch protection can require *Nota specifically* — a bare
+  known App identity, so branch protection can require *Notari specifically* — a bare
   commit status can be spoofed by anyone with `statuses: write`.
 - Signed evidence retention (searchable passport history).
 - Slack / email alerts on BLOCK and on policy drift.
@@ -96,7 +96,7 @@ The governance and compliance surface for regulated / large orgs:
 ## Why teams upgrade (the pain, not the feature)
 
 1. **Activation (free):** the moment a fake bad PR gets BLOCKed with a passport
-   that names the exact violation. That is when Nota stops being abstract.
+   that names the exact violation. That is when Notari stops being abstract.
 2. **Willingness-to-pay signal:** number of repos with the gate enabled, and BLOCK
    volume. A team gating five-plus repos and catching real BLOCKs weekly has
    crossed from "trying it" to "depending on it."

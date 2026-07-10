@@ -11,8 +11,8 @@ real git emits.
 
 from __future__ import annotations
 
-from nota import policy
-from nota.perimeter import GATE_TAMPER_GLOBS, _glob_hit
+from notari import policy
+from notari.perimeter import GATE_TAMPER_GLOBS, _glob_hit
 
 BINARY_NEW = """diff --git a/blob.bin b/blob.bin
 new file mode 100644

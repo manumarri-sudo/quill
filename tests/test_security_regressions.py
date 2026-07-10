@@ -11,11 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from nota import contract as contract_mod
-from nota import provenance as provenance_mod
-from nota import verify as verify_mod
-from nota.policy import _glob_segments
-from nota.verify import Verdict
+from notari import contract as contract_mod
+from notari import provenance as provenance_mod
+from notari import verify as verify_mod
+from notari.policy import _glob_segments
+from notari.verify import Verdict
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -294,7 +294,7 @@ class TestM2DeepPathGlob:
 
 
 # ── H-3: wrapper strict requires head_commit ─────────────────────────────────
-# (Covered in test_action_wrapper.py via the fake nota; this is a unit-level
+# (Covered in test_action_wrapper.py via the fake notari; this is a unit-level
 # regression for the verify() function itself.)
 
 
@@ -320,7 +320,7 @@ class TestBlockResultPassportRoundtrip:
     without crashing, since every strict-mode early-exit uses this path."""
 
     def test_block_result_builds_valid_passport(self, repo: Path) -> None:
-        from nota import passport as passport_mod
+        from notari import passport as passport_mod
 
         contract, _ = contract_mod.begin("test task", allowed_paths=["**"], root=repo)
         result = verify_mod._block_result(
@@ -337,7 +337,7 @@ class TestBlockResultPassportRoundtrip:
         assert passport["evidence"]["changed_files"] == []
 
     def test_block_result_renders_markdown(self, repo: Path) -> None:
-        from nota import passport as passport_mod
+        from notari import passport as passport_mod
 
         contract, _ = contract_mod.begin("test task", allowed_paths=["**"], root=repo)
         result = verify_mod._block_result(
@@ -409,7 +409,7 @@ class TestWaivedSecretBadLine:
     """A non-numeric line in exceptions.json must not crash the gate."""
 
     def test_nonnumeric_line_skips_waiver(self) -> None:
-        from nota.policy import SecretFinding
+        from notari.policy import SecretFinding
 
         finding = SecretFinding(path="src/app.py", line=10, pattern_name="test")
         exceptions = [{"type": "secret", "path": "src/app.py", "line": "not-a-number"}]
@@ -417,7 +417,7 @@ class TestWaivedSecretBadLine:
         assert result is None
 
     def test_none_line_still_matches(self) -> None:
-        from nota.policy import SecretFinding
+        from notari.policy import SecretFinding
 
         finding = SecretFinding(path="src/app.py", line=10, pattern_name="test")
         exceptions = [{"type": "secret", "path": "src/app.py"}]
@@ -448,7 +448,7 @@ class TestVersionSync:
         root = Path(__file__).parent.parent
         with open(root / "pyproject.toml", "rb") as f:
             pyproject_version = tomllib.load(f)["project"]["version"]
-        from nota._version import __version__
+        from notari._version import __version__
 
         assert __version__ == pyproject_version
 
@@ -463,7 +463,7 @@ class TestBaseCommitAncestry:
     head) is the canonical instance."""
 
     def test_base_equals_head_blocks_strict(self, repo: Path) -> None:
-        from nota import attest
+        from notari import attest
 
         head_sha = _git(repo, "rev-parse", "HEAD")
         contract = contract_mod.Contract(
@@ -484,9 +484,9 @@ class TestBaseCommitAncestry:
         provenance_mod.sign_artifact(
             contract.to_dict(),
             priv_pem,
-            repo / ".nota" / "contract.sig",
+            repo / ".notari" / "contract.sig",
         )
-        env = {"NOTA_APPROVER_PUBKEYS": pub_pem, "GITHUB_REPOSITORY": "owner/name"}
+        env = {"NOTARI_APPROVER_PUBKEYS": pub_pem, "GITHUB_REPOSITORY": "owner/name"}
         result = verify_mod.verify(
             contract=contract,
             root=repo,

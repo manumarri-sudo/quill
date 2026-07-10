@@ -1,4 +1,4 @@
-# Launch dry-run — Nota 0.3.0
+# Launch dry-run — Notari 0.3.0
 
 Real command results from a pre-alpha release dry-run, run against the **built
 and clean-installed wheel** (not the source tree), on 2026-07-08. This exists so
@@ -14,7 +14,7 @@ Reproduce with `scripts/` equivalents or the commands below.
 | --- | --- | --- |
 | Lint | `uv run ruff check src tests` | **All checks passed** |
 | Format | `uv run ruff format --check src tests` | **139 files already formatted** |
-| Types | `uv run mypy src/nota` | clean (2 local-only weasyprint import notes when the `pdf` extra is installed; absent in CI) |
+| Types | `uv run mypy src/notari` | clean (2 local-only weasyprint import notes when the `pdf` extra is installed; absent in CI) |
 | Tests | `uv run pytest -q` | **1252 passed, 4 xfailed** |
 | Build | `uv build` | `notari-0.3.0-py3-none-any.whl` + `notari-0.3.0.tar.gz` |
 
@@ -22,13 +22,13 @@ Reproduce with `scripts/` equivalents or the commands below.
 
 ```
 $ python3 -m venv /tmp/venv && /tmp/venv/bin/pip install notari-0.3.0-py3-none-any.whl
-$ nota --version
-nota 0.3.0
+$ notari --version
+notari 0.3.0
 ```
 
 ## 3. The three verdicts, from the installed artifact
 
-Contract: `nota begin "add rate limiting to the API" --scope 'src/api/**'`.
+Contract: `notari begin "add rate limiting to the API" --scope 'src/api/**'`.
 
 ### PASS — in-scope change only
 ```
@@ -46,8 +46,8 @@ verify exit 1
    Where: src/api/app.py:2
    Fix it yourself: Delete line 2 of src/api/app.py …
 ```
-`nota explain --fix-prompt` emitted the compact, secret-free agent prompt
-("Fix ONLY the findings below — do not weaken, bypass, or edit Nota's
+`notari explain --fix-prompt` emitted the compact, secret-free agent prompt
+("Fix ONLY the findings below — do not weaken, bypass, or edit Notari's
 configuration …").
 
 ### NEEDS_REVIEW — in-scope symlink (opaque redirect)
@@ -60,39 +60,39 @@ verify exit 0
 ## 4. Learning loop
 
 ```
-$ nota lessons
-1. ⛔ Nota trust surface or gate workflow touched  (block)   Seen: 2 time(s)
+$ notari lessons
+1. ⛔ Notari trust surface or gate workflow touched  (block)   Seen: 2 time(s)
 2. ⛔ Secret-like value added to the code  (block)
    …
 
-$ nota lessons promote never-edit-nota-trust-surfaces
-✓ promoted: never-edit-nota-trust-surfaces
+$ notari lessons promote never-edit-notari-trust-surfaces
+✓ promoted: never-edit-notari-trust-surfaces
 
-$ nota teach --agents claude,codex
+$ notari teach --agents claude,codex
   updated: CLAUDE.md
   updated: AGENTS.md
 # user content in CLAUDE.md intact: YES
 # managed block written: YES
 
-$ nota agent-brief
+$ notari agent-brief
 Task: add rate limiting to the API
 Allowed: src/api/**
 Repo lessons from prior findings:
-- Never edit Nota trust files, approver keys, perimeter files, or workflows …
+- Never edit Notari trust files, approver keys, perimeter files, or workflows …
 ```
 
 ## 5. Coherence checks
 
 - `passport.md` leads with the action block: **YES** (`## What to do next` before `## Evidence`).
-- `passport.json` schema: `nota.change-passport/v1.1` (additive `remediation` array; v1 readers unaffected).
-- `nota teach` preserved the operator's own `CLAUDE.md` content and only wrote inside the managed block.
+- `passport.json` schema: `notari.change-passport/v1.1` (additive `remediation` array; v1 readers unaffected).
+- `notari teach` preserved the operator's own `CLAUDE.md` content and only wrote inside the managed block.
 - Mistake recording is idempotent per commit (fingerprint dedup) and swarm-safe (atomic `O_APPEND`).
 
 ## 6. Release coherence
 
-- `pyproject.toml` / `src/nota/_version.py` / `nota --version` all report **0.3.0**.
-- `_NOTA_ACTION_PIN` (`src/nota/cli.py`) and `docs/secure-workflow.yml` reference the
-  same 40-hex release commit SHA; `nota status` rejects a non-SHA pin.
+- `pyproject.toml` / `src/notari/_version.py` / `notari --version` all report **0.3.0**.
+- `_NOTARI_ACTION_PIN` (`src/notari/cli.py`) and `docs/secure-workflow.yml` reference the
+  same 40-hex release commit SHA; `notari status` rejects a non-SHA pin.
 - The README workflow snippet shows `@RELEASE_SHA` with instructions to replace it
   with the release commit SHA — no mutable-tag pin ships in the docs.
 

@@ -1,5 +1,5 @@
 """Tests for overnight mode (auto-approve HIGH-risk during a configured window
-or a manual `nota night` toggle).
+or a manual `notari night` toggle).
 
 Safety contract under test (load-bearing):
   CRITICAL risk NEVER auto-approves under overnight mode. rm -rf, DROP TABLE,
@@ -26,9 +26,9 @@ from pathlib import Path
 
 import pytest
 
-from nota import overnight
-from nota.adapters.claude_code import decide
-from nota.policy import Risk
+from notari import overnight
+from notari.adapters.claude_code import decide
+from notari.policy import Risk
 
 # ---------------------------------------------------------------------------
 # State persistence
@@ -90,16 +90,16 @@ class TestStatePersistence:
         """A corrupt JSON file MUST NOT make the gate think overnight is on."""
         f = tmp_path / "overnight.json"
         f.write_text("{not valid json")
-        monkeypatch.setenv("NOTA_OVERNIGHT_FILE", str(f))
+        monkeypatch.setenv("NOTARI_OVERNIGHT_FILE", str(f))
         state = overnight.load_state()
         assert state.enabled is False
 
     def test_state_file_has_secure_mode(self) -> None:
         """0o600 so other users on the machine can't read overnight state."""
         overnight.turn_on()
-        from nota.paths import default_path
+        from notari.paths import default_path
 
-        p = default_path("overnight.json", env_override="NOTA_OVERNIGHT_FILE")
+        p = default_path("overnight.json", env_override="NOTARI_OVERNIGHT_FILE")
         assert p.exists()
         # On macOS / linux the lower 9 bits encode user/group/other rwx.
         mode = p.stat().st_mode & 0o777
@@ -462,11 +462,11 @@ class TestCounters:
 
 
 class TestCliSmoke:
-    def test_nota_night_on_works(self, monkeypatch) -> None:
+    def test_notari_night_on_works(self, monkeypatch) -> None:
         from typer.testing import CliRunner
 
-        import nota.cli as cli
-        from nota.cli import app
+        import notari.cli as cli
+        from notari.cli import app
 
         # Enabling overnight mode is a partial gate-disable, so it now requires a
         # human (Touch ID / tty challenge). Simulate the human for this smoke
@@ -479,10 +479,10 @@ class TestCliSmoke:
         state = overnight.load_state()
         assert state.enabled is True
 
-    def test_nota_day_works(self) -> None:
+    def test_notari_day_works(self) -> None:
         from typer.testing import CliRunner
 
-        from nota.cli import app
+        from notari.cli import app
 
         runner = CliRunner()
         runner.invoke(app, ["night", "on"])
@@ -491,29 +491,29 @@ class TestCliSmoke:
         state = overnight.load_state()
         assert state.enabled is False
 
-    def test_nota_night_status_works(self) -> None:
+    def test_notari_night_status_works(self) -> None:
         from typer.testing import CliRunner
 
-        from nota.cli import app
+        from notari.cli import app
 
         runner = CliRunner()
         runner.invoke(app, ["night", "on"])
         result = runner.invoke(app, ["night", "status"])
         assert result.exit_code == 0
 
-    def test_nota_night_rejects_bad_hours(self) -> None:
+    def test_notari_night_rejects_bad_hours(self) -> None:
         from typer.testing import CliRunner
 
-        from nota.cli import app
+        from notari.cli import app
 
         runner = CliRunner()
         result = runner.invoke(app, ["night", "on", "--hours", "999"])
         assert result.exit_code == 2  # safety contract refuses multi-day toggle
 
-    def test_nota_night_rejects_unknown_arg(self) -> None:
+    def test_notari_night_rejects_unknown_arg(self) -> None:
         from typer.testing import CliRunner
 
-        from nota.cli import app
+        from notari.cli import app
 
         runner = CliRunner()
         result = runner.invoke(app, ["night", "bogus"])

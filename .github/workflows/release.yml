@@ -2,10 +2,10 @@ name: release
 
 # Auto-publishes to PyPI when a GitHub release is published. Uses PyPI
 # Trusted Publishing (OIDC) so no API token lives in repo secrets. One-time
-# setup required on the PyPI side: register manumarri-sudo/nota as a
+# setup required on the PyPI side: register manumarri-sudo/notari as a
 # trusted publisher for the `notari` project with workflow `release.yml`
-# and environment `pypi`. The PyPI dist is `notari` because `nota` was
-# taken; the package, CLI binary, and config dir all remain `nota`. See:
+# and environment `pypi`. The PyPI dist is `notari` because `notari` was
+# taken; the package, CLI binary, and config dir all remain `notari`. See:
 #   https://docs.pypi.org/trusted-publishers/
 
 on:

@@ -6,8 +6,8 @@ and check the grammar (singular/plural, "and" connective, capped blocks).
 
 from __future__ import annotations
 
-from nota import events as ev
-from nota.receipt import (
+from notari import events as ev
+from notari.receipt import (
     Receipt,
     _format_window,
     _pluralize,

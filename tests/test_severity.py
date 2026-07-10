@@ -9,8 +9,8 @@ Two invariants:
 
 from __future__ import annotations
 
-from nota.policy import Risk
-from nota.severity import (
+from notari.policy import Risk
+from notari.severity import (
     color,
     from_risk,
     icon,

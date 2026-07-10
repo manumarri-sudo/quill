@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from nota import attest
+from notari import attest
 
 
 def test_roundtrip_sign_verify() -> None:

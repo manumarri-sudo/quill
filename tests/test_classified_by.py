@@ -9,8 +9,8 @@ tests pin the field so that coupling can't regress. (audit #21)
 
 from __future__ import annotations
 
-from nota.adapters.claude_code import _classification_source, decide
-from nota.policy import Risk
+from notari.adapters.claude_code import _classification_source, decide
+from notari.policy import Risk
 
 
 def test_default_edit_is_classified_default() -> None:

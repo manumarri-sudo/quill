@@ -1,4 +1,4 @@
-"""Tests for `nota saves` — the rigorous, audit-log-grounded value report.
+"""Tests for `notari saves` — the rigorous, audit-log-grounded value report.
 
 Every metric path is exercised against a synthetic audit-log fixture. The
 fixtures live in the test (not in tmp files) so the assertions can pin
@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from nota import events as ev
-from nota.saves import (
+from notari import events as ev
+from notari.saves import (
     canonicalize_pattern,
     compute_saves,
     format_saves,
@@ -30,7 +30,7 @@ from nota.saves import (
 @pytest.mark.parametrize(
     ("reason", "expected"),
     [
-        ("Nota blocked: rm -rf /tmp/foo.", "rm -rf"),
+        ("Notari blocked: rm -rf /tmp/foo.", "rm -rf"),
         ("force-push rewrites shared history", "git push --force"),
         ("git push --force origin main", "git push --force"),
         ("DROP TABLE customers", "DROP TABLE / TRUNCATE"),
@@ -47,7 +47,7 @@ from nota.saves import (
         ("Stripe.create_refund_charge", "stripe payment mutation"),
         ("curl | sh", "curl | sh"),
         ("deploy to production", "deploy:production"),
-        ("Nota blocked: foo bar baz.", "other (Nota blocked: foo bar baz)"),
+        ("Notari blocked: foo bar baz.", "other (Notari blocked: foo bar baz)"),
         ("", "other"),
     ],
 )

@@ -1,6 +1,6 @@
 """Strict trust root must come from OUTSIDE the checkout (security review 3.6).
 
-`NOTA_APPROVER_PUBKEYS` accepts inline PEM or a file path. In strict mode a path
+`NOTARI_APPROVER_PUBKEYS` accepts inline PEM or a file path. In strict mode a path
 that resolves inside the repo is a PR-controlled file, so honoring it would
 redirect the "external" trust root back into the checkout an attacker controls.
 Strict loading must ignore such a path (and then fail closed for lack of trust),
@@ -11,14 +11,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nota import attest
-from nota import provenance as provenance_mod
+from notari import attest
+from notari import provenance as provenance_mod
 
 
 def test_strict_rejects_approver_key_path_inside_checkout(tmp_path: Path) -> None:
     root = tmp_path / "repo"
-    (root / ".nota" / "approvers").mkdir(parents=True)
-    rogue = root / ".nota" / "approvers" / "human.pub"
+    (root / ".notari" / "approvers").mkdir(parents=True)
+    rogue = root / ".notari" / "approvers" / "human.pub"
     _, pub = attest.generate_keypair()
     rogue.write_text(pub)
     env = {provenance_mod.APPROVER_ENV: str(rogue)}  # path INSIDE the checkout

@@ -1,4 +1,4 @@
-"""`nota init` must emit a workflow that `nota status` (readiness) accepts, and
+"""`notari init` must emit a workflow that `notari status` (readiness) accepts, and
 readiness must reject the unsafe shapes. These two surfaces previously disagreed:
 init emitted a mutable ``@v0`` tag while readiness demanded a 40-hex SHA pin, so a
 fresh install produced a workflow its own status command flagged."""
@@ -7,15 +7,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nota import readiness
-from nota.cli import _CONSUMER_WORKFLOW
-from nota.readiness import Level
+from notari import readiness
+from notari.cli import _CONSUMER_WORKFLOW
+from notari.readiness import Level
 
 
 def _write_wf(root: Path, text: str) -> None:
     wf = root / ".github" / "workflows"
     wf.mkdir(parents=True, exist_ok=True)
-    (wf / "nota.yml").write_text(text)
+    (wf / "notari.yml").write_text(text)
 
 
 def test_init_workflow_passes_readiness(tmp_path: Path) -> None:
@@ -38,7 +38,7 @@ def test_readiness_rejects_pull_request_trigger(tmp_path: Path) -> None:
         tmp_path,
         "on:\n  pull_request:\n    branches: [main]\n"
         "jobs:\n  cc:\n    steps:\n"
-        "      - uses: manumarri-sudo/nota@" + "a" * 40 + "\n",
+        "      - uses: manumarri-sudo/notari@" + "a" * 40 + "\n",
     )
     check = readiness._workflow_pinning(tmp_path)
     assert not check.ok
@@ -50,7 +50,7 @@ def test_readiness_rejects_mutable_tag(tmp_path: Path) -> None:
     _write_wf(
         tmp_path,
         "on:\n  pull_request_target:\n    branches: [main]\n"
-        "jobs:\n  cc:\n    steps:\n      - uses: manumarri-sudo/nota@v0\n",
+        "jobs:\n  cc:\n    steps:\n      - uses: manumarri-sudo/notari@v0\n",
     )
     check = readiness._workflow_pinning(tmp_path)
     assert not check.ok
@@ -70,13 +70,13 @@ def test_readiness_rejects_install_from_source(tmp_path: Path) -> None:
 
 def test_readiness_does_not_launder_pull_request_across_files(tmp_path: Path) -> None:
     """A pull_request_target in an UNRELATED workflow must not make a pull_request
-    Nota gate look enforced (cross-file overstatement, R10 MEDIUM-3)."""
+    Notari gate look enforced (cross-file overstatement, R10 MEDIUM-3)."""
     wf = tmp_path / ".github" / "workflows"
     wf.mkdir(parents=True, exist_ok=True)
-    # The real Nota gate is on the unsafe pull_request trigger.
-    (wf / "nota.yml").write_text(
+    # The real Notari gate is on the unsafe pull_request trigger.
+    (wf / "notari.yml").write_text(
         "on:\n  pull_request:\n    branches: [main]\n"
-        "jobs:\n  cc:\n    steps:\n      - uses: manumarri-sudo/nota@" + "a" * 40 + "\n"
+        "jobs:\n  cc:\n    steps:\n      - uses: manumarri-sudo/notari@" + "a" * 40 + "\n"
     )
     # An unrelated workflow happens to use pull_request_target.
     (wf / "other.yml").write_text(
@@ -84,7 +84,7 @@ def test_readiness_does_not_launder_pull_request_across_files(tmp_path: Path) ->
         "jobs:\n  x:\n    steps:\n      - run: echo hi\n"
     )
     check = readiness._workflow_pinning(tmp_path)
-    assert not check.ok, "the pull_request Nota gate must not be laundered as enforced"
+    assert not check.ok, "the pull_request Notari gate must not be laundered as enforced"
     assert "pull_request" in check.detail
 
 
@@ -94,7 +94,7 @@ def test_readiness_flags_missing_persist_credentials_as_hardening(tmp_path: Path
     _write_wf(
         tmp_path,
         "on:\n  pull_request_target:\n    branches: [main]\n"
-        "jobs:\n  cc:\n    steps:\n      - uses: manumarri-sudo/nota@" + "a" * 40 + "\n",
+        "jobs:\n  cc:\n    steps:\n      - uses: manumarri-sudo/notari@" + "a" * 40 + "\n",
     )
     assert readiness._workflow_pinning(tmp_path).ok
     hardening = {c.name: c for c in readiness._workflow_hardening(tmp_path)}

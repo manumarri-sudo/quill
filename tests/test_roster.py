@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from nota import events as ev
-from nota.roster import derive_roster
+from notari import events as ev
+from notari.roster import derive_roster
 
 
 def _evt(etype: str, sid: str, agent: str = "root", **payload: object) -> dict[str, object]:

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 
-from nota.learning import (
+from notari.learning import (
     AUTOPROMOTE_MIN_APPROVALS,
     AUTOPROMOTE_WINDOW_SEC,
     PatternStats,

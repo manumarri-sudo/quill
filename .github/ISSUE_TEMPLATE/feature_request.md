@@ -1,18 +1,18 @@
 ---
 name: Feature request
-about: A capability Nota should have
+about: A capability Notari should have
 title: "feat: "
 labels: ["enhancement"]
 ---
 
 ## The problem this solves
 
-Describe the situation where Nota falls short today. Focus on the
+Describe the situation where Notari falls short today. Focus on the
 workflow, not the implementation.
 
 ## The proposed feature
 
-What should Nota do? Be specific about the user-facing surface (new
+What should Notari do? Be specific about the user-facing surface (new
 CLI command, new policy override, new event type, etc.).
 
 ## Why this matters

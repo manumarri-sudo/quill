@@ -33,7 +33,7 @@ jobs:
         run: ruff format --check src tests
 
       - name: Type-check (mypy)
-        run: mypy src/nota   # blocking: strict is green and the py.typed marker promises it
+        run: mypy src/notari   # blocking: strict is green and the py.typed marker promises it
 
       - name: Test
         run: pytest tests/   # enforces --cov-fail-under=75 from pyproject (currently ~82%)

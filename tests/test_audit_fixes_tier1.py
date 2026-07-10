@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from nota.policy import Risk, classify_command
+from notari.policy import Risk, classify_command
 
 # --- ${IFS} whitespace obfuscation -----------------------------------------
 # `rm${IFS}-rf${IFS}/` runs as `rm -rf /` but dodged the space-separated rm

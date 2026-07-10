@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from nota.githook import (
+from notari.githook import (
     _BLOCK_MARKER,
     find_active_session,
     hook_path,
@@ -16,7 +16,7 @@ from nota.githook import (
     render_commit_block,
     uninstall_hook,
 )
-from nota.receipt import Receipt
+from notari.receipt import Receipt
 
 
 def _receipt(
@@ -158,7 +158,7 @@ def test_prepare_commit_msg_appends_block_when_template_marker_absent(tmp_path):
     # Single session with one tool call so derive_from_events produces a Receipt
     import json
 
-    from nota import events as ev
+    from notari import events as ev
 
     now = datetime.now(UTC).isoformat()
     audit.write_text(
@@ -208,31 +208,31 @@ def test_install_hook_creates_executable(tmp_path):
     assert not already
     assert p == hook_path(tmp_path)
     assert p.exists()
-    assert "nota git-hook" in p.read_text()
+    assert "notari git-hook" in p.read_text()
     # Should be executable
     import os
 
     assert os.access(p, os.X_OK)
 
 
-def test_install_hook_bakes_absolute_nota_binary_path(tmp_path, monkeypatch):
-    """Hook should `exec /abs/path/to/nota git-hook` not bare `exec nota`.
+def test_install_hook_bakes_absolute_notari_binary_path(tmp_path, monkeypatch):
+    """Hook should `exec /abs/path/to/notari git-hook` not bare `exec notari`.
     Otherwise commits from outside the venv silently no-op.
 
-    We stage a resolvable `nota` as a sibling of `sys.executable` so
-    `_resolve_nota_binary()` deterministically finds an absolute path
+    We stage a resolvable `notari` as a sibling of `sys.executable` so
+    `_resolve_notari_binary()` deterministically finds an absolute path
     (this is the venv layout it targets). The hook must then bake that
-    exact absolute path in, not the bare literal `nota`.
+    exact absolute path in, not the bare literal `notari`.
     """
-    # Fake venv bin dir with an executable `nota` next to the interpreter.
+    # Fake venv bin dir with an executable `notari` next to the interpreter.
     fake_bin = tmp_path / "venv" / "bin"
     fake_bin.mkdir(parents=True)
     fake_python = fake_bin / "python"
     fake_python.write_text("#!/bin/sh\n")
     fake_python.chmod(0o755)
-    fake_nota = fake_bin / "nota"
-    fake_nota.write_text("#!/bin/sh\n")
-    fake_nota.chmod(0o755)
+    fake_notari = fake_bin / "notari"
+    fake_notari.write_text("#!/bin/sh\n")
+    fake_notari.chmod(0o755)
     monkeypatch.setattr(sys, "executable", str(fake_python))
 
     repo = tmp_path / "repo"
@@ -245,10 +245,10 @@ def test_install_hook_bakes_absolute_nota_binary_path(tmp_path, monkeypatch):
     m = re.search(r"exec\s+(\S+)\s+git-hook", contents)
     assert m is not None, f"no exec line found:\n{contents}"
     binary = m.group(1)
-    # Resolution should have found our staged venv-sibling nota and baked
-    # its absolute path in. A bare literal `nota` (unresolved) is the
+    # Resolution should have found our staged venv-sibling notari and baked
+    # its absolute path in. A bare literal `notari` (unresolved) is the
     # regression this test exists to catch.
-    assert binary == str(fake_nota), f"expected absolute venv path, got {binary!r}"
+    assert binary == str(fake_notari), f"expected absolute venv path, got {binary!r}"
     assert binary.startswith("/")
 
 
@@ -267,7 +267,7 @@ def test_install_hook_refuses_to_overwrite_existing(tmp_path):
         install_hook(tmp_path)
 
 
-def test_uninstall_hook_removes_nota_hook(tmp_path):
+def test_uninstall_hook_removes_notari_hook(tmp_path):
     (tmp_path / ".git").mkdir()
     install_hook(tmp_path)
     p, removed = uninstall_hook(tmp_path)
@@ -275,10 +275,10 @@ def test_uninstall_hook_removes_nota_hook(tmp_path):
     assert not p.exists()
 
 
-def test_uninstall_hook_refuses_non_nota(tmp_path):
+def test_uninstall_hook_refuses_non_notari(tmp_path):
     (tmp_path / ".git" / "hooks").mkdir(parents=True)
     p = hook_path(tmp_path)
-    p.write_text("#!/bin/sh\necho 'not nota'\n")
+    p.write_text("#!/bin/sh\necho 'not notari'\n")
     with pytest.raises(RuntimeError):
         uninstall_hook(tmp_path)
 

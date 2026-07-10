@@ -9,8 +9,8 @@ that compare the path string - a silent fail-open. These pin the decode.
 
 from __future__ import annotations
 
-from nota import perimeter as perim
-from nota import policy
+from notari import perimeter as perim
+from notari import policy
 
 # Exactly what `git diff` (core.quotepath=true, the default) emits for a new
 # file named café.env containing one secret-shaped line.

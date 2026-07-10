@@ -7,8 +7,8 @@ be forged without the off-box signing key.
 
 from __future__ import annotations
 
-from nota import attest
-from nota import transparency as tl
+from notari import attest
+from notari import transparency as tl
 
 
 def _leaves(n: int) -> list[bytes]:

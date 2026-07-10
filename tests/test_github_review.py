@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nota import github_review as gh
+from notari import github_review as gh
 
 HEAD = "deadbeef" * 5  # 40-char sha
 

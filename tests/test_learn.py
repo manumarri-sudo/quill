@@ -1,4 +1,4 @@
-"""Tests for the self-improvement engine (`nota learn`) + KPIs.
+"""Tests for the self-improvement engine (`notari learn`) + KPIs.
 
 Pins:
   - normalize_block_reason collapses every known historical format
@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from nota import events as ev
-from nota.learn import (
+from notari import events as ev
+from notari.learn import (
     KPIReport,
     SuggestionCategory,
     _normalize_block_reason,
@@ -44,9 +44,9 @@ def _ev(type_: str, **payload_kv) -> dict:
     [
         ("rm -rf", "rm -rf"),
         ("rm -rf.", "rm -rf"),
-        ("Nota blocked: rm -rf.", "rm -rf"),
+        ("Notari blocked: rm -rf.", "rm -rf"),
         (
-            "Nota blocked: rm -rf. To allow, lower the risk in your nota config "
+            "Notari blocked: rm -rf. To allow, lower the risk in your notari config "
             "or run the command outside Claude Code.",
             "rm -rf",
         ),
@@ -54,7 +54,7 @@ def _ev(type_: str, **payload_kv) -> dict:
         ("rm -rf - try instead: Move to /tmp/quarantine.", "rm -rf"),
         ("rm -rf.  ↪ try: Move to a quarantine dir", "rm -rf"),
         ("vercel --prod", "vercel --prod"),
-        ("Nota blocked: vercel --prod. To allow, lower the risk...", "vercel --prod"),
+        ("Notari blocked: vercel --prod. To allow, lower the risk...", "vercel --prod"),
         ("DROP TABLE/DATABASE/SCHEMA", "DROP TABLE/DATABASE/SCHEMA"),
         ("", ""),
     ],
@@ -153,11 +153,11 @@ def test_kpi_cascade_events_counted() -> None:
 
 def test_kpi_operator_bypasses_counted() -> None:
     """verdict.allowed with reason starting 'approved one-shot' is an
-    operator-bypass via nota approve. Counted but reported as a raw
+    operator-bypass via notari approve. Counted but reported as a raw
     number (not a ratio) because data is sparse."""
     events = [
-        _ev(ev.VERDICT_ALLOWED, reason="approved one-shot via nota approve abc"),
-        _ev(ev.VERDICT_ALLOWED, reason="approved one-shot via nota approve xyz"),
+        _ev(ev.VERDICT_ALLOWED, reason="approved one-shot via notari approve abc"),
+        _ev(ev.VERDICT_ALLOWED, reason="approved one-shot via notari approve xyz"),
         _ev(ev.VERDICT_ALLOWED, reason="read-only command"),  # not an override
     ]
     k = derive_kpis(events)
@@ -169,7 +169,7 @@ def test_kpi_top_blocked_patterns_dedupes_via_normalizer() -> None:
     events = [
         _ev(ev.VERDICT_BLOCKED, reason="rm -rf"),
         _ev(ev.VERDICT_BLOCKED, reason="rm -rf."),
-        _ev(ev.VERDICT_BLOCKED, reason="Nota blocked: rm -rf."),
+        _ev(ev.VERDICT_BLOCKED, reason="Notari blocked: rm -rf."),
         _ev(ev.VERDICT_BLOCKED, reason="rm -rf.  ↪ try: Move to a quarantine dir"),
         _ev(ev.VERDICT_BLOCKED, reason="vercel --prod"),
     ]

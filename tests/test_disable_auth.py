@@ -1,10 +1,10 @@
-"""Tests for the human-presence gate on turning the Nota gate OFF.
+"""Tests for the human-presence gate on turning the Notari gate OFF.
 
 Verifies the self-disable defense without a real fingerprint, a real tty, or
 touching the real gate state. The defense is two-layered:
 
   - The HARD guarantee is the hook-layer CRITICAL classification of
-    `nota off|pause|night` (see test_self_disable_classifier.py): an AGENT's
+    `notari off|pause|night` (see test_self_disable_classifier.py): an AGENT's
     Bash call is denied before it ever reaches the CLI.
   - This module covers the HUMAN path - `_require_disable_auth`'s tiered ladder
     (Touch ID -> /dev/tty typed challenge -> --no-biometric opt-in / refuse) -
@@ -19,9 +19,9 @@ from __future__ import annotations
 import pytest
 import typer
 
-import nota.cli as cli
-import nota.touchid as touchid
-from nota.cli import _require_disable_auth
+import notari.cli as cli
+import notari.touchid as touchid
+from notari.cli import _require_disable_auth
 
 
 class _Console:
@@ -49,9 +49,9 @@ def _set_tty(monkeypatch, *, passes: bool) -> None:
 
 
 def test_env_bypass_var_is_removed(monkeypatch) -> None:
-    """NOTA_SKIP_DISABLE_AUTH must NOT bypass the prompt. An explicit Touch ID
+    """NOTARI_SKIP_DISABLE_AUTH must NOT bypass the prompt. An explicit Touch ID
     cancel refuses outright and must not fall through to the tty challenge."""
-    monkeypatch.setenv("NOTA_SKIP_DISABLE_AUTH", "1")
+    monkeypatch.setenv("NOTARI_SKIP_DISABLE_AUTH", "1")
     monkeypatch.setattr(touchid, "is_available", lambda: True)
     monkeypatch.setattr(
         touchid, "authenticate", lambda **_k: touchid.TouchIDResult(False, "user_canceled")
@@ -65,7 +65,7 @@ def test_env_bypass_var_is_removed(monkeypatch) -> None:
 def test_no_biometry_no_tty_refuses_by_default(monkeypatch) -> None:
     """No sensor AND no controlling tty (an agent's own piped process) REFUSES
     by default - a hijacked agent can't self-disable. Regression for the
-    `nota off` fall-open hole (audit #1, same class as c9b522a)."""
+    `notari off` fall-open hole (audit #1, same class as c9b522a)."""
     monkeypatch.setattr(touchid, "is_available", lambda: False)
     _set_tty(monkeypatch, passes=False)
     with pytest.raises(typer.Exit):
@@ -85,7 +85,7 @@ def test_no_biometric_opt_in_proceeds(monkeypatch) -> None:
 def test_tty_challenge_success_proceeds(monkeypatch) -> None:
     """The human-path fallback: no Touch ID dialog, but a human at a real tty
     types the phrase correctly -> the disable proceeds. This is the case that
-    makes `nota off` usable on an ad-hoc-signed uv install where Touch ID
+    makes `notari off` usable on an ad-hoc-signed uv install where Touch ID
     cannot present a dialog."""
     monkeypatch.setattr(touchid, "is_available", lambda: False)
     _set_tty(monkeypatch, passes=True)
@@ -143,7 +143,7 @@ def test_passes_on_touchid_success(monkeypatch) -> None:
 
 
 def test_pause_json_is_in_adapter_gate_surface() -> None:
-    from nota.adapters.claude_code import _GATE_CONFIG_SUFFIXES
+    from notari.adapters.claude_code import _GATE_CONFIG_SUFFIXES
 
     assert any("pause.json" in s for s in _GATE_CONFIG_SUFFIXES)
 
@@ -162,7 +162,7 @@ def test_human_tty_challenge_failcloses_with_no_controlling_tty() -> None:
     import sys
 
     code = (
-        "from nota.cli import _human_tty_challenge\n"
+        "from notari.cli import _human_tty_challenge\n"
         "class C:\n"
         "    def print(self, *a, **k):\n"
         "        pass\n"
