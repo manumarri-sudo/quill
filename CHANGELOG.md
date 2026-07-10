@@ -197,7 +197,7 @@ Strategic shift: the open-source Notari becomes a tool with an actively-useful s
 
 **`notari integrate <agent>` — teach your coding agent to query Notari data.** No LLM ships in Notari. Instead, this command appends a Notari-instructions snippet to the user's coding-agent rules file (`~/.claude/CLAUDE.md` for Claude Code, `./.cursorrules` for Cursor, `./CONVENTIONS.md` for Aider). The snippet lists the deterministic `notari` commands the agent can run when the user asks "what did the agent do this morning?" or "show me recent blocks." The user's existing coding agent does the inference; Notari provides the data layer. Auto-detects installed agents, idempotent via a `<!-- notari-integration v1 -->` marker, supports project-scope and per-user-global-scope installs, includes `--remove` for clean uninstall. Implemented in `src/notari/integrate.py` (~250 lines) + 18 tests covering install / idempotent re-run / refresh-on-drift / uninstall / content-preservation.
 
-**`docs/research/cross-user-learning-design-2026-06.md` — privacy-respecting design exploration.** Three architecture paths laid out with honest tradeoffs: Path A (community policy packs, no telemetry, human-curated PRs), Path B (opt-in aggregated statistics with k-anonymity + differential privacy + no cross-day linkage), Path C (federated-style local-only learning that publishes signed pattern-deltas). Recommendation: ship Path A in v0.4, Path C in v0.5, Path B only if v0.6+ community demand warrants. The recommendation explicitly preserves the no-telemetry-by-default voice that's a brand pillar.
+**`docs/research/cross-user-learning-design-2026-06.md` — privacy-respecting design exploration.** Three architecture paths laid out with honest tradeoffs: Path A (community policy packs, no telemetry, human-curated PRs), Path B (opt-in aggregated statistics with k-anonymity + differential privacy + no cross-day linkage), Path C (federated-style local-only learning that publishes signed pattern-deltas). Recommendation: ship Path A in v0.4, Path C in v0.5, Path B only if v0.6+ community demand warrants. The recommendation keeps no-telemetry-by-default as a hard default.
 
 **Six new feature ideas captured as `[NEEDS RESEARCH]` tasks**, not built unattended:
 - `notari audit export --format soc2-evidence-pack` (tar.gz with chain-verified slice + per-control summary + auditor PDF)
@@ -292,6 +292,14 @@ Tests: 733 → 812. 79 new tests across `test_saves.py` (42), `test_insights.py`
 - `docs/clients.md`: per-client MCP-proxy config snippets for Claude Desktop, Claude Cowork (GA'd 2026-04-09, shares Desktop's `claude_desktop_config.json` on macOS), Cline, Windsurf, Continue, Cody, Zed, GitHub Copilot agent mode, JetBrains AI, and the OpenAI Codex CLI MCP fallback, plus a brief recap of the existing Claude Code and Cursor 1.7+ hook adapters. Each entry is honest about which surfaces Notari gates today (every MCP-routed tool call, including custom MCP servers behind Notari) and which it doesn't (the client's own built-ins, including Cowork file edits / scheduled tasks / Anthropic-managed connectors, Cline's built-ins, Windsurf's built-ins). Includes a Cowork-specific note about the OpenTelemetry bridge for Enterprise tenants via `NOTARI_OTEL_ENDPOINT`.
 - `docs/byo-agent.md`: how to wire Notari into an agent loop someone wrote themselves. Covers two paths today (MCP-proxy via `notari serve` for any loop that already supports MCP servers, and the interim "wrap your direct dispatches in a local MCP server" pattern for loops that dispatch tools directly in Python), plus the v0.3 ship target (`from notari import gate` as the single public library API per `docs/research/universal-adapter-strategy-2026-05.md` §4), and the universal bare-loop template that every framework adapter wraps.
 - README "Other clients" subsection added under Path B pointing at both docs pages. No code or behavior change in this slice; v0.3 universal-adapter implementation work is unchanged on the ship list.
+
+<details>
+<summary><b>Pre-0.3.0 alpha history</b> (0.2.x, before the rename to Notari and the Change Control pivot)</summary>
+
+> Note: some links in these historical entries point at research notes and docs
+> (`docs/research/*`, `docs/clients.md`, `docs/byo-agent.md`) that were internal
+> working material or were removed from the public tree at the Change Control
+> pivot; they are kept here as-written for the historical record.
 
 ## [0.2.0a5] - 2026-05-27
 
@@ -443,3 +451,5 @@ Research basis: `docs/research/polish-and-launch-2026-05.md` - SOTA survey of k9
 - Audit log mode `0o600`, `O_APPEND` for atomic concurrent writes, force-fsync on `risk >= high`
 - Upstream MCP server subprocesses spawn with a scrubbed environment; only `env_pass`-listed variables are forwarded
 - `env_pass` refuses to forward variables that look like Notari's signing key
+
+</details>
