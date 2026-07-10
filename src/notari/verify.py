@@ -1051,6 +1051,25 @@ def verify(
             f"link text [{detail}]"
         )
 
+    # Homoglyph / mixed-script paths BLOCK. A changed path whose segment mixes
+    # scripts, or is a wholly-non-Latin word that reads as ASCII, has no benign
+    # reason to exist in a code path, and a broad allow-scope would admit it
+    # while the finite deny table might miss the codepoint. So this fails the
+    # build rather than only paging a reviewer (NEEDS_REVIEW exits 0, which
+    # merges by default, exactly what a homoglyph attacker would prefer).
+    # (Security red-team: confusable path dodges the forbid table under a broad
+    # allow-scope; out-of-table scripts caught by cross-script mixing.)
+    suspicious: list[str] = []
+    for p in sorted(raw_changed):
+        why = perimeter_mod.suspicious_path(p)
+        if why is not None:
+            suspicious.append(why)
+    if suspicious:
+        reasons.append(
+            f"{len(suspicious)} path(s) look like a homoglyph or mixed-script disguise: "
+            + "; ".join(suspicious[:5])
+        )
+
     # Incomplete scan coverage: an oversized diff or an over-ceiling file count
     # means the scanners did NOT see the whole candidate. Strict refuses to bless
     # a change it could not fully read (fail closed); cooperative surfaces it for
@@ -1135,6 +1154,7 @@ def verify(
         or contract_expiry_blocks
         or repo_blocks
         or scan_blocks
+        or suspicious
     )
     if block:
         verdict = Verdict.BLOCK

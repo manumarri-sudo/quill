@@ -242,6 +242,17 @@ def begin_cmd(
     scope_str = ", ".join(contract.allowed_paths) or "(no path restriction)"
     out.print(f"  scope: {scope_str}")
     out.print(f"  base commit: {contract.base_commit or '(no commits yet)'}")
+    # Empty scope is the single biggest first-run footgun (0.3.4): with no
+    # --scope, every path the perimeter does not forbid is "in scope", so verify
+    # PASSes almost any diff and the gate looks like it does nothing. Say so
+    # loudly; the perimeter's forbidden list is the only thing biting otherwise.
+    if not contract.allowed_paths:
+        out.print(
+            "  [yellow]⚠ no scope set:[/yellow] every path your perimeter does not forbid counts "
+            "as in-bounds, so this contract will PASS most diffs.\n"
+            "  Re-run with [bold]--scope <glob>[/bold] (e.g. --scope 'src/api/**') to make the "
+            "boundary actually mean something for this task."
+        )
     # First-run ordering guard (0.3.2): the contract just froze base=HEAD, so
     # any setup file still uncommitted (perimeter, .gitignore from keygen/guard)
     # will land INSIDE the task diff and muddy the verdict with self-flags.
@@ -442,7 +453,7 @@ def verify_cmd(
     raise typer.Exit(code=result.verdict.exit_code)
 
 
-@app.command("keygen", hidden=True)
+@app.command("keygen", rich_help_panel="Boundary setup")
 def keygen_cmd(
     out: Annotated[
         Path | None,
@@ -525,7 +536,7 @@ def keygen_cmd(
         )
 
 
-@app.command("guard", hidden=True)
+@app.command("guard", rich_help_panel="Boundary setup")
 def guard_cmd(
     key: Annotated[
         Path,
@@ -587,7 +598,7 @@ def guard_cmd(
     )
 
 
-@app.command("verify-passport", hidden=True)
+@app.command("verify-passport", rich_help_panel="Boundary setup")
 def verify_passport_cmd(
     passport_file: Annotated[
         Path,
@@ -1204,9 +1215,21 @@ def init_cmd(
             os.close(fd)
     (approvers / "human.pub").write_text(approver_pub)
 
+    # Seed real forbidden paths so the FIRST verify blocks an obviously-dangerous
+    # edit instead of passing everything. If the user named --forbid we respect
+    # exactly that; otherwise we detect sensitive dirs actually present in the
+    # repo (auth, migrations, infra, ...) and forbid those, telling them what we
+    # picked so they can edit it. Without this, an empty perimeter PASSes any
+    # non-gate path and the tool looks like it does nothing.
+    forbid_paths = tuple(forbid or ())
+    seeded: tuple[str, ...] = ()
+    if not forbid_paths:
+        seeded = perimeter_mod.detect_sensitive_paths(root)
+        forbid_paths = seeded
+
     per = perimeter_mod.default_perimeter(
         allowed_paths=tuple(allow or ()),
-        forbidden_paths=tuple(forbid or ()),
+        forbidden_paths=forbid_paths,
         approved_by=approved_by,
     )
     per.write(root)
@@ -1219,6 +1242,20 @@ def init_cmd(
 
     out.print(f"[green]✓[/green] perimeter [bold]{per.perimeter_id}[/bold] signed")
     out.print(f"[green]✓[/green] keys in [bold]{keys_dir}[/bold] (gitignored) · workflow written")
+    if seeded:
+        shown = ", ".join(seeded[:6]) + (" ..." if len(seeded) > 6 else "")
+        out.print(
+            f"[green]✓[/green] forbade [bold]{len(seeded)}[/bold] sensitive path(s) found in "
+            f"your repo: [dim]{shown}[/dim]"
+        )
+        out.print(
+            "  [dim]edit .notari/perimeter.json to adjust, then re-sign with `notari guard`.[/dim]"
+        )
+    elif not forbid:
+        out.print(
+            "[yellow]note:[/yellow] no obviously-sensitive paths detected to forbid. Add your own "
+            "with [bold]notari guard --forbid <glob>[/bold] so the gate blocks something real."
+        )
     out.print("\n[bold]To make this a real boundary, do these 3 things OFF this machine[/bold]")
     out.print(
         "[dim](a key on this laptop is readable by the agent, these move trust off-box):[/dim]"

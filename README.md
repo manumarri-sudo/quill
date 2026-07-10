@@ -127,6 +127,14 @@ Calibration matters more than marketing.
 - **Notari is not a hosted service.** It is a single Python package. The audit log and
   signing key live on your disk in mode `0o600`; you own the key, the log, and the
   verdict. No cloud round-trip on the verify path, no telemetry by default.
+- **Notari spends no AI tokens.** There is no LLM inside it: the verdict, the secret
+  scan, the plain-English `explain`, and the local gate are all deterministic code
+  (regex, globs, AST, counting). No model, no API key, no per-check cost, nothing to
+  meter. The only tokens in the picture are the ones your coding agent already spends
+  writing the code, and, if you *choose* to paste a Notari fix-prompt back to it, the
+  ones it spends on the fix. That is a deliberate design property, not a limitation:
+  a gate with a model in it could be prompt-injected and would bill you per PR; this
+  one cannot and does not.
 
 ## Change Control in detail
 

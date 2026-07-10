@@ -20,7 +20,7 @@ import fnmatch
 import hashlib
 import json
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -188,6 +188,58 @@ def _confusable_skeleton(s: str) -> str:
     return "".join(_CONFUSABLES.get(c, c) for c in s)
 
 
+def suspicious_path(path: str) -> str | None:
+    """Name why `path` looks like a homoglyph / mixed-script deception, or None.
+
+    The deny-side confusable table (`_CONFUSABLES`) is finite, so a homoglyph
+    whose codepoint is not listed could dodge a forbidden glob while a broad
+    allow-scope (`src/**`) still admits it, because ** does not inspect segment
+    content. Rather than pretend the table is exhaustive, we catch the whole
+    class: a path segment that mixes scripts (Latin + any non-Latin in one run)
+    or is a wholly-non-Latin word whose confusable skeleton reads as ASCII is
+    reported here, and verify BLOCKs on it (no benign code path mixes scripts).
+    Legitimate non-Latin filenames (a wholly Cyrillic directory whose skeleton
+    stays non-ASCII) do NOT trip this: single-script names are fine; only
+    cross-script *mixing* or a full ASCII-lookalike impersonation is the tell.
+    """
+    for seg in path.split("/"):
+        if not seg or seg.isascii():
+            continue
+        scripts = {_script_of(ch) for ch in seg if ch.isalpha()}
+        real = {s for s in scripts if s != "Common"}
+        # (a) One segment mixing scripts (Latin 'uth' + Cyrillic 'а') is the
+        # classic single-letter homoglyph swap.
+        if len(real) > 1:
+            return f"path segment '{seg}' mixes scripts ({', '.join(sorted(real))})"
+        # (b) A single-script non-Latin segment whose confusable skeleton is
+        # ENTIRELY ASCII is impersonating an ASCII word (every character is a
+        # Latin lookalike). A genuine non-Latin name keeps non-ASCII characters
+        # in its skeleton and is left alone.
+        skel = _confusable_skeleton(seg)
+        if skel != seg and skel.isascii() and any(c.isalpha() for c in skel):
+            return f"path segment '{seg}' is entirely ASCII lookalikes (reads as '{skel}')"
+    return None
+
+
+def _script_of(ch: str) -> str:
+    """Coarse Unicode script bucket for a character (Latin / Cyrillic / Greek /
+    Common / Other). Enough to detect cross-script mixing without a full ICU
+    dependency. Any non-ASCII LETTER that is not Cyrillic or Greek is bucketed
+    "Other" (a foreign script for mixing purposes); this is what stops an
+    Armenian / Coptic / Cherokee lookalike from being waved through, since those
+    are exactly the out-of-table confusables the finite skeleton misses."""
+    if ch.isascii():
+        return "Latin" if ch.isalpha() else "Common"
+    if not ch.isalpha():
+        return "Common"
+    o = ord(ch)
+    if 0x0400 <= o <= 0x052F:
+        return "Cyrillic"
+    if 0x0370 <= o <= 0x03FF or 0x1F00 <= o <= 0x1FFF:
+        return "Greek"
+    return "Other"
+
+
 def _glob_hit(path: str, glob: str, *, casefold: bool = False) -> bool:
     # Deny-side match (forbidden + gate-tamper). Inclusive by design.
     if casefold:
@@ -251,6 +303,84 @@ def default_perimeter(
         perimeter_id=_perimeter_id(allowed_paths, forbidden, created),
         approved_by=approved_by,
     )
+
+
+# Directory / file names that almost always deserve a human on any AI-authored
+# change. `notari init` seeds forbidden globs for the ones actually present in
+# the repo, so the very first verify BLOCKs an obviously-dangerous edit even
+# before the user has hand-tuned a perimeter. This is a STARTING point the user
+# edits, not a security guarantee: it forbids what it can name, nothing more.
+_SENSITIVE_DIR_NAMES: tuple[str, ...] = (
+    "auth",
+    "authentication",
+    "migrations",
+    "migration",
+    "infra",
+    "infrastructure",
+    "terraform",
+    "deploy",
+    "deployment",
+    "secrets",
+    "payments",
+    "payment",
+    "billing",
+)
+# .github is intentionally NOT here: .github/workflows is already covered by
+# GATE_TAMPER_GLOBS, so seeding it would be redundant and misleading.
+
+
+def detect_sensitive_paths(root: Path, *, max_depth: int = 3) -> tuple[str, ...]:
+    """Forbidden globs for sensitive directories that actually exist in `root`.
+
+    Walks up to `max_depth` levels (skipping .git and the vendored/dependency
+    dirs that would swamp the result) and returns a deterministic, de-duplicated
+    tuple of globs like ``src/auth/**``. Returns real, present paths only, so the
+    seed is honest: it never forbids something that is not there.
+    """
+    skip = {
+        ".git",
+        ".notari",
+        "node_modules",
+        ".venv",
+        "venv",
+        "__pycache__",
+        "dist",
+        "build",
+        "out",
+        "target",
+        "vendor",
+        ".next",
+        ".terraform",
+        ".gradle",
+        "Pods",
+        ".tox",
+        "coverage",
+    }
+    found: set[str] = set()
+    sensitive_files: set[str] = set()
+    root = root.resolve()
+    for dirpath, dirnames, files in root.walk() if hasattr(root, "walk") else _walk(root):
+        rel = dirpath.relative_to(root)
+        depth = len(rel.parts)
+        dirnames[:] = [d for d in dirnames if d not in skip and depth < max_depth]
+        for d in list(dirnames):
+            if d.lower() in _SENSITIVE_DIR_NAMES:
+                found.add((rel / d).as_posix() + "/**")
+        for f in files:
+            if f == "Dockerfile":
+                sensitive_files.add("**/Dockerfile")
+            elif f.endswith(".tf"):
+                sensitive_files.add("**/*.tf")
+            elif f.startswith(".env") and not f.endswith((".example", ".sample", ".template")):
+                sensitive_files.add("**/.env*")
+    return tuple(sorted(found)) + tuple(sorted(sensitive_files))
+
+
+def _walk(root: Path) -> Iterator[tuple[Path, list[str], list[str]]]:
+    import os as _os
+
+    for dp, dn, fn in _os.walk(root):
+        yield Path(dp), dn, fn
 
 
 def load(root: Path) -> Perimeter | None:

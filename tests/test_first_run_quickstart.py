@@ -283,3 +283,144 @@ def test_verify_default_never_opens_in_non_tty_or_ci(
     res = runner.invoke(app, ["verify"])
     assert res.exit_code == 1, res.output  # BLOCK still exits 1
     assert opened == []
+
+
+def _signed_ready(repo: Path, *, repo_bind: str = "owner/name") -> tuple[str, str, object]:
+    """Correct-order setup with an env-pinned approver key.
+
+    Returns (approver_priv, approver_pub, contract). The private key is returned
+    so tests that need to forge a still-trusted contract can re-sign with it.
+    """
+    priv, pub = _keypair_and_perimeter(repo)
+    _commit_all(repo, "notari: signed boundary")
+    contract, _ = contract_mod.begin(
+        "feature", allowed_paths=("src/**",), root=repo, repo=repo_bind
+    )
+    provenance_mod.sign_artifact(contract.to_dict(), priv, repo / ".notari" / "contract.sig")
+    _commit_all(repo, "notari: contract")
+    return priv, pub, contract
+
+
+def test_strict_wrong_repo_binding_blocks(repo: Path) -> None:
+    """A validly-signed contract bound to repo A must BLOCK when verified as repo
+    B (replay across repos). This strict branch had no end-to-end BLOCK test."""
+    _priv, pub, contract = _signed_ready(repo, repo_bind="owner/name")
+    (repo / "src" / "app.py").write_text("x = 1\ny = 2\n")
+    _commit_all(repo, "in-scope change")
+    result = verify_mod.verify(
+        contract=contract,
+        root=repo,
+        perimeter=perimeter_mod.load(repo),
+        strict=True,
+        env={provenance_mod.APPROVER_ENV: pub, "GITHUB_REPOSITORY": "someone-else/other"},
+    )
+    assert result.verdict is Verdict.BLOCK
+    assert any("repo" in r.lower() for r in result.reasons)
+
+
+def test_strict_forged_base_non_ancestor_blocks(repo: Path) -> None:
+    """A contract whose base_commit is a real commit but NOT an ancestor of HEAD
+    (a forged/replayed base) must BLOCK in strict. The contract is signed by the
+    TRUSTED approver so provenance passes and verify is forced into the ancestry
+    check; the assertion on "ancestor" guards against passing on a wrong branch."""
+    from notari import contract as _cm
+
+    priv, pub, _ = _signed_ready(repo)
+    # A sibling commit on a divergent branch: a real SHA that is NOT an ancestor
+    # of the line we verify.
+    _git(repo, "checkout", "-q", "-b", "sibling")
+    (repo / "src" / "other.py").write_text("z = 9\n")
+    _commit_all(repo, "sibling commit")
+    sibling = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True
+    ).stdout.strip()
+    _git(repo, "checkout", "-q", "main" if _has_main(repo) else "master")
+    # Forge a contract pinned to the sibling base, signed by the trusted key so
+    # provenance is valid and only the ancestry check can block it.
+    forged, _ = contract_mod.begin(
+        "feature", allowed_paths=("src/**",), root=repo, repo="owner/name"
+    )
+    forged_d = forged.to_dict()
+    forged_d["base_commit"] = sibling
+    forged2 = _cm.Contract.from_dict(forged_d)
+    provenance_mod.sign_artifact(forged2.to_dict(), priv, repo / ".notari" / "contract.sig")
+    (repo / "src" / "app.py").write_text("x = 1\nq = 2\n")
+    _commit_all(repo, "change on main line")
+    result = verify_mod.verify(
+        contract=forged2,
+        root=repo,
+        perimeter=perimeter_mod.load(repo),
+        strict=True,
+        env={provenance_mod.APPROVER_ENV: pub, "GITHUB_REPOSITORY": "owner/name"},
+    )
+    assert result.verdict is Verdict.BLOCK
+    assert any("ancestor" in r.lower() for r in result.reasons), result.reasons
+
+
+def _has_main(repo: Path) -> bool:
+    r = subprocess.run(
+        ["git", "branch", "--list", "main"], cwd=repo, capture_output=True, text=True
+    )
+    return "main" in r.stdout
+
+
+def test_confusable_path_blocks(repo: Path) -> None:
+    """A mixed-script directory name (Cyrillic 'а' inside a Latin path) under a
+    broad allow-scope must BLOCK (fail CI), never silent PASS or a soft review
+    that merges by default."""
+    _priv, pub, contract = _signed_ready(repo)
+    # 'аuth' starts with Cyrillic U+0430, the rest Latin: mixed-script.
+    sneaky = repo / "src" / "аuth"
+    sneaky.mkdir(parents=True)
+    (sneaky / "login.py").write_text("pw = 1\n")
+    _commit_all(repo, "add mixed-script dir")
+    result = verify_mod.verify(
+        contract=contract,
+        root=repo,
+        perimeter=perimeter_mod.load(repo),
+        strict=False,
+        env={provenance_mod.APPROVER_ENV: pub, "GITHUB_REPOSITORY": "owner/name"},
+    )
+    assert result.verdict is Verdict.BLOCK
+    assert any("homoglyph" in r or "mixed-script" in r for r in result.reasons)
+
+
+def test_out_of_table_script_homoglyph_blocks(repo: Path) -> None:
+    """Armenian and Cherokee lookalikes are NOT in the confusable table, so this
+    exercises the cross-script-mixing path (the class the finite table misses).
+    Both must BLOCK under a broad allow-scope."""
+    _priv, pub, contract = _signed_ready(repo)
+    # 'Аuth' with Armenian capital-O-like is subtle; use Cherokee 'Ꭺ' (U+13AA),
+    # a strong 'A' lookalike, spliced into an otherwise-Latin segment.
+    sneaky = repo / "src" / "Ꭺuth"
+    sneaky.mkdir(parents=True)
+    (sneaky / "x.py").write_text("pw = 1\n")
+    _commit_all(repo, "add cherokee-mixed dir")
+    result = verify_mod.verify(
+        contract=contract,
+        root=repo,
+        perimeter=perimeter_mod.load(repo),
+        strict=False,
+        env={provenance_mod.APPROVER_ENV: pub, "GITHUB_REPOSITORY": "owner/name"},
+    )
+    assert result.verdict is Verdict.BLOCK
+    assert any("mixes scripts" in r or "homoglyph" in r for r in result.reasons)
+
+
+def test_legit_unicode_dir_still_passes(repo: Path) -> None:
+    """A wholly non-Latin (single-script) directory name is legitimate and must
+    NOT trip the homoglyph review, only cross-script mixing does."""
+    _priv, pub, contract = _signed_ready(repo)
+    # src is Latin, but the FILE name is wholly Cyrillic: single-script segment.
+    d = repo / "src" / "документы"
+    d.mkdir(parents=True)
+    (d / "readme.py").write_text("x = 1\n")
+    _commit_all(repo, "legit cyrillic dir")
+    result = verify_mod.verify(
+        contract=contract,
+        root=repo,
+        perimeter=perimeter_mod.load(repo),
+        strict=False,
+        env={provenance_mod.APPROVER_ENV: pub, "GITHUB_REPOSITORY": "owner/name"},
+    )
+    assert result.verdict is Verdict.PASS, result.reasons

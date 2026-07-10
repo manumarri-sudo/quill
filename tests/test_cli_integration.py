@@ -55,9 +55,13 @@ def test_app_help_shows_grouped_core_and_hides_advanced(runner: CliRunner) -> No
     assert result.exit_code == 0
     for visible in ("Core", "Safety", "begin", "verify", "explain", "init", "status", "off"):
         assert visible in result.output
-    # (trifecta/lessons/etc. appear as prose in the preamble, so assert on
-    # command names that never occur outside their own listing rows.)
-    for hidden in ("onboard", "scan-secrets", "commit-hook-install", "keygen"):
+    # Boundary-setup primitives are now visible (0.3.4): the users setting up
+    # strict mode must be able to discover the commands that make it real.
+    for visible in ("Boundary setup", "keygen", "guard", "verify-passport"):
+        assert visible in result.output
+    # Pre-pivot / advanced surface stays callable but unlisted (progressive
+    # disclosure). Assert on command names that never occur in the preamble prose.
+    for hidden in ("onboard", "scan-secrets", "commit-hook-install"):
         assert hidden not in result.output
     # Hidden commands still work by name.
     assert runner.invoke(app, ["onboard", "--help"]).exit_code == 0

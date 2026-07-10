@@ -2,6 +2,44 @@
 
 All notable changes to `notari` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - the first run actually blocks something
+
+An external tri-lens review (code, product, market) found that the default
+first-run gate blocked almost nothing: `init` then `begin` with no scope left
+an empty allow-list that passes any non-forbidden path, so a skeptic could init,
+throw a backdoor at it, and get PASS. Fixed, plus the signing commands are now
+discoverable and two homoglyph / replay gaps are closed.
+
+### Changed
+
+- **`notari init` seeds real forbidden paths.** It scans the repo (bounded depth,
+  skipping vendored/build dirs) and forbids the sensitive directories actually
+  present (auth, migrations, infra, terraform, deploy, secrets, payments,
+  billing, Dockerfiles, `*.tf`, `.env` files), so the very first verify BLOCKs an
+  obviously-dangerous edit. It only auto-seeds when you did not pass `--forbid`;
+  explicit intent always wins, and it tells you exactly what it picked.
+- **`notari begin` warns on an empty scope**, because a contract with no `--scope`
+  passes most diffs (only the perimeter's forbidden list bites). The warning
+  names the fix.
+- **The boundary-setup commands are visible again.** `keygen`, `guard`, and
+  `verify-passport` moved from hidden into a "Boundary setup" help panel; the
+  users configuring strict mode need to find the commands that make it real.
+
+### Fixed (security)
+
+- **Homoglyph / mixed-script paths now BLOCK.** A changed path that mixes scripts
+  (a Cyrillic, Greek, Armenian, Cherokee, or other non-Latin letter spliced into
+  a Latin segment) or is a wholly-non-Latin word that reads as an ASCII word now
+  fails the build. The deny-side confusable table is finite, so a broad
+  allow-scope could otherwise admit an out-of-table lookalike; this catches the
+  whole class by cross-script detection rather than a lookup, and it BLOCKs (not
+  a soft review that merges by default) because no benign code path mixes scripts.
+  Legitimate single-script non-Latin filenames are unaffected.
+- **Strict-mode replay branches are now tested end to end.** A validly-signed
+  contract bound to the wrong repository, and one whose base commit is a real but
+  non-ancestor commit, each have a regression test proving they BLOCK (these
+  branches previously had no negative coverage).
+
 ## [0.3.3] - a CLI for people who don't read terminals
 
 ### Changed
