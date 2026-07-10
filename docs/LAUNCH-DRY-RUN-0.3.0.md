@@ -92,9 +92,13 @@ Repo lessons from prior findings:
 
 - `pyproject.toml` / `src/notari/_version.py` / `notari --version` all report **0.3.0**.
 - `_NOTARI_ACTION_PIN` (`src/notari/cli.py`) and `docs/secure-workflow.yml` reference the
-  same 40-hex release commit SHA; `notari status` rejects a non-SHA pin.
+  same 40-hex release-action commit SHA; `notari status` rejects a non-SHA pin.
 - The README workflow snippet shows `@RELEASE_SHA` with instructions to replace it
   with the release commit SHA — no mutable-tag pin ships in the docs.
 
-> At final tag time: place the `v0.3.0` tag on the pinned release commit (or re-bump
-> both pins to the tagged commit), then re-run §3–§4 once against the tagged artifact.
+> At final tag time: land a pin-bump commit that points both pins at the
+> release-action commit (the newest commit containing the final `action.yml`),
+> then place the `v0`/`v0.3.0` tags on that pin-bump commit. The pin sits one
+> commit below the tag because a commit cannot reference its own SHA; the two
+> commits carry an identical `action.yml`. Re-run §3–§4 once against the
+> tagged artifact.

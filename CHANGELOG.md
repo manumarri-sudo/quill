@@ -8,6 +8,19 @@ Notari Change Control: a CI/CD pull-request gate that verifies an AI-written dif
 against a human-signed task boundary and issues a tamper-evident Change Passport.
 This is the first public-alpha release.
 
+### Renamed — Quill → Notari
+
+The project was renamed from Quill (dist `quillx`, briefly Nota during the
+transition) to Notari before this release: CLI `quill` → `notari`, PyPI dist
+`quillx` → `notari`, import path `quill` → `notari`, state dir `~/.quill/` →
+`~/.notari/`, env vars `QUILL_*` → `NOTARI_*`, schema strings `quill.*` →
+`notari.*`. There is no automatic migration from pre-rename dogfood installs
+(the 0.2.x alphas had no meaningful adoption): reinstall hooks with
+`notari integrate` / `notari init` since previously installed hooks reference
+the old binary name, re-run `notari onboard`, and move `~/.quill/` state
+manually if you want to keep it. 0.3.0 is the first release under the
+`notari` name.
+
 ### The action loop (verify → explain → fix-prompt → lessons → teach)
 
 - **`notari explain`** turns a passport into plain-English remediation: per finding,
@@ -254,20 +267,20 @@ Tests: 733 → 812. 79 new tests across `test_saves.py` (42), `test_insights.py`
 
 ### Added — MCP Registry ownership verification
 
-- Added the `mcp-name: io.github.manumarri-sudo/notari` magic line to README (as an HTML comment near the top so it stays out of the rendered display but is present in the raw markdown PyPI ships). The official MCP Registry validates this line against the PyPI package's README as proof that the namespace owner controls both the GitHub repo and the PyPI dist. v0.2.0a5 is functionally identical to v0.2.0a4 — the only change is this line plus the version bump. Submission to `registry.modelcontextprotocol.io` proceeds against this release.
+- Added the `mcp-name: io.github.manumarri-sudo/quill` magic line to README (as an HTML comment near the top so it stays out of the rendered display but is present in the raw markdown PyPI ships). The official MCP Registry validates this line against the PyPI package's README as proof that the namespace owner controls both the GitHub repo and the PyPI dist. v0.2.0a5 is functionally identical to v0.2.0a4 — the only change is this line plus the version bump. Submission to `registry.modelcontextprotocol.io` proceeds against this release. (The project has since been renamed to Notari — see 0.3.0 — so the registry entry needs re-submission under `io.github.manumarri-sudo/notari`.)
 
 ## [0.2.0a4] - 2026-05-27
 
 ### Changed - PyPI dist rename and first PyPI publish
 
-- The PyPI dist name is now `notari` (was `notari`). The `notari` name on PyPI is held by an unrelated, 17-month-silent package in a different domain (LLM-based README generation), so `pip install notari` would never have resolved to this project. Install becomes `pip install notari` / `pipx install notari` / `uvx notari`. The import path, CLI binary (`notari`), config directory (`~/.notari/`), env vars (`NOTARI_KEY`), HMAC key path, audit log path, and brand are all unchanged; this is a distribution-name change only and existing dogfood state (audit log, approvals, sessions) is fully forward-compatible. Homebrew is a tap we own so the formula stays `brew install notari`. A PEP 541 reclaim request for the `notari` name is in flight; if granted, `notari` will become a transitional alias for one release cycle, then sunset.
-- First publish to PyPI under the `notari` dist name. v0.2.0a4 is functionally identical to 0.2.0a3; the only changes are the dist rename in `pyproject.toml`, the version-string bump in `pyproject.toml` + `src/notari/_version.py` + the README badge, the `[all]` extra updated to reference `notari[...]`, and documentation updates in `README.md` and `docs/distribution.md` to reflect the new install command. No code or behavior changes — all P0 fixes shipped in 0.2.0a2/0.2.0a3 are unchanged and the audit chain remains forward-compatible.
+- The PyPI dist name is now `quillx` (the project was still named Quill at this release; see 0.3.0 for the rename to Notari). The `quill` name on PyPI is held by an unrelated, 17-month-silent package in a different domain (LLM-based README generation), so `pip install quill` would never have resolved to this project. Install becomes `pip install quillx` / `pipx install quillx` / `uvx --from quillx quill`. The import path, CLI binary (`quill`), config directory (`~/.quill/`), env vars (`QUILL_KEY`), HMAC key path, audit log path, and brand are all unchanged; this is a distribution-name change only and existing dogfood state (audit log, approvals, sessions) is fully forward-compatible. Homebrew is a tap we own so the formula stays `brew install quill`. A PEP 541 reclaim request for the `quill` name was in flight at the time; the later rename to Notari (0.3.0) mooted it.
+- First publish to PyPI, under the `quillx` dist name. v0.2.0a4 is functionally identical to 0.2.0a3; the only changes are the dist rename in `pyproject.toml`, the version-string bump in `pyproject.toml` + `src/quill/_version.py` + the README badge, the `[all]` extra updated to reference `quillx[...]`, and documentation updates in `README.md` and `docs/distribution.md` to reflect the new install command. No code or behavior changes — all P0 fixes shipped in 0.2.0a2/0.2.0a3 are unchanged and the audit chain remains forward-compatible.
 
 ## [0.2.0a3] - 2026-05-18
 
 ### Fixed
 
-- `src/notari/_version.py` was missed in the 0.2.0a2 version bump, so the runtime `notari version` command reported `0.2.0a1` even though pyproject and wheel filename were correctly 0.2.0a2. Now consistent. No code changes other than the version string itself; all 0.2.0a2 P0 fixes are unchanged and still verified end-to-end against the audit chain.
+- `src/quill/_version.py` (the package's pre-rename path) was missed in the 0.2.0a2 version bump, so the runtime `quill version` command reported `0.2.0a1` even though pyproject and wheel filename were correctly 0.2.0a2. Now consistent. No code changes other than the version string itself; all 0.2.0a2 P0 fixes are unchanged and still verified end-to-end against the audit chain.
 
 ## [0.2.0a2] - 2026-05-17
 
