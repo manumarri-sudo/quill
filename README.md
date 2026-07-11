@@ -1,15 +1,18 @@
 # notari
 
-> **Notari Change Control**: a merge-boundary gate that checks an AI agent's pull
-> request against a **human-signed change policy**. Out-of-scope edits, forbidden
-> paths, and secrets fail the build; in-scope work merges. It enforces
-> *structural* authorization (which paths may change, what is off-limits, no
-> secrets), deterministically, in CI where the agent can't disable it. It does
-> **not** judge whether the code is semantically correct, and it is a real
-> adversarial boundary only with the full deployment in
-> [docs/SECURITY-MODEL.md](https://github.com/manumarri-sudo/notari/blob/main/docs/SECURITY-MODEL.md)
-> (signed contract, off-box keys, required check). **Alpha**; treat the security
-> model as the source of truth over any one-line claim.
+> **Notari** issues a signed **Change Passport** for every AI-authored pull
+> request: a receipt, re-verifiable by any reviewer or auditor without trusting
+> Notari's runtime, of which files a human approved the agent to touch and
+> whether it stayed inside them. A human signs the boundary once; in CI, Notari
+> checks each pull request against it and stamps the passport **PASS**,
+> **NEEDS_REVIEW**, or **BLOCK**. There is no model in that verdict, so it cannot
+> be prompt-injected. It does **not** judge whether the code is correct: it
+> attests to *where* the change went and whether it leaked a secret, the part a
+> human most often skims past on a large agent PR. And a repeated mistake becomes
+> a short rule you promote into `CLAUDE.md` / `AGENTS.md`, so the agent stops
+> making it. **Alpha**; treat
+> [the security model](https://github.com/manumarri-sudo/notari/blob/main/docs/SECURITY-MODEL.md)
+> as the source of truth over any one-line claim.
 
 **New here?** Start with the
 [Quickstart](https://github.com/manumarri-sudo/notari/blob/main/docs/QUICKSTART.md)
@@ -29,13 +32,14 @@ exactly the feedback this alpha exists for:
 [![Typed](https://img.shields.io/badge/typed-strict-blue.svg)](https://mypy.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-An AI agent opens a pull request. Did it touch **only** the paths a human
-authorized, and nothing off-limits? Notari answers that at the merge boundary, in
-CI, deterministically (there is no model in the decision path to jailbreak), and
-records a signed verdict. It checks *where* the change went and *whether* it
-leaked secrets; it does not prove the in-scope code is correct or free of a
-backdoor. That is the honest scope, and it is the part a human reviewer most
-often misses on a large agent PR.
+An AI agent opens a pull request. Which files was it *not* approved to touch? On
+a 40-file agent diff that is the question a human skims past, and it is the one
+Notari answers, at the merge boundary in CI, with a signed Change Passport a
+reviewer can re-verify instead of trusting a screenshot. The verdict is a
+deterministic function of the diff, the signed contract, and the policy, so
+there is no model in it to jailbreak. It records *where* the change went and
+*whether* it leaked a secret; it does not prove the in-scope code is correct or
+free of a backdoor. That is the honest scope.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/manumarri-sudo/notari/main/docs/assets/notari-flow-dark.svg">
