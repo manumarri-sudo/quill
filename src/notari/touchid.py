@@ -24,10 +24,13 @@ reply-block pattern fires without requiring a separate NSRunLoop pump.
 from __future__ import annotations
 
 import functools
+import hashlib
+import os
 import subprocess
 import sys
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 # Reason strings shown in the Touch ID system banner. Apple guidelines say
@@ -46,9 +49,118 @@ class TouchIDResult:
     reason: str  # "ok" | "user_canceled" | "lockout" | "not_available" | "error:<code>"
 
 
+# ---------------------------------------------------------------------------
+# Compiled-helper path (the fix that made Touch ID work "once and for all",
+# 2026-07-12). Empirical finding, verified live: an AD-HOC signed native
+# binary presents the LAContext sheet from a terminal just fine (same pattern
+# as pinentry-touchid); what cannot present is the python-build-standalone
+# interpreter that uv installs. So instead of evaluating LAContext in-process,
+# we vendor a ~50-line Objective-C helper (touchid_helper.m), compile it once
+# with clang on first use, and let the compiled binary own the dialog.
+#
+# Threat model note: a same-user attacker who can replace the helper binary
+# can fake a success exit code. That attacker can equally edit ~/.notari
+# config or this module; the helper adds no NEW exposure. We still pin the
+# vendored source hash so a stale or tampered binary triggers a recompile
+# from the packaged source.
+# ---------------------------------------------------------------------------
+
+_HELPER_SOURCE: Final[Path] = Path(__file__).with_name("touchid_helper.m")
+_HELPER_DIR: Final[Path] = Path.home() / ".notari" / "bin"
+_HELPER_BIN: Final[Path] = _HELPER_DIR / "notari-touchid-helper"
+_HELPER_HASH: Final[Path] = _HELPER_DIR / "notari-touchid-helper.srchash"
+
+# Exit-code contract with touchid_helper.m.
+_HELPER_EXIT_REASONS: Final[dict[int, str]] = {
+    0: "ok",
+    1: "user_canceled",
+    2: "not_available",
+    3: "auth_failed",
+    4: "lockout",
+    5: "timeout",
+}
+
+
+def _source_hash() -> str:
+    return hashlib.sha256(_HELPER_SOURCE.read_bytes()).hexdigest()
+
+
+@functools.lru_cache(maxsize=1)
+def _helper_path() -> Path | None:
+    """Return the compiled helper, building it on first use. None = unusable.
+
+    Compile requires clang + CLT (present on any machine that pip/uv-installed
+    notari from source or via brew). Any failure returns None and callers fall
+    through to the legacy in-process path or the typed-phrase challenge:
+    never an exception, never a hang.
+    """
+    if sys.platform != "darwin":
+        return None
+    try:
+        if not _HELPER_SOURCE.exists():
+            return None
+        want = _source_hash()
+        if _HELPER_BIN.exists() and _HELPER_HASH.exists() and _HELPER_HASH.read_text().strip() == want:
+            return _HELPER_BIN
+        _HELPER_DIR.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.run(
+            [
+                "clang", "-O2", "-fobjc-arc",
+                "-framework", "Foundation",
+                "-framework", "LocalAuthentication",
+                "-o", str(_HELPER_BIN), str(_HELPER_SOURCE),
+            ],
+            capture_output=True,
+            timeout=60,
+        )
+        if proc.returncode != 0 or not _HELPER_BIN.exists():
+            return None
+        os.chmod(_HELPER_BIN, 0o755)
+        _HELPER_HASH.write_text(want)
+        return _HELPER_BIN
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _authenticate_via_helper(reason: str, timeout_s: float) -> TouchIDResult | None:
+    """Run the compiled helper. None means the helper path is unusable
+    (caller falls through); otherwise a definitive TouchIDResult."""
+    helper = _helper_path()
+    if helper is None:
+        return None
+    try:
+        proc = subprocess.run(
+            [str(helper), reason],
+            capture_output=True,
+            text=True,
+            # The helper self-times-out at 35s; give it headroom so we report
+            # its verdict rather than racing it.
+            timeout=max(timeout_s, 35.0) + 5.0,
+        )
+    except subprocess.TimeoutExpired:
+        return TouchIDResult(False, "timeout")
+    except (OSError, subprocess.SubprocessError):
+        return None
+    reason_out = (proc.stdout or "").strip() or _HELPER_EXIT_REASONS.get(proc.returncode, f"error:{proc.returncode}")
+    return TouchIDResult(proc.returncode == 0, reason_out)
+
+
 @functools.lru_cache(maxsize=1)
 def can_present_ui() -> bool:
-    """True iff the running interpreter can actually PRESENT the biometric sheet.
+    """True iff THIS process can get the biometric sheet on screen, by any path.
+
+    Preferred path: the compiled helper (see module note above): works even
+    under an ad-hoc uv/pip interpreter. Legacy path: in-process LAContext,
+    which only presents when the interpreter carries a real signing identity.
+    """
+    if _helper_path() is not None:
+        return True
+    return _interpreter_can_present_ui()
+
+
+@functools.lru_cache(maxsize=1)
+def _interpreter_can_present_ui() -> bool:
+    """Legacy check: can the INTERPRETER itself present the biometric sheet?
 
     `canEvaluatePolicy` returns True on any Mac with enrolled Touch ID, but the
     system UI agent (coreauthd / LocalAuthentication UIAgent) only DRAWS the
@@ -143,8 +255,20 @@ def authenticate(
     Never raises. The caller decides whether to fall through to the
     typed-token-only path (when result.success is False) or refuse the
     approval entirely (paranoid mode).
+
+    Order of attempts: compiled helper first (presents under any interpreter),
+    then in-process LAContext (only if the interpreter is properly signed).
     """
     if not is_available():
+        return TouchIDResult(False, "not_available")
+
+    via_helper = _authenticate_via_helper(reason, timeout_s)
+    if via_helper is not None:
+        return via_helper
+
+    if not _interpreter_can_present_ui():
+        # No helper and an ad-hoc interpreter: evaluatePolicy would hang
+        # ~30s without ever drawing. Report honestly instead.
         return TouchIDResult(False, "not_available")
 
     import LocalAuthentication

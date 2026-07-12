@@ -21,6 +21,9 @@ from __future__ import annotations
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+import notari.touchid as touchid_mod
 from notari.touchid import (
     DEFAULT_REASON,
     DEFAULT_TIMEOUT_S,
@@ -28,6 +31,29 @@ from notari.touchid import (
     authenticate,
     is_available,
 )
+
+
+# Captured BEFORE the autouse fixture patches it, so helper-contract tests can
+# exercise the real translation logic against a stub executable.
+_REAL_AUTHENTICATE_VIA_HELPER = touchid_mod._authenticate_via_helper
+
+
+@pytest.fixture(autouse=True)
+def _no_real_biometrics(monkeypatch):
+    """HARD safety rail: no test may ever reach the compiled helper or a real
+    LAContext. Added 2026-07-12 after the helper-first refactor made three
+    mocked tests present three REAL Touch ID dialogs at the human running
+    pytest. Forces the legacy in-process path (which the tests mock) and
+    clears the lru_caches so per-test patches can't leak across tests.
+    """
+    touchid_mod._helper_path.cache_clear()
+    touchid_mod.can_present_ui.cache_clear()
+    touchid_mod._interpreter_can_present_ui.cache_clear()
+    monkeypatch.setattr(touchid_mod, "_helper_path", lambda: None)
+    monkeypatch.setattr(touchid_mod, "_authenticate_via_helper", lambda reason, timeout_s: None)
+    monkeypatch.setattr(touchid_mod, "_interpreter_can_present_ui", lambda: True)
+    yield
+    touchid_mod.can_present_ui.cache_clear()
 
 
 def test_default_reason_is_concrete_one_sentence() -> None:
@@ -88,6 +114,39 @@ def test_touchid_result_is_immutable() -> None:
     except Exception:
         return  # frozen as expected
     raise AssertionError("TouchIDResult should be frozen")
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "stdout", "want_success", "want_reason"),
+    [
+        (0, "ok", True, "ok"),
+        (1, "user_canceled", False, "user_canceled"),
+        (2, "not_available", False, "not_available"),
+        (3, "auth_failed", False, "auth_failed"),
+        (4, "lockout", False, "lockout"),
+        (5, "timeout", False, "timeout"),
+        (7, "", False, "error:7"),  # unknown code, empty stdout -> mapped fallback
+    ],
+)
+def test_helper_exit_code_contract(monkeypatch, tmp_path, exit_code, stdout, want_success, want_reason):
+    """The compiled helper communicates via exit code + one-word stdout;
+    _authenticate_via_helper must translate both faithfully. Uses a stub
+    executable so no real dialog can appear."""
+    stub = tmp_path / "stub-helper"
+    stub.write_text(f"#!/bin/sh\nprintf '%s\\n' '{stdout}'\nexit {exit_code}\n")
+    stub.chmod(0o755)
+    monkeypatch.setattr(touchid_mod, "_helper_path", lambda: stub)
+    result = _REAL_AUTHENTICATE_VIA_HELPER("test reason", 1.0)
+    assert result is not None
+    assert result.success is want_success
+    assert result.reason == want_reason
+
+
+def test_helper_unusable_returns_none(monkeypatch):
+    """No compiled helper -> None, so authenticate() falls through instead of
+    fabricating a verdict."""
+    monkeypatch.setattr(touchid_mod, "_helper_path", lambda: None)
+    assert _REAL_AUTHENTICATE_VIA_HELPER("r", 1.0) is None
 
 
 def test_authenticate_uses_biometrics_only_policy_not_password_fallback() -> None:
