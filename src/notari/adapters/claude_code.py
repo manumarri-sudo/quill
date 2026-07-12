@@ -1208,11 +1208,28 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     tool_name, original_decision_reason, bool(approval_token_used)
                 )
 
+    # Human-controls footer on every block. The out-of-band notification that
+    # used to carry the approval path was removed in the Change Control pivot, so
+    # the block itself is now where the human learns what they can do. `approve
+    # --latest` needs no token (the audit log only carries a hash by design), and
+    # naming `off`/`doctor` here makes the gate's controls discoverable exactly
+    # when someone runs into it.
+    human_reason = decision.reason
+    if decision.permission in ("deny", "ask"):
+        human_reason = (
+            f"{decision.reason}\n\n"
+            "You (the human) control this gate. From your OWN terminal:\n"
+            "  notari approve --latest   release this one call (Touch ID or typed phrase)\n"
+            "  notari off                pause the gate, bounded and logged\n"
+            "  notari doctor             check the gate's health\n"
+            "These are human-only: an agent's own attempt to run them is blocked."
+        )
+
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": decision.permission,
-            "permissionDecisionReason": decision.reason,
+            "permissionDecisionReason": human_reason,
         },
     }
 

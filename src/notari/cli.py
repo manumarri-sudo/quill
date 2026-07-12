@@ -13,6 +13,7 @@ The CLI is deliberately thin. Logic lives in the library; this module is wiring.
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import os
 import re
@@ -2350,17 +2351,33 @@ def _human_tty_challenge(console: Console, action: str) -> bool:
     a human typing in their own terminal (the human path is never hooked).
     """
     phrase = "-".join(secrets.token_hex(2) for _ in range(3))  # e.g. 1a2b-3c4d-5e6f
+    # Open /dev/tty via a low-level fd, NOT open(..., "r+"): mode "r+" builds a
+    # BufferedRandom, whose constructor requires a seekable raw stream, and a tty
+    # device is not seekable, so it raises io.UnsupportedOperation (a subclass of
+    # OSError) on EVERY real terminal. That made this fallback dead on all TTYs.
+    # os.open + an unbuffered FileIO wrapped in TextIOWrapper avoids the buffered
+    # layer entirely; a genuinely headless process still raises OSError (ENXIO).
     try:
-        with open("/dev/tty", "r+", buffering=1) as tty:
-            tty.write(
-                f"\n  Confirm you are a human present at this terminal.\n"
-                f"  To {action}, type this phrase exactly:\n\n"
-                f"      {phrase}\n\n  > "
-            )
-            tty.flush()
-            typed = tty.readline().strip()
+        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
     except OSError:
         return False  # no controlling tty: piped / headless / agent-redirected
+    # FileIO owns the fd (closefd defaults True); closing the TextIOWrapper cascades
+    # down and closes the fd exactly once, so we never os.close(fd) separately (that
+    # double-close is what emitted a stray "Bad file descriptor" at shutdown).
+    tty = io.TextIOWrapper(io.FileIO(fd, "r+"), write_through=True, line_buffering=True)
+    try:
+        tty.write(
+            f"\n  Confirm you are a human present at this terminal.\n"
+            f"  To {action}, type this phrase exactly:\n\n"
+            f"      {phrase}\n\n  > "
+        )
+        tty.flush()
+        typed = tty.readline().strip()
+    except OSError:
+        return False
+    finally:
+        with contextlib.suppress(OSError):
+            tty.close()
     return secrets.compare_digest(typed, phrase)
 
 
@@ -4494,8 +4511,13 @@ def approve_token(
             f"{chosen.reason or 'tool call'}[/dim]"
         )
 
-    ap = store.approve(token)
-    if ap is None:
+    # Resolve the pending token WITHOUT committing it. store.approve() flips
+    # approved_at (the flag that makes the token consumable), so calling it
+    # before authentication meant a crash / kill / exception mid-auth could
+    # leave a call approved that no human ever confirmed. We validate here and
+    # only call store.approve() after auth passes (fail-closed).
+    ap = store.approvals.get(token)
+    if ap is None or not ap.is_active:
         console.print(
             f"[red]no active approval matching[/red] [bold]{token}[/bold]\n"
             "  it may have expired (TTL is 10 minutes), already been "
@@ -4512,7 +4534,12 @@ def approve_token(
     if not skip_biometric:
         from notari import touchid
 
-        if touchid.is_available():
+        confirmed = False
+        # Tier 1: hardware Touch ID, ONLY where the dialog can actually present.
+        # is_available() is True even on an ad-hoc-signed uv interpreter where the
+        # sheet never draws, so we also require can_present_ui() before attempting
+        # it; otherwise fall straight to the typed-phrase challenge.
+        if touchid.is_available() and touchid.can_present_ui():
             console.print(
                 f"  [dim]Touch ID required to approve "
                 f"[bold]{ap.tool_name}[/bold] · check the sensor[/dim]",
@@ -4521,53 +4548,62 @@ def approve_token(
                 f"approve {ap.tool_name} (token {token[:8]})",
             )
             if res.success:
+                confirmed = True
                 biometric_event = ev.APPROVE_BIOMETRIC_OK
                 biometric_reason = "ok"
-            else:
-                # Failure: revoke the just-issued approval state and refuse.
+            elif res.reason in ("user_canceled", "auth_failed", "lockout"):
+                # An EXPLICIT human "no" refuses outright; do NOT fall through.
                 store.revoke(token)
-                biometric_event = ev.APPROVE_BIOMETRIC_DENY
-                biometric_reason = res.reason
                 console.print(
                     f"[red]biometric refused[/red]: {res.reason}\n"
                     "  approval REVOKED. agent retry will not be allowed.",
                 )
                 _emit_approve_audit(
-                    biometric_event,
-                    token,
-                    ap.tool_name,
-                    biometric_reason,
+                    ev.APPROVE_BIOMETRIC_DENY, token, ap.tool_name, res.reason
                 )
                 raise typer.Exit(code=2)
-        else:
-            # Touch ID unavailable in THIS context (the agent's own process has
-            # no GUI/Secure-Enclave session; SSH and headless daemons too).
-            # REFUSE by default - this is load-bearing. Allowing a no-biometric
-            # approval when the sensor can't fire is exactly the self-approval
-            # hole an agent walks through: it can read the token from
-            # `notari approvals list` and run `notari approve` in its own context,
-            # which has no Touch ID, so a skip-on-unavailable default lets it
-            # release its own blocked call with zero human involvement. The
-            # operator must approve from a session where Touch ID works, or pass
-            # --no-biometric to explicitly opt into typed-token-only approval.
+            # else: sensor could not present (timeout/not_available/error) -
+            # fall through to the typed-phrase challenge below.
+
+        # Tier 2: TTY + typed-phrase human-presence challenge. Safe to offer here
+        # because `notari approve` is hook-CRITICAL: an agent's own attempt is
+        # denied before reaching this CLI, so only a human at a real terminal
+        # gets here. This is what makes approval work on the common ad-hoc-signed
+        # install where Touch ID can never draw a sheet.
+        if not confirmed and _human_tty_challenge(
+            console, f"approve {ap.tool_name}"
+        ):
+            confirmed = True
+            biometric_event = ev.APPROVE_BIOMETRIC_OK
+            biometric_reason = "tty_challenge"
+
+        # Tier 3: no biometric dialog AND no human at a controlling tty -> REFUSE.
+        if not confirmed:
             store.revoke(token)
             console.print(
-                "[red]Touch ID unavailable in this context - approval REFUSED.[/red]\n"
-                "  An agent's own process can't reach the sensor, so approving\n"
-                "  here would let it self-approve. Approve from a Terminal in\n"
-                "  your GUI login session (where Touch ID works), or pass\n"
+                "[red]No Touch ID dialog and no interactive terminal - approval "
+                "REFUSED.[/red]\n"
+                "  Approve from a Terminal in your own login session, or pass\n"
                 "  --no-biometric to opt into typed-token-only approval.",
             )
             _emit_approve_audit(
-                ev.APPROVE_BIOMETRIC_DENY,
-                token,
-                ap.tool_name,
-                "not_available",
+                ev.APPROVE_BIOMETRIC_DENY, token, ap.tool_name, "not_available"
             )
             raise typer.Exit(code=2)
     else:
         biometric_event = ev.APPROVE_BIOMETRIC_SKIPPED
         biometric_reason = "user_opted_out"
+
+    # Auth passed (Touch ID / TTY) or the human explicitly opted out with
+    # --no-biometric. ONLY NOW do we commit the approval by flipping approved_at.
+    # Any refuse path above already did store.revoke() + exited, so an unconfirmed
+    # token is never left approvable.
+    if store.approve(token) is None:
+        console.print(
+            "[red]approval no longer resolvable (expired or consumed during "
+            "confirmation).[/red]",
+        )
+        raise typer.Exit(code=1)
 
     if biometric_event is not None:
         _emit_approve_audit(biometric_event, token, ap.tool_name, biometric_reason)

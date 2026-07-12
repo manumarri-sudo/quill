@@ -13,7 +13,6 @@ anything. The risk preset writes [policy] overrides, not new code paths.
 
 from __future__ import annotations
 
-import platform
 import shutil
 import sys
 from dataclasses import dataclass
@@ -275,27 +274,18 @@ def _prompt_log_location(console: Console) -> Path:
 
 
 def _prompt_notifications(console: Console) -> dict[str, Any]:
-    is_mac = platform.system() == "Darwin"
-    notify: dict[str, Any] = {"on_blocked": True, "on_ask": False}
+    # Out-of-band notification dispatch (macOS banner / Slack / webhook) was
+    # removed in the Change Control pivot. Prompting for it here promised users a
+    # feature that no longer exists, so instead we tell them where the block's
+    # controls actually appear: inline in every deny, with the human commands.
     console.print(
-        "\n[bold]notifications for blocked calls[/bold]\n"
-        "  [dim]each block fans WHAT/WHY/TRY/APPROVE out of the terminal[/dim]",
+        "\n[bold]when a call is blocked[/bold]\n"
+        "  [dim]the block prints its controls inline, in your terminal:[/dim]\n"
+        "  [dim]  notari approve --latest   release that one call[/dim]\n"
+        "  [dim]  notari off                pause the gate (bounded, logged)[/dim]\n"
+        "  [dim]  notari doctor             check the gate's health[/dim]",
     )
-    if is_mac and Confirm.ask("  macOS notification center?", default=True):
-        notify["macos"] = True
-        notify["sound"] = "Glass"
-    if Confirm.ask("  Slack webhook?", default=False):
-        url = Prompt.ask("    webhook url", default="")
-        if url.startswith("http"):
-            notify["slack_webhook_url"] = url
-    if Confirm.ask("  generic JSON webhook?", default=False):
-        url = Prompt.ask("    endpoint url", default="")
-        if url.startswith("http"):
-            notify["webhook_url"] = url
-    # only macos key is enough by itself; if no channels, return empty dict
-    if not any(k in notify for k in ("macos", "slack_webhook_url", "webhook_url")):
-        return {}
-    return notify
+    return {}
 
 
 def _prompt_risk_preset(console: Console) -> str:

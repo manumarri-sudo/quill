@@ -403,6 +403,21 @@ CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
         "Disabling the gate is a human-only action. If you are the human, run "
         "`notari off` yourself in your own terminal - it is not gated there.",
     ),
+    # Approving a blocked call is the human's go-ahead, so an agent running
+    # `notari approve` through its Bash tool would be releasing its OWN blocked
+    # call - the self-approval hole. CRITICAL (denied even under bypass), same
+    # posture as off/pause/night, and it is what makes the typed-phrase fallback
+    # safe to offer in the approve CLI: the human path (approve typed in their
+    # own terminal) is never hooked, only the agent's tool call is. `approvals`
+    # (the read-only list) is NOT matched: \bapprove\b needs a word boundary
+    # after the 'e', which "approvals" does not have.
+    (
+        r"\bnotari\s+approve\b",
+        "agent attempting to approve/release a blocked call via the CLI",
+        "Approving a blocked call is a human-only action. If you are the human, "
+        "run `notari approve --latest` yourself in your own terminal - it is not "
+        "gated there.",
+    ),
 )
 
 # Private-data-read shapes. These DON'T classify to critical by themselves
