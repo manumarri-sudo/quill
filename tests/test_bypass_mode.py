@@ -129,3 +129,64 @@ def test_low_risk_unchanged_under_bypass():
     )
     assert risk_normal == risk_bypass
     assert risk_normal is Risk.LOW
+
+
+# ---------------------------------------------------------------------------
+# sensitive-directory writes ask even in bypass mode (live-perimeter gap fix)
+
+
+def test_sensitive_dir_write_asks_even_in_bypass():
+    """A Write into a sensitive directory (migrations, auth, payments, secrets,
+    infra) escalates to HIGH and is NOT downshifted by bypass mode, closing the
+    gap where an AI-authored write to such a path landed silently under
+    --dangerously-skip-permissions."""
+    for path in (
+        "/repo/migrations/0001_init.sql",
+        "/repo/migration/PLAN.md",
+        "/repo/src/auth/tokens.py",
+        "/repo/payments/charge.py",
+        "/repo/secrets/keys.env",
+        "/repo/infra/main.tf",
+    ):
+        risk, reason, _ = classify_event(
+            "Write", {"file_path": path, "content": "x = 1\n"}, bypass_mode=True
+        )
+        assert risk is Risk.HIGH, f"{path} should ask even in bypass, got {risk}"
+        assert "sensitive" in reason.lower()
+
+
+def test_sensitive_dir_edit_asks_even_in_bypass():
+    risk, _, _ = classify_event(
+        "Edit",
+        {"file_path": "/repo/migrations/0002.sql", "new_string": "alter table x"},
+        bypass_mode=True,
+    )
+    assert risk is Risk.HIGH
+
+
+def test_non_sensitive_write_still_downshifts_in_bypass():
+    """The convenience is preserved: an ordinary write still downshifts to LOW
+    in bypass, so only the sensitive dirs keep the human in the loop."""
+    risk, _, _ = classify_event(
+        "Write", {"file_path": "/repo/src/util.py", "content": "x = 1\n"}, bypass_mode=True
+    )
+    assert risk is Risk.LOW
+
+
+def test_filename_named_like_sensitive_dir_is_not_escalated():
+    """Matching is on directory components, not the filename: a file merely
+    named migration.md at the repo root is a normal write."""
+    risk, _, _ = classify_event(
+        "Write", {"file_path": "/repo/migration.md", "content": "notes"}, bypass_mode=True
+    )
+    assert risk is Risk.LOW
+
+
+def test_sensitive_dir_write_not_downshifted_without_bypass():
+    """Outside bypass a sensitive-dir write is HIGH (ask) for a pattern reason
+    (not the plain default), so a [policy] override cannot silently unlock it."""
+    risk, reason, _ = classify_event(
+        "Write", {"file_path": "/repo/auth/login.py", "content": "x = 1\n"}
+    )
+    assert risk is Risk.HIGH
+    assert "sensitive" in reason.lower()

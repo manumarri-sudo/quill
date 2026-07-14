@@ -269,6 +269,32 @@ def classify_event(
                     "escalation shape. Use `notari` commands to change policy.",
                 )
 
+    # Sensitive-directory write: an Edit/Write into migrations, auth, payments,
+    # secrets, infra (Notari's own "almost always deserve a human" list) is
+    # escalated to a HIGH ask that ALWAYS fires - even in bypass mode, and even
+    # under a [policy] Edit=low downgrade. This closes the gap where a default-
+    # HIGH built-in write to a sensitive path got silently downshifted to LOW
+    # under --dangerously-skip-permissions. It asks, it does not hard-deny: the
+    # operator confirms each one. Sourced as a pattern match (reason is not the
+    # "default risk for X" string), so neither the bypass downshift below nor
+    # the run_hook downshift guard can soften it. Checked BEFORE the user
+    # override for the same reason gate self-tamper is: a policy downgrade must
+    # not unlock it. Path-based, so a prose/JSON write is caught like code.
+    if tool_name in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+        for key in ("file_path", "path", "notebook_path"):
+            target = tool_input.get(key)
+            if isinstance(target, str):
+                hit = _sensitive_path_hit(target)
+                if hit:
+                    return (
+                        Risk.HIGH,
+                        f"edit into a sensitive '{hit}' directory ({target}); "
+                        f"sensitive paths ask even in bypass mode",
+                        "if this change is intended, approve it; sensitive dirs "
+                        "(migrations, auth, payments, secrets, infra) always "
+                        "surface a human before an AI-authored write lands",
+                    )
+
     # User config can override per-tool risk via the [policy] table:
     # ["Bash"] = "high", ["Edit"] = "low", etc. Loaded best-effort: the hook
     # never crashes on a missing/invalid config, it just falls back to defaults.
@@ -353,6 +379,29 @@ def _is_gate_config_path(raw: str) -> bool:
         norm = raw.replace("\\", "/")
     norm = norm.rstrip("/")
     return any(norm.endswith(suffix) for suffix in _GATE_CONFIG_SUFFIXES)
+
+
+def _sensitive_path_hit(raw: str) -> str | None:
+    """The sensitive-directory name a write target sits under, or None.
+
+    Reuses the perimeter's _SENSITIVE_DIR_NAMES (migrations, auth,
+    payments, secrets, infra, ...) so the live gate and the verify-time
+    perimeter name the same surfaces. Matches a DIRECTORY component (not
+    the filename), case-insensitively. Best-effort: parse error -> None.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    from notari.perimeter import _SENSITIVE_DIR_NAMES
+
+    try:
+        parts = Path(raw).expanduser().parts
+    except (OSError, ValueError):
+        parts = tuple(x for x in raw.split("/") if x)
+    names = {n.lower() for n in _SENSITIVE_DIR_NAMES}
+    for comp in parts[:-1]:
+        if comp.lower() in names:
+            return comp
+    return None
 
 
 def _summarize_call(tool_name: str, tool_input: Mapping[str, Any]) -> str:
