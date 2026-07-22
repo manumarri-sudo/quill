@@ -153,7 +153,12 @@ CRITICAL_COMMAND_PATTERNS: Final[tuple[tuple[str, str, str], ...]] = (
         # recommended remediation, so they must NOT match here - the negative
         # lookahead excludes them while still catching `--force` and `-f`
         # anywhere in the push command.
-        r"\bgit\s+push\b.*?\s(?:--force(?!-with-lease|-if-includes)|-f)\b",
+        # Two scoping rules keep this from firing on innocent compound commands:
+        # the flag must sit in the SAME command segment as the push (so a later
+        # `; chrome --force-device-scale-factor=2` is not the push's flag), and
+        # `--force` must end there, so `--force-with-lease`, `--force-if-includes`,
+        # and any other `--force-*` flag do not count as an unconditional force.
+        r"\bgit\s+push\b[^;&|]*?\s(?:--force(?![-\w])|-f)\b",
         "git push --force",
         "Use `git push --force-with-lease` to avoid clobbering a teammate's commits - "
         "or rebase first: `git fetch && git rebase origin/<branch>`",
