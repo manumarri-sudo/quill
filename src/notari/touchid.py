@@ -84,6 +84,18 @@ def _source_hash() -> str:
     return hashlib.sha256(_HELPER_SOURCE.read_bytes()).hexdigest()
 
 
+def _is_macos() -> bool:
+    """Platform check behind a call, deliberately.
+
+    A literal `sys.platform != "darwin"` narrows to False when mypy type-checks
+    for Linux, so every line after the guard is reported unreachable and the
+    strict gate fails on the CI runners even though the code is correct on the
+    platform it targets. Going through a function keeps the guard honest at
+    runtime and opaque to the narrowing.
+    """
+    return sys.platform == "darwin"
+
+
 @functools.lru_cache(maxsize=1)
 def _helper_path() -> Path | None:
     """Return the compiled helper, building it on first use. None = unusable.
@@ -93,7 +105,7 @@ def _helper_path() -> Path | None:
     through to the legacy in-process path or the typed-phrase challenge:
     never an exception, never a hang.
     """
-    if sys.platform != "darwin":
+    if not _is_macos():
         return None
     try:
         if not _HELPER_SOURCE.exists():
