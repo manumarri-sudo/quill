@@ -35,6 +35,21 @@ NOT_FORCE_PUSHES = [
     "git push origin main",
 ]
 
+# A code-review pass (Codex, 2026-07-22) noted that the [^;&|] class in the
+# force-push pattern is not shell-quote-aware in isolation, and proposed that a
+# quoted separator before --force could suppress detection:
+#   git push -o "ci.variable=foo;bar" origin main --force
+# That does NOT bypass the gate, because classify_command masks quoted content
+# (turning the quoted ; into a space) one gate BEFORE this pattern runs. These
+# cases pin that the two layers together keep every real force push CRITICAL,
+# so a future change to either layer that reopens the hole fails here.
+FORCE_PUSH_WITH_QUOTED_SEPARATORS = [
+    'git push -o "ci.variable=foo;bar" origin main --force',
+    "git push -o 'ci.variable=a&b' origin main --force",
+    'git push -o "x|y" origin main -f',
+    'git push -o "note: a && b" origin main --force',
+]
+
 
 @pytest.mark.parametrize("cmd", REAL_FORCE_PUSHES)
 def test_real_force_push_is_critical(cmd: str) -> None:
@@ -46,3 +61,8 @@ def test_innocent_push_is_not_flagged_as_force(cmd: str) -> None:
     c = classify_command(cmd)
     reason = (getattr(c, "reason", "") or "") + (getattr(c, "rule", "") or "")
     assert "git push --force" not in reason, f"{cmd} -> {reason}"
+
+
+@pytest.mark.parametrize("cmd", FORCE_PUSH_WITH_QUOTED_SEPARATORS)
+def test_quoted_separator_does_not_hide_a_real_force_push(cmd: str) -> None:
+    assert classify_command(cmd).risk is Risk.CRITICAL, cmd
