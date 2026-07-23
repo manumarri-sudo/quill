@@ -1,4 +1,7 @@
-<img src="https://raw.githubusercontent.com/manumarri-sudo/notari/main/docs/assets/notari-mark.svg" alt="" width="34" align="left" hspace="10">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/manumarri-sudo/notari/main/docs/assets/notari-mark-dark.svg">
+  <img src="https://raw.githubusercontent.com/manumarri-sudo/notari/main/docs/assets/notari-mark.svg" alt="" width="38">
+</picture>
 
 # notari
 
