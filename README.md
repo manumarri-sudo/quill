@@ -402,7 +402,14 @@ build machine** (a repo/org secret: `NOTARI_GATE_KEY`, `NOTARI_APPROVER_PUBKEYS`
 **sign the contract** (`notari begin --key`) and require it in strict mode,
 **pin the Action to the release commit SHA** (not a mutable tag, and not the PR's own
 checkout; `notari status` rejects a non-SHA pin), and make the
-**Status Check required** in branch protection. With those in place the bypasses
+**Status Check required** in branch protection. One honest caveat on that last step:
+the required check is a bare commit **status**, and any workflow with `statuses: write`
+can post the same `notari/change-control` context, so a compromised same-repo workflow
+could post a green status over a real BLOCK. Notari makes that **detectable** (the
+passport fingerprint records the SHA and MAC of the status it actually wrote, which
+`notari verify-passport` cross-checks), but binding the *source* of the check so it
+cannot be spoofed at all needs a GitHub App check-run, which is on the roadmap. Until
+then, keep `statuses: write` off untrusted workflows. With those in place the bypasses
 the security model enumerates are closed against the attacks the test suite
 exercises (including the composite rogue-key-in-base attack, the Action-wrapper
 fail-open, and binary/rename diff coverage, all closed with regression tests);
