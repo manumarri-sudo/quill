@@ -60,10 +60,16 @@ git add .notari .gitignore && git commit -m "notari: signed boundary"
 notari begin "add rate limiting to the API" \
   --scope "src/api/**" \
   --key .notari/keys/approver.pem \
-  --expires-in 7
+  --expires-in 7 \
+  --repo owner/name
 
 git add .notari && git commit -m "notari: open task contract"
 ```
+
+`--repo` binds the contract to one repository so it cannot be replayed elsewhere, and
+it is required for `--strict` to accept the contract, so include it now even though the
+local demo below runs in cooperative mode. In CI the repo is filled in automatically
+from `$GITHUB_REPOSITORY`.
 
 Pass `--key` so the contract is **signed**: an unsigned contract cannot establish
 provenance under `notari verify --strict` (the CI default), so the boundary wouldn't
@@ -85,6 +91,14 @@ notari verify
 You get a green **PASS**: "diff is within the approved boundary: in scope, no
 secrets, nothing forbidden," signed by your approver key. That is the everyday
 happy path; now break it.
+
+> **Local vs. CI, one honest distinction:** the `notari verify` you just ran is
+> *cooperative* mode, which is advisory because the trust root sits on this machine
+> where the agent could reach it. The enforced boundary is `notari verify --strict`
+> running in CI, where the approver public key lives as a repository secret
+> (`NOTARI_APPROVER_PUBKEYS`) that a pull request cannot edit. Strict mode ignores the
+> committed `.notari/approvers/*.pub` for exactly that reason, so run strict in CI, not
+> from the checkout you are demonstrating in.
 
 ## 5. Watch a bad change get blocked
 

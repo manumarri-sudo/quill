@@ -6,8 +6,9 @@
 # notari
 
 > **Notari** issues a signed **Change Passport** for every AI-authored pull
-> request: a receipt, re-verifiable by any reviewer or auditor without trusting
-> Notari's runtime, of which files a human approved the agent to touch and
+> request: a receipt any reviewer or auditor can re-verify from the signature
+> alone, without re-running Notari or trusting a screenshot, recording which
+> files a human approved the agent to touch and
 > whether it stayed inside them. A human signs the boundary once; in CI, Notari
 > checks each pull request against it and stamps the passport **PASS**,
 > **NEEDS_REVIEW**, or **BLOCK**. There is no model in that verdict, so it cannot
@@ -46,17 +47,23 @@ notari verify --strict                                    # in CI: PASS, NEEDS_R
 Four surfaces, each stated at its real strength rather than its most flattering one:
 
 **1. The gate, which is the provable boundary.** In CI, outside the agent's reach,
-every changed path is measured against a signed scope and a signed perimeter, added
-lines are scanned for 26 vendor secret patterns, and renames (both endpoints),
-mode-only changes, binaries, symlinks, submodules, and `.gitattributes` diff-hiding
-are all in the inventory rather than blind spots. There is no model in the decision
-path, so there is nothing to prompt-inject.
+every changed path outside `.notari/` is measured against a signed scope and a signed
+perimeter, each touched file is scanned for 26 vendor secret patterns, and renames
+(both endpoints), mode-only changes, binaries, symlinks, submodules, and
+`.gitattributes` diff-hiding are all in the inventory rather than blind spots. Secret
+detection is a finite pattern set, so it catches the common vendor-format leaks rather
+than proving no secret exists. There is no model in the decision path, so there is
+nothing to prompt-inject.
 
 **2. The receipt, which outlives the run.** A Change Passport (`passport.json` plus a
-PR-ready `passport.md`) that anyone re-verifies later with `notari verify-passport`,
-months on, on a different machine, without trusting this runtime or a screenshot.
-Behind it sits an HMAC-chained audit log that detects edits, insertions, and trailing
-truncation, and the passport's footer cites the exact chain entry for its run.
+PR-ready `passport.md`) whose Ed25519 signature anyone can re-check later with
+`notari verify-passport`, months on, on a different machine, so a forged or tampered
+verdict fails and you trust the signed receipt rather than a screenshot. This checks
+that the gate genuinely issued this verdict, not that the code is correct, and it does
+not re-run the gate. Behind it sits an HMAC-chained audit log that detects edits and
+insertions cryptographically, and trailing truncation against a sealed high-water-mark
+once `notari audit verify` has run; the passport's footer cites the exact chain entry
+for its run.
 
 **3. The loop, which stops the same mistake recurring.** `notari explain` turns a BLOCK
 into a per-finding fix and a paste-ready agent prompt, `notari lessons` ranks what an
@@ -156,7 +163,7 @@ is not on by default. See [docs/SECURITY-MODEL.md](docs/SECURITY-MODEL.md) for
 the full deployment checklist.
 
 `notari verify` reads `git diff <base>..HEAD`, checks every changed file against the
-scope you approved, scans added lines for hardcoded secrets and sensitive surfaces
+scope you approved, scans each touched file for hardcoded secrets and sensitive surfaces
 (CI config, lockfiles, test deletions), evaluates any logged exceptions, and writes
 a **Change Passport**: `passport.json` + a PR-ready `passport.md`, that cites the
 HMAC-chained audit entry for the run, so a reviewer can trace the verdict back to a
@@ -242,11 +249,12 @@ notari verify                 # local/cooperative: advisory, forgeable by the ag
 
 1. builds the authoritative changed-path inventory from
    `git diff --name-status -z --find-renames <base_commit>..<candidate>`, both
-   rename endpoints, binary and mode-only changes included, and parses the
-   unified diff only to scan **added lines**,
+   rename endpoints, binary and mode-only changes included,
 2. matches every changed path (both ends of a rename) against the contract scope,
-3. scans added lines for the 26 vendor-format secret patterns in
-   [`src/notari/secrets.py`](src/notari/secrets.py),
+3. scans each touched file for the 26 vendor-format secret patterns in
+   [`src/notari/secrets.py`](src/notari/secrets.py), reading the whole file from the
+   candidate commit (not just added lines) so a 100% rename or a UTF-16 file cannot
+   hide a credential,
 4. classifies sensitive surfaces (CI/workflow files, lockfiles, test deletions,
    git configuration like `.gitattributes` that controls diff visibility),
 5. applies any logged exceptions in `.notari/exceptions.json` (ignored entirely in
@@ -388,7 +396,8 @@ notari guard --key approver.pem --forbid 'migrations/**' --forbid 'src/auth/**'
 live where a PR can't edit it. Hold the approver/gate **private keys off the
 build machine** (a repo/org secret: `NOTARI_GATE_KEY`, `NOTARI_APPROVER_PUBKEYS`),
 **sign the contract** (`notari begin --key`) and require it in strict mode,
-**pin the Action to a published tag** (not the PR's own checkout), and make the
+**pin the Action to the release commit SHA** (not a mutable tag, and not the PR's own
+checkout; `notari status` rejects a non-SHA pin), and make the
 **Status Check required** in branch protection. With those in place the bypasses
 the security model enumerates are closed against the attacks the test suite
 exercises (including the composite rogue-key-in-base attack, the Action-wrapper

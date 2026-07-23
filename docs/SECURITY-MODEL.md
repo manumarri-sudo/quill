@@ -140,15 +140,18 @@ real. We do not close them with more regex.
 
 6. **Trailing truncation is not detected by the chain alone.** Deleting the
    last N lines of the log leaves a shorter but *valid* chain - each remaining
-   entry still links to its predecessor - so `notari audit verify` passes on a
+   entry still links to its predecessor - so a bare chain walk passes on a
    truncated log. This is a weaker prerequisite than the limit-5 case: it needs
-   only write access to the log file, not the HMAC key. Mitigation: `seal_head`
-   records a high-water-mark (entry count + last mac) to a `<log>.head` sidecar,
-   and a later verify against it (`expected_count`) flags a shortfall; but
-   truncation *before* any seal, or deletion of the sidecar on a compromised
-   host, stays undetected. Per-write detection (a head pointer updated under the
-   emit flock) would close it but is deferred rather than risk the audited
-   tamper-evidence write path.
+   only write access to the log file, not the HMAC key. Mitigation, now wired
+   into the CLI: a clean `notari audit verify` seals a high-water-mark (entry
+   count + last mac) to a `<log>.head` sidecar, and every subsequent
+   `notari audit verify` reads that mark and reports BROKEN when the log is
+   shorter than it. The residual is honest: truncation *before* the first seal,
+   or deletion of the sidecar on a compromised host, stays undetected, and an
+   attacker who can read the HMAC key can re-seal at the lower count. Per-write
+   detection (a head pointer updated under the emit flock) would close the
+   pre-seal window but is deferred rather than risk the audited tamper-evidence
+   write path.
 
 ## What the limits mean for the claims
 
