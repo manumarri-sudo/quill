@@ -43,6 +43,14 @@ jobs:
           head-sha: ${{ github.event.pull_request.head.sha }}
           strict: "true"
           fail-on-block: "true"
+          # Fail the job on NEEDS_REVIEW too, not just BLOCK. Without this a
+          # review-class finding (a submodule-pointer swap, a symlink redirected
+          # out of scope, a sensitive-surface change) exits 0 and can merge on a
+          # green required check with no human having looked (security red-team
+          # 2026-07-22, finding 3). The hardened template opts into blocking so
+          # the default posture is safe; drop it to "false" only if you have a
+          # separate human-review gate for NEEDS_REVIEW.
+          block-on-review: "true"
           # checkout-path tells the wrapper which subdirectory holds the candidate
           # git repo. Without it the wrapper runs from the workspace root (no repo
           # there) and fails closed. It MUST match the checkout `path:` above.

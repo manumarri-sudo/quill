@@ -1136,6 +1136,7 @@ jobs:
       - uses: {_NOTARI_ACTION_PIN}  # v0, SHA-pinned; bump on release
         with:
           strict: "true"
+          block-on-review: "true"
           head: ${{{{ github.event.pull_request.head.sha }}}}
           head-sha: ${{{{ github.event.pull_request.head.sha }}}}
           checkout-path: _pr_checkout

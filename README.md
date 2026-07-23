@@ -302,6 +302,7 @@ jobs:
           head-sha: ${{ github.event.pull_request.head.sha }}
           checkout-path: _pr_checkout
           strict: "true"
+          block-on-review: "true"   # NEEDS_REVIEW fails the job too, so a review-class change can't merge unseen
           approver-pubkeys: ${{ secrets.NOTARI_APPROVER_PUBKEYS }}
           gate-key: ${{ secrets.NOTARI_GATE_KEY }}
           gate-pubkeys: ${{ vars.NOTARI_GATE_PUBKEYS }}

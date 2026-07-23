@@ -150,6 +150,9 @@ def test_init_template_matches_secure_workflow() -> None:
         "path: _pr_checkout",
         "persist-credentials: false",
         "checkout-path: _pr_checkout",
+        # NEEDS_REVIEW must fail the job in the shipped template, or a
+        # review-class change merges green unseen (red-team finding 3).
+        'block-on-review: "true"',
     ):
         assert needle in _CONSUMER_WORKFLOW, needle
     # SHA-pinned, not a mutable tag (readiness enforces this too).
