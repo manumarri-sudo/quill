@@ -29,6 +29,11 @@ claim and narrows the rest, so nothing in the README overstates the gate.
 - **`notari init` prints repo-relative key paths.** In a deep checkout the
   absolute path wrapped mid-line, breaking the `gh secret set` commands a new
   user copies. They are now relative and copy-pasteable.
+- **The block footer is context-aware.** On a yes/no "ask" (like `git commit`)
+  it no longer advertises `notari approve`, which was redundant with the prompt
+  the operator already sees; approve now appears only on a hard "deny" where it
+  is the sole way through. Both cases carry a tip pointing at the full command
+  list.
 
 ### Changed (documentation honesty)
 

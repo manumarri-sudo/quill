@@ -793,3 +793,41 @@ def test_notari_log_env_overrides_per_project(
 
     log_path, _ = _resolve_project_paths(str(project))
     assert log_path == override
+
+
+# ---- context-aware operator-controls footer ------------------------------
+# An operator hit the approve control in the footer on a `git commit` "ask" and
+# asked why, since Claude Code already shows a yes/no there. The footer must not
+# advertise a control that does not apply to the case:
+#   ask  -> the yes/no prompt IS the approval, so no approve line.
+#   deny -> a hard block with no prompt, so approve is the only way through.
+
+_APPROVE_CONTROL = "notari " + "approve --latest"
+
+
+def test_ask_footer_offers_no_redundant_approve(tmp_path: Path) -> None:
+    log = tmp_path / "audit.jsonl"
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        out = run_hook(_stdin_for("Bash", command="git commit -m x"), audit=audit)
+    hso = out["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "ask"
+    reason = hso["permissionDecisionReason"]
+    # No approve advertised when a yes/no already exists...
+    assert _APPROVE_CONTROL not in reason
+    # ...but the how-to-stop-asking control and the discoverability tip are.
+    assert "notari off" in reason
+    assert "notari --help" in reason
+
+
+def test_deny_footer_shows_approve_as_the_way_through(tmp_path: Path) -> None:
+    log = tmp_path / "audit.jsonl"
+    with AuditLog(path=log, hmac_key=b"k" * 32) as audit:
+        out = run_hook(_stdin_for("Bash", command="rm -rf /"), audit=audit)
+    hso = out["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    reason = hso["permissionDecisionReason"]
+    # A hard block has no yes/no, so approve is the only way through and must show.
+    assert _APPROVE_CONTROL in reason
+    assert "notari off" in reason
+    assert "notari doctor" in reason
+    assert "notari --help" in reason

@@ -1257,21 +1257,37 @@ def run_hook(stdin_text: str, audit: AuditLog | None = None) -> dict[str, Any]:
                     tool_name, original_decision_reason, bool(approval_token_used)
                 )
 
-    # Human-controls footer on every block. The out-of-band notification that
-    # used to carry the approval path was removed in the Change Control pivot, so
-    # the block itself is now where the human learns what they can do. `approve
-    # --latest` needs no token (the audit log only carries a hash by design), and
-    # naming `off`/`doctor` here makes the gate's controls discoverable exactly
-    # when someone runs into it.
+    # Human-controls footer, context-aware. The two permission levels give the
+    # human different choices, so the footer must not advertise a control that
+    # does not apply:
+    #   ask  -> Claude Code shows its own yes/no prompt, so answering there IS
+    #           the approval. `notari approve` would be redundant and confusing
+    #           (reported by an operator who hit it on a `git commit` ask), so we
+    #           do NOT show it here; we only offer to stop the asking + the tip.
+    #   deny -> a hard block with no yes/no prompt, so `notari approve --latest`
+    #           (Touch ID or a typed phrase) is the ONLY way through, and belongs
+    #           front and centre. It needs no token: the audit log carries a hash
+    #           by design.
+    # Both cases end with a discoverability tip pointing at the full command list.
+    _TIP = "  Tip: notari --help lists every command, including what to turn on or off."
     human_reason = decision.reason
-    if decision.permission in ("deny", "ask"):
+    if decision.permission == "ask":
         human_reason = (
             f"{decision.reason}\n\n"
-            "--- operator controls (you run these in your own terminal; "
-            "the agent cannot) ---\n"
-            "  notari approve --latest   release this one call (Touch ID or typed phrase)\n"
-            "  notari off                pause the gate, bounded and logged\n"
-            "  notari doctor             check the gate's health"
+            "  Answer yes/no above. To stop being asked for this: "
+            "notari off (notari on resumes).\n"
+            f"{_TIP}"
+        )
+    elif decision.permission == "deny":
+        human_reason = (
+            f"{decision.reason}\n\n"
+            "  You can run these yourself (the agent can't):\n"
+            "    notari approve --latest   allow just this one command "
+            "(Touch ID or a typed phrase)\n"
+            "    notari off                pause the gate a while, logged; "
+            "notari on resumes\n"
+            "    notari doctor             check the gate is healthy\n"
+            f"{_TIP}"
         )
 
     return {
