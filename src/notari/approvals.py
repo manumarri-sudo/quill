@@ -32,6 +32,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+try:
+    import fcntl  # POSIX only
+
+    _HAS_FLOCK = True
+except ImportError:  # pragma: no cover - non-POSIX
+    fcntl = None  # type: ignore[assignment]
+    _HAS_FLOCK = False
+
 DEFAULT_TTL_SECONDS = 600  # 10 minutes
 
 
@@ -225,25 +233,48 @@ class ApprovalStore:
     ) -> Approval | None:
         """Look up + consume an active approval matching this exact call.
 
-        Returns the approval if found (one-shot: marks consumed and saves).
-        Returns None if no active approval matches.
+        One-shot and race-safe: the whole read-check-mark-write sequence runs
+        under an exclusive file lock, and the on-disk state is re-read inside the
+        lock, so two concurrent hook processes retrying the same blocked call
+        cannot both consume the single token (security red-team 2026-07-22,
+        finding 9). Without the lock, both processes loaded an unconsumed token
+        and each authorized the supposedly one-time action.
+
+        Returns the approval if found (marks consumed and saves), else None.
         """
         digest = args_digest(args)
-        for ap in self.approvals.values():
-            # is_consumable (not is_active): a token must have been
-            # explicitly approved by the operator. A merely-issued (pending)
-            # token never releases a call - that would let a denied call
-            # auto-allow its own retry.
-            if not ap.is_consumable:
-                continue
-            if ap.tool_name != tool_name:
-                continue
-            if ap.args_digest != digest:
-                continue
-            ap.consumed_at = _now_iso()
-            self.save()
-            return ap
-        return None
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # A dedicated lock file, so locking does not depend on the data file
+        # already existing and never truncates it.
+        lock_path = self.path.with_name(self.path.name + ".lock")
+        with open(lock_path, "a+") as lock_fd:
+            if _HAS_FLOCK:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            try:
+                # Re-read the authoritative on-disk state INSIDE the lock: another
+                # process may have consumed the token since this instance loaded.
+                fresh = ApprovalStore.load(self.path)
+                for ap in fresh.approvals.values():
+                    # is_consumable (not is_active): a token must have been
+                    # explicitly approved by the operator. A merely-issued
+                    # (pending) token never releases a call, that would let a
+                    # denied call auto-allow its own retry.
+                    if not ap.is_consumable:
+                        continue
+                    if ap.tool_name != tool_name:
+                        continue
+                    if ap.args_digest != digest:
+                        continue
+                    ap.consumed_at = _now_iso()
+                    fresh.save()
+                    # Reflect the consumption in this instance too.
+                    self.approvals = fresh.approvals
+                    return ap
+                self.approvals = fresh.approvals
+                return None
+            finally:
+                if _HAS_FLOCK:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
 
     def revoke(self, token: str) -> bool:
         """Drop a token without consuming it. Returns True if present."""

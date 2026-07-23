@@ -246,3 +246,49 @@ def test_active_excludes_consumed(tmp_path: Path) -> None:
     store.approve(ap.token)
     store.consume("Bash", {"command": "x"})
     assert store.active() == []
+
+
+def test_concurrent_consume_yields_exactly_one_winner(tmp_path: Path) -> None:
+    """Red-team finding 9: a one-shot token must survive a race. Two processes
+    retrying the same approved call concurrently must not BOTH consume it.
+
+    Uses real processes (not threads) so the fcntl file lock is actually
+    exercised; threads in one interpreter would not prove cross-process safety.
+    """
+    import subprocess
+    import sys
+    import textwrap
+
+    approvals = tmp_path / "approvals.json"
+
+    # Seed one approved (consumable) token for an exact call.
+    store = ApprovalStore(path=approvals)
+    ap = store.issue("Bash", {"command": "git push --force"})
+    store.approve(ap.token)
+
+    worker = textwrap.dedent(
+        """
+        import sys
+        from pathlib import Path
+        from notari.approvals import ApprovalStore
+        store = ApprovalStore.load(Path(sys.argv[1]))
+        got = store.consume("Bash", {"command": "git push --force"})
+        sys.stdout.write("WON" if got is not None else "LOST")
+        """
+    )
+    script = tmp_path / "worker.py"
+    script.write_text(worker)
+
+    procs = [
+        subprocess.Popen(
+            [sys.executable, str(script), str(approvals)],
+            stdout=subprocess.PIPE,
+            text=True,
+            cwd=str(Path(__file__).resolve().parents[1]),
+            env={**__import__("os").environ, "PYTHONPATH": "src"},
+        )
+        for _ in range(8)
+    ]
+    outs = [p.communicate()[0].strip() for p in procs]
+    assert outs.count("WON") == 1, outs
+    assert outs.count("LOST") == 7, outs
