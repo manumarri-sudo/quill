@@ -2,6 +2,48 @@
 
 All notable changes to `notari` are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - say only what the code does
+
+A pre-launch review pass, half of it by an independent cross-vendor reviewer,
+turned up one dormant feature and several places where the docs promised more
+than the code delivered. This release makes the code match the strongest honest
+claim and narrows the rest, so nothing in the README overstates the gate.
+
+### Fixed
+
+- **Trailing-truncation detection is now wired into `notari audit verify`.**
+  `seal_head` and `read_head` existed but no command invoked them, so a
+  truncated log (last N entries deleted, leaving a shorter but valid chain) was
+  reported intact. A clean verify now seals a `<log>.head` high-water-mark, and
+  every later verify reads it and reports BROKEN when the log is shorter. The
+  residual (truncation before the first seal, sidecar deletion, or HMAC-key
+  compromise) is documented in the security model rather than hidden.
+- **The force-push classifier no longer false-fires across a command
+  separator.** `git push` followed later in the same line by an unrelated
+  `--force-*` flag on another tool was misclassified CRITICAL. The rule is now
+  scoped to the push's own command segment, and `--force-with-lease` /
+  `--force-if-includes` (the documented remediation) stay clear. A quoted
+  separator inside a legitimate argument still cannot hide a real force push,
+  because the classifier masks quoted content first; regression tests pin both
+  directions.
+- **`notari init` prints repo-relative key paths.** In a deep checkout the
+  absolute path wrapped mid-line, breaking the `gh secret set` commands a new
+  user copies. They are now relative and copy-pasteable.
+
+### Changed (documentation honesty)
+
+- `notari verify-passport` is described as re-checking the passport's Ed25519
+  signature so a forged or tampered verdict fails, not as independently
+  re-deriving the verdict or proving the code correct.
+- The CI secret scan is described as reading each touched file in full from the
+  candidate commit (not "added lines only"), and as a finite vendor-pattern set
+  that catches common leaks rather than proving no secret exists.
+- The hardened workflow instruction pins the Action to the release commit SHA,
+  not a mutable tag, matching the shipped template and `notari status`.
+- The quickstart binds the contract to a repo with `--repo` and states plainly
+  that the local demo is cooperative mode while strict enforcement runs in CI
+  with the approver public key held as a secret.
+
 ## [0.4.0] - a link is a path too
 
 The local gate gets a Touch ID path that actually presents on a normal
