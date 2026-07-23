@@ -364,3 +364,46 @@ def test_redact_userless_dsn_password() -> None:
     out = redact("redis://:authpass123@cache:6379/0")
     assert "authpass123" not in out
     assert "[REDACTED:dsn-password]" in out
+
+
+# ---------------------------------------------------------------------------
+# scan() must catch the inline-credential shapes, not only redact() them.
+# Before the 2026-07-22 red-team fix these lived only in redact(), so the CI
+# verdict scanner (which calls scan()) reported PASS on a working credential in
+# any of these forms.
+# ---------------------------------------------------------------------------
+
+
+def test_scan_catches_aws_secret_access_key():
+    s = 'aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"'
+    assert any(h.pattern_name == "aws-secret-key" for h in scan(s))
+
+
+def test_scan_catches_bearer_header():
+    s = "Authorization: Bearer abc123DEF456ghi789JKL012mno345"
+    assert any(h.pattern_name == "bearer-token" for h in scan(s))
+
+
+def test_scan_catches_dsn_password():
+    s = "DATABASE_URL=postgres://admin:s3cr3tPassw0rd@db.internal:5432/app"
+    assert any(h.pattern_name == "dsn-password" for h in scan(s))
+
+
+def test_scan_catches_password_flag():
+    s = "mysql --user root --password hunter2secret --host db"
+    assert any(h.pattern_name == "password-flag" for h in scan(s))
+
+
+def test_scan_catches_env_secret_assignment():
+    s = "DJANGO_SECRET_KEY=x9f2k3j4l5m6n7o8p9q0r1s2t3u4v5w6"
+    assert any(h.pattern_name == "env-secret" for h in scan(s))
+
+
+def test_scan_does_not_flag_ordinary_prose():
+    # The env-secret / password-flag patterns must not fire on plain sentences
+    # that merely mention the words, or the CI gate would false-BLOCK routine
+    # docs and commit messages.
+    s = "Update the password reset flow and document the secret rotation policy."
+    hits = [h.pattern_name for h in scan(s)]
+    assert "env-secret" not in hits
+    assert "password-flag" not in hits

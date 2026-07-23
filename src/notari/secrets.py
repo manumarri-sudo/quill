@@ -243,6 +243,25 @@ def scan(
                     line=_line_for_offset(text, start),
                 ),
             )
+    # Inline-credential shapes (bearer headers, aws_secret_access_key, DSN
+    # passwords, --password flags, FOO_SECRET= assignments). These lived only in
+    # redact() before, so the verdict scanner missed a working credential in any
+    # of these forms while the redactor scrubbed them from the log (security
+    # red-team 2026-07-22, finding 5). The match points at the credential VALUE
+    # (the `secret` group), not the whole line, so the reported location is the
+    # secret itself.
+    for label, cred_re in _INLINE_CRED_PATTERNS:
+        for m in cred_re.finditer(text):
+            s, e = m.span("secret")
+            if e > s:
+                hits.append(
+                    SecretHit(
+                        pattern_name=label,
+                        matched_at=s,
+                        length=e - s,
+                        line=_line_for_offset(text, s),
+                    ),
+                )
     return hits
 
 
